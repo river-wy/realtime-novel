@@ -1,0 +1,71 @@
+{
+  "schema_version": "1.0",
+  "beats": [
+    {
+      "id": "beat-001",
+      "sequence": 1,
+      "title": "父亲遗物送达",
+      "description": "父亲去世三个月后，遗物从老家寄到，主角独自在城西老小区拆箱。",
+      "trigger": { "type": "auto" },
+      "status": "active",
+      "chapter_range": { "start": 1, "end": 2 },
+      "linked_seeds": [1, 2],
+      "linked_chars": ["char-protagonist", "char-father"],
+      "expected_arc": "主角从被动接受到主动面对"
+    },
+    {
+      "id": "beat-002",
+      "sequence": 2,
+      "title": "收音机",
+      "description": "主角在遗物中发现 1987 年的收音机，型号老旧但能响。",
+      "trigger": { "type": "auto" },
+      "status": "pending",
+      "chapter_range": { "start": 3, "end": 5 },
+      "linked_seeds": [1, 3],
+      "linked_chars": ["char-protagonist", "char-father"],
+      "expected_arc": "主角与父亲的连接开始建立"
+    },
+    {
+      "id": "beat-003",
+      "sequence": 3,
+      "title": "妻的察觉",
+      "description": "妻发现主角独处时间变长，开始询问。",
+      "trigger": { "type": "user-decision" },
+      "status": "pending",
+      "chapter_range": { "start": 6, "end": 8 },
+      "linked_seeds": [1, 2],
+      "linked_chars": ["char-protagonist", "char-wife"],
+      "expected_arc": "夫妻关系出现张力"
+    },
+    {
+      "id": "beat-004",
+      "sequence": 4,
+      "title": "父亲的信",
+      "description": "主角发现父亲留下的信，提到了一个故人。",
+      "trigger": { "type": "seed-driven" },
+      "status": "pending",
+      "chapter_range": { "start": 9, "end": 12 },
+      "linked_seeds": [2],
+      "linked_chars": ["char-protagonist", "char-father"],
+      "expected_arc": "主角对父亲的理解加深"
+    },
+    {
+      "id": "beat-005",
+      "sequence": 5,
+      "title": "共同面对",
+      "description": "妻知道信的真相，与主角共同面对。",
+      "trigger": { "type": "user-decision" },
+      "status": "pending",
+      "chapter_range": { "start": 13, "end": 16 },
+      "linked_seeds": [1, 2],
+      "linked_chars": ["char-protagonist", "char-wife", "char-father"],
+      "expected_arc": "夫妻关系修复 + 主角与父亲达成和解"
+    }
+  ],
+  "current_beat": 0,
+  "arc_phrase": "主角从回避父亲的死到理解父亲的一生",
+  "metadata": {
+    "created_at": "2026-06-12T16:52:00+08:00",
+    "updated_at": "2026-06-12T16:52:00+08:00"
+  }
+}

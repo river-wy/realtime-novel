@@ -1,0 +1,165 @@
+{
+  "1_种子回收率": {
+    "value": 1.0,
+    "recovered": 3,
+    "total": 3,
+    "target": 0.7,
+    "passed": true,
+    "detail": "3/3 个种子被强化或回收"
+  },
+  "2_基座约束遵守率": {
+    "value": 1.0,
+    "violations": 0,
+    "total_chapters": 20,
+    "target": 1.0,
+    "passed": true,
+    "detail": "无违反"
+  },
+  "3_具体性颗粒密度": {
+    "value": 0.72,
+    "total_granules": 58,
+    "total_chars": 80461,
+    "target": 3.0,
+    "target_comparison": "<=",
+    "passed": true,
+    "chapter_details": [
+      {
+        "chapter": 1,
+        "granules": 13,
+        "chars": 3875,
+        "density": 3.35
+      },
+      {
+        "chapter": 2,
+        "granules": 7,
+        "chars": 3548,
+        "density": 1.97
+      },
+      {
+        "chapter": 3,
+        "granules": 4,
+        "chars": 3611,
+        "density": 1.11
+      },
+      {
+        "chapter": 4,
+        "granules": 6,
+        "chars": 4721,
+        "density": 1.27
+      },
+      {
+        "chapter": 5,
+        "granules": 2,
+        "chars": 4045,
+        "density": 0.49
+      },
+      {
+        "chapter": 6,
+        "granules": 0,
+        "chars": 3661,
+        "density": 0.0
+      },
+      {
+        "chapter": 7,
+        "granules": 0,
+        "chars": 3812,
+        "density": 0.0
+      },
+      {
+        "chapter": 8,
+        "granules": 0,
+        "chars": 4598,
+        "density": 0.0
+      },
+      {
+        "chapter": 9,
+        "granules": 4,
+        "chars": 3865,
+        "density": 1.03
+      },
+      {
+        "chapter": 10,
+        "granules": 2,
+        "chars": 3960,
+        "density": 0.51
+      },
+      {
+        "chapter": 11,
+        "granules": 3,
+        "chars": 4107,
+        "density": 0.73
+      },
+      {
+        "chapter": 12,
+        "granules": 2,
+        "chars": 3249,
+        "density": 0.62
+      },
+      {
+        "chapter": 13,
+        "granules": 4,
+        "chars": 5429,
+        "density": 0.74
+      },
+      {
+        "chapter": 14,
+        "granules": 2,
+        "chars": 3822,
+        "density": 0.52
+      },
+      {
+        "chapter": 15,
+        "granules": 1,
+        "chars": 3598,
+        "density": 0.28
+      },
+      {
+        "chapter": 16,
+        "granules": 0,
+        "chars": 3840,
+        "density": 0.0
+      },
+      {
+        "chapter": 17,
+        "granules": 0,
+        "chars": 3703,
+        "density": 0.0
+      },
+      {
+        "chapter": 18,
+        "granules": 5,
+        "chars": 4125,
+        "density": 1.21
+      },
+      {
+        "chapter": 19,
+        "granules": 3,
+        "chars": 5026,
+        "density": 0.6
+      },
+      {
+        "chapter": 20,
+        "granules": 0,
+        "chars": 3866,
+        "density": 0.0
+      }
+    ],
+    "detail": "58 颗粒 / 80461 字 = 0.72 / 千字"
+  },
+  "4_overdue_触发命中率": {
+    "value": 0.0,
+    "hit": 0,
+    "overdue": 0,
+    "target": 0.9,
+    "passed": false,
+    "detail": "0/0 个 overdue 种子被回收"
+  },
+  "5_importance_优先采纳率": {
+    "value": 1.0,
+    "adopted": 2,
+    "main_count": 2,
+    "target": 0.8,
+    "passed": true,
+    "detail": "2/2 个主线种子被强化或回收"
+  }
+}

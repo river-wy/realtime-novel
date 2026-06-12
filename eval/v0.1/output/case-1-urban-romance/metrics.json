@@ -1,0 +1,75 @@
+{
+  "1_种子回收率": {
+    "value": 0.333,
+    "recovered": 1,
+    "total": 3,
+    "target": 0.7,
+    "passed": false,
+    "detail": "1/3 个种子被强化或回收"
+  },
+  "2_基座约束遵守率": {
+    "value": 1.0,
+    "violations": 0,
+    "total_chapters": 5,
+    "target": 1.0,
+    "passed": true,
+    "detail": "无违反"
+  },
+  "3_具体性颗粒密度": {
+    "value": 0.71,
+    "total_granules": 10,
+    "total_chars": 14039,
+    "target": 3.0,
+    "target_comparison": "<=",
+    "passed": true,
+    "chapter_details": [
+      {
+        "chapter": 1,
+        "granules": 2,
+        "chars": 2805,
+        "density": 0.71
+      },
+      {
+        "chapter": 2,
+        "granules": 2,
+        "chars": 2801,
+        "density": 0.71
+      },
+      {
+        "chapter": 3,
+        "granules": 2,
+        "chars": 2803,
+        "density": 0.71
+      },
+      {
+        "chapter": 4,
+        "granules": 2,
+        "chars": 2815,
+        "density": 0.71
+      },
+      {
+        "chapter": 5,
+        "granules": 2,
+        "chars": 2815,
+        "density": 0.71
+      }
+    ],
+    "detail": "10 颗粒 / 14039 字 = 0.71 / 千字"
+  },
+  "4_overdue_触发命中率": {
+    "value": 0.0,
+    "hit": 0,
+    "overdue": 0,
+    "target": 0.9,
+    "passed": false,
+    "detail": "0/0 个 overdue 种子被回收"
+  },
+  "5_importance_优先采纳率": {
+    "value": 0.5,
+    "adopted": 1,
+    "main_count": 2,
+    "target": 0.8,
+    "passed": false,
+    "detail": "1/2 个主线种子被强化或回收"
+  }
+}

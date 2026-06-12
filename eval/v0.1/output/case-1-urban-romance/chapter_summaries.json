@@ -1,0 +1,95 @@
+[
+  {
+    "chapter_id": 1,
+    "range": "第 1 章（段 1-3）",
+    "key_events": [
+      "1987 年的收音机首次出现"
+    ],
+    "seed_changes": {
+      "planted": [
+        1
+      ]
+    },
+    "character_state": {
+      "林远": "内敛/回避",
+      "陈岚": "温和/等待"
+    },
+    "unresolved": [
+      "父亲为何留下这台收音机",
+      "妻是否会知道信的事"
+    ]
+  },
+  {
+    "chapter_id": 2,
+    "range": "第 2 章（段 4-6）",
+    "key_events": [
+      "1987 年的收音机首次出现"
+    ],
+    "seed_changes": {},
+    "character_state": {
+      "林远": "内敛/回避",
+      "陈岚": "温和/等待"
+    },
+    "unresolved": [
+      "父亲为何留下这台收音机",
+      "妻是否会知道信的事"
+    ]
+  },
+  {
+    "chapter_id": 3,
+    "range": "第 3 章（段 7-9）",
+    "key_events": [
+      "1987 年的收音机首次出现",
+      "街角早餐店场景"
+    ],
+    "seed_changes": {
+      "planted": [
+        3
+      ]
+    },
+    "character_state": {
+      "林远": "内敛/回避",
+      "陈岚": "温和/等待"
+    },
+    "unresolved": [
+      "父亲为何留下这台收音机",
+      "妻是否会知道信的事"
+    ]
+  },
+  {
+    "chapter_id": 4,
+    "range": "第 4 章（段 10-12）",
+    "key_events": [
+      "1987 年的收音机首次出现"
+    ],
+    "seed_changes": {},
+    "character_state": {
+      "林远": "内敛/回避",
+      "陈岚": "温和/等待"
+    },
+    "unresolved": [
+      "父亲为何留下这台收音机",
+      "妻是否会知道信的事"
+    ]
+  },
+  {
+    "chapter_id": 5,
+    "range": "第 5 章（段 13-15）",
+    "key_events": [
+      "1987 年的收音机首次出现"
+    ],
+    "seed_changes": {
+      "resonating": [
+        1
+      ]
+    },
+    "character_state": {
+      "林远": "内敛/回避",
+      "陈岚": "温和/等待"
+    },
+    "unresolved": [
+      "父亲为何留下这台收音机",
+      "妻是否会知道信的事"
+    ]
+  }
+]

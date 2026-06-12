@@ -1,0 +1,50 @@
+{
+  "schema_version": "1.0",
+  "base": {
+    "timeline": {
+      "era": "现代",
+      "year_range": { "start": 2019, "end": 2019 },
+      "anchor_event": "父亲去世 2019 春"
+    },
+    "geography": {
+      "primary": "杭州",
+      "secondary": ["城西老小区", "互联网公司", "高中校园", "老家的院子"],
+      "spatial_rules": ["室内为主", "外出是特殊事件"]
+    },
+    "core_rules": [
+      {
+        "id": "rule-001",
+        "statement": "无超自然",
+        "enforcement": "hard",
+        "applies_to": "all"
+      },
+      {
+        "id": "rule-002",
+        "statement": "现代都市背景，禁止古代/穿越/重生元素",
+        "enforcement": "hard",
+        "applies_to": "all"
+      },
+      {
+        "id": "rule-003",
+        "statement": "主角性格内敛，不滥情",
+        "enforcement": "soft",
+        "applies_to": "all"
+      }
+    ]
+  },
+  "branches": [
+    {
+      "id": "node-001",
+      "type": "main",
+      "title": "发现遗物",
+      "parent_id": null,
+      "status": "active",
+      "children": []
+    }
+  ],
+  "metadata": {
+    "created_at": "2026-06-12T16:52:00+08:00",
+    "updated_at": "2026-06-12T16:52:00+08:00",
+    "user_modified": false
+  }
+}

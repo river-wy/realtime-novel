@@ -1,0 +1,49 @@
+{
+  "schema_version": "1.0",
+  "prose_style": {
+    "primary": "散文式",
+    "sentence_length": "长短交错",
+    "paragraph_style": "每段聚焦一个画面或一个心理活动"
+  },
+  "tone": {
+    "primary": "冷叙述",
+    "secondary": "内敛",
+    "psychological_per_paragraph": 3
+  },
+  "density": {
+    "specificity": 0.7,
+    "subjectivity": 0.6,
+    "density": 0.5,
+    "genre_resonance": 0.8,
+    "max_specific_granules_per_kchars": 3,
+    "scene_type_overrides": {
+      "对话": { "subjectivity": 0.4 },
+      "独白": { "subjectivity": 0.9 },
+      "动作": { "subjectivity": 0.3 }
+    }
+  },
+  "taboos": [
+    {
+      "id": "taboo-001",
+      "description": "不滥情",
+      "severity": "forbidden",
+      "examples": ["突然告白", "情绪崩溃式独白"]
+    },
+    {
+      "id": "taboo-002",
+      "description": "不煽情",
+      "severity": "discouraged",
+      "examples": ["廉价感动", "巧合重逢"]
+    }
+  ],
+  "limits": {
+    "psychological_per_paragraph": 3,
+    "specific_granules_per_kchars": 3,
+    "max_chapter_words": 3000,
+    "min_chapter_words": 2500
+  },
+  "metadata": {
+    "created_at": "2026-06-12T16:52:00+08:00",
+    "updated_at": "2026-06-12T16:52:00+08:00"
+  }
+}
