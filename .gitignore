@@ -18,9 +18,8 @@ __pycache__/
 *.bak
 *.tmp
 
-# 评测输出（产物在 generated-stories/，评测 JSON 不入 Git）
-docs/eval-notes/code/v0.1/output/
-docs/eval-notes/code/v0.2/output/
+# 评测输出（v0.1 / v0.2 的报告 + metrics + summaries + seed_table 入 Git，作为历史快照）
+# 后续 v0.3+ 的 output/ 可选择性忽略（按需）
 
 # 环境
 .env
