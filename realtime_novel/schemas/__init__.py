@@ -16,6 +16,7 @@ from .main_plot import MainPlotSchema
 from .sub_plot import SubPlotSchema
 from .character_card import CharacterCardSchema
 from .seed_table import SeedTableSchema
+from .chapter import ChapterSummarySchema
 
 # 7 件 Schema → 写入顺序 → 文件名
 SCHEMA_REGISTRY = [
@@ -36,5 +37,6 @@ __all__ = [
     "SubPlotSchema",
     "CharacterCardSchema",
     "SeedTableSchema",
+    "ChapterSummarySchema",  # M-β 新增（不是 7 件之一，但产品需要）
     "SCHEMA_REGISTRY",
 ]

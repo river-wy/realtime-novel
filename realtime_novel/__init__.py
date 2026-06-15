@@ -16,6 +16,7 @@ M-α 阶段产出（v0.3-product-skeleton.md §4）:
 """
 from .project import ProjectManager, Project, LoadedProject
 from .world_tree import WorldTree
+from .chapter_generator import ChapterGenerator, GenerationResult
 from .schemas import (
     WorldTreeSchema,
     StyleCharterSchema,
@@ -24,10 +25,11 @@ from .schemas import (
     SubPlotSchema,
     CharacterCardSchema,
     SeedTableSchema,
+    ChapterSummarySchema,
     SCHEMA_REGISTRY,
 )
 
-__version__ = "0.1.0-alpha"
+__version__ = "0.2.0-beta"
 
 __all__ = [
     # S1
@@ -36,7 +38,10 @@ __all__ = [
     "LoadedProject",
     # S2
     "WorldTree",
-    # 7 件 Schema
+    # S4 (M-β 新增)
+    "ChapterGenerator",
+    "GenerationResult",
+    # 7 件 Schema + 摘要 Schema
     "WorldTreeSchema",
     "StyleCharterSchema",
     "GenreResonanceSchema",
@@ -44,5 +49,6 @@ __all__ = [
     "SubPlotSchema",
     "CharacterCardSchema",
     "SeedTableSchema",
+    "ChapterSummarySchema",
     "SCHEMA_REGISTRY",
 ]
