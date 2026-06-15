@@ -1,0 +1,67 @@
+schema_version: '1.0'
+characters:
+- id: char-protagonist
+  name: 林远
+  role: protagonist
+  traits:
+  - 内敛
+  - 克制
+  - 观察细致
+  - 不擅表达
+  speech_style: 短句多，常用沉默代替回答
+  background: 28 岁程序员，在杭州一家互联网公司工作。父林建国三个月前因病去世，母在他初中时已离开。结婚两年，与妻陈岚住在城西老小区。
+  arc: 从回避父亲的死到理解父亲的一生
+  internal_state: 刚收到遗物，有些麻木，不知道该怎么面对
+- id: char-wife
+  name: 陈岚
+  role: supporting
+  traits:
+  - 温和
+  - 敏锐
+  - 有耐心
+  speech_style: 语调柔和，会问开放式问题
+  background: 26 岁高中语文老师，与林远高二时相识，大学毕业后结婚。喜欢读书，关心丈夫但不强求。
+  arc: 从旁观丈夫到与他共同面对
+  internal_state: 察觉丈夫变化，但选择等待
+- id: char-father
+  name: 林建国
+  role: supporting
+  traits:
+  - 寡言
+  - 固执
+  - 深爱家庭但不表达
+  speech_style: 只说必要的话，偶尔一句击中要害
+  background: 1958 年生，1987 年时 29 岁，买了那台收音机。1990 年代曾在老家县城做过一阵小生意（收音机相关），后回到杭州。2019
+    年春因病去世。
+  arc: 通过遗物和信被儿子理解
+  internal_state: 已故
+- id: char-breakfast-shop-owner
+  name: 老周
+  role: background
+  traits:
+  - 寡言
+  - 手艺好
+  - 不问客人事
+  speech_style: 只问'吃什么'，从不闲聊
+  background: 街角早餐店老板，五十多岁，老婆几年前走了。
+  arc: 作为喘息空间存在
+  internal_state: 平静
+relationships:
+- id: rel-001
+  from_char: char-protagonist
+  to_char: char-wife
+  type: 夫妻
+  description: 结婚两年，关系平稳但最近出现张力
+- id: rel-002
+  from_char: char-protagonist
+  to_char: char-father
+  type: 父子
+  description: 父亲刚去世，关系未能好好告别
+- id: rel-003
+  from_char: char-wife
+  to_char: char-father
+  type: 翁媳
+  description: 没见过公公几面，但听丈夫讲过
+metadata:
+  created_at: '2026-06-12T16:52:00+08:00'
+  updated_at: '2026-06-12T16:52:00+08:00'

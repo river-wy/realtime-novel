@@ -48,6 +48,21 @@ v0.3 (产品骨架搭建)     ⏳ 推进中 · M-α 待启动
 ## 怎么跑
 
 ```bash
+# 装环境 (一次性)
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e .
+
+# 跑 M-α 验收 (骨架 0.1 · 5 项)
+python verify.py
+
+# 装载 demo 数据 (M-α 后首跑需要)
+python -m realtime_novel._seed_demo
+```
+
+跑评测（v0.1 / v0.2）：
+
+```bash
 # v0.1 评测（mock，5 分钟）
 cd docs/eval-notes/code/v0.1 && python3 main.py
 

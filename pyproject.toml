@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "realtime_novel"
+version = "0.1.0-alpha"
+description = "实时生成 + 可干预小说产品"
+requires-python = ">=3.11"
+dependencies = [
+    "pydantic>=2.0",
+    "pyyaml>=6.0",
+]
+
+[tool.setuptools.packages.find]
+include = ["realtime_novel*"]

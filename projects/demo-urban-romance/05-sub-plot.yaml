@@ -1,0 +1,43 @@
+schema_version: '1.0'
+threads:
+- id: subplot-001
+  title: 街角早餐店
+  description: 主角每天去街角的早餐店吃早餐，店老板是个寡言的中年男人。这里成为主角的喘息空间。
+  parent_beat_id: null
+  status: active
+  priority: side
+  linked_seeds:
+  - 3
+  linked_chars:
+  - char-protagonist
+  - char-breakfast-shop-owner
+  beats:
+  - id: subplot-beat-001-01
+    sequence: 1
+    title: 第一次去
+    description: 主角某天清晨走进街角早餐店。
+    status: active
+  - id: subplot-beat-001-02
+    sequence: 2
+    title: 成为常客
+    description: 主角形成习惯，店老板开始记住他的口味。
+    status: pending
+- id: subplot-002
+  title: 工作变动
+  description: 主角的公司在第 5 章开始有调整，他考虑是否跳槽。
+  parent_beat_id: beat-002
+  status: pending
+  priority: main
+  linked_seeds: []
+  linked_chars:
+  - char-protagonist
+  - char-colleague
+  beats:
+  - id: subplot-beat-002-01
+    sequence: 1
+    title: 公司变动
+    description: 公司开始调整，主角面临选择。
+    status: pending
+metadata:
+  created_at: '2026-06-12T16:52:00+08:00'
+  updated_at: '2026-06-12T16:52:00+08:00'
