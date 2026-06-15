@@ -51,9 +51,23 @@ def _add_workspace_arg(parser: argparse.ArgumentParser):
 
 def cmd_new(args) -> int:
     """新建项目 — M-γ 阶段实装 5 步引导"""
-    print(f"📝 new: 准备创建项目 '{args.project_id}'")
-    print(f"   workspace: {Path(args.workspace).resolve()}")
-    print(f"   ⚠️  M-α 阶段 stub，M-γ 阶段实装（见 docs/roadmap/v0.3-product-skeleton.md §4 M-γ）")
+    from realtime_novel import ProjectManager, OnboardingFlow
+
+    workspace = Path(args.workspace).resolve()
+    pm = ProjectManager(workspace_root=workspace)
+
+    # 创建项目目录（如果不存在）
+    try:
+        project = pm.create(args.project_id, exist_ok=True)
+    except FileExistsError as e:
+        print(f"❌ {e}")
+        print(f"   (用 --restart 覆盖已存在的引导状态)")
+        if not getattr(args, "restart", False):
+            return 1
+
+    # 启动 5 步引导
+    flow = OnboardingFlow(project)
+    flow.run(force_restart=getattr(args, "restart", False))
     return 0
 
 
@@ -186,9 +200,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     # new
-    p = subparsers.add_parser("new", help="新建项目（M-γ 实装）")
+    p = subparsers.add_parser("new", help="新建项目（5 步启动链路）")
     _add_project_id_arg(p)
     _add_workspace_arg(p)
+    p.add_argument(
+        "--restart",
+        action="store_true",
+        help="强制从头开始（清空已有引导状态）",
+    )
     p.set_defaults(func=cmd_new)
 
     # load

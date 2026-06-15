@@ -28,6 +28,7 @@ from .core.schemas import (
     SCHEMA_REGISTRY,
 )
 from .services.chapter_generator import ChapterGenerator, GenerationResult
+from .services.onboarding import OnboardingFlow, OnboardingState
 from .utils.version import __version__
 
 __all__ = [
@@ -37,6 +38,9 @@ __all__ = [
     "LoadedProject",
     # S2 (core)
     "WorldTree",
+    # S3 (services)
+    "OnboardingFlow",
+    "OnboardingState",
     # S4 (services)
     "ChapterGenerator",
     "GenerationResult",

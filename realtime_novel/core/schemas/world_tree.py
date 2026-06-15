@@ -64,7 +64,7 @@ class CoreRule(BaseModel):
 
 class TreeNode(BaseModel):
     """WorldTree 上的一个节点（主线/支线/场景）"""
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
     id: str
     type: NodeType
     title: str
