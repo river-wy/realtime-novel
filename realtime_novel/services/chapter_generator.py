@@ -106,6 +106,7 @@ class ChapterGenerator:
         chapter_summaries: List[ChapterSummarySchema],
         last_chapter_full: Optional[str] = None,
         user_input: Optional[str] = None,
+        system_msg: Optional[str] = None,
     ) -> GenerationResult:
         """生成下一章节
 
@@ -114,6 +115,7 @@ class ChapterGenerator:
             chapter_summaries: 之前所有章节的摘要（按章节号顺序）
             last_chapter_full: 上一章全文（用于最近轮次层）
             user_input: 用户干预/导演输入（可选）
+            system_msg: M-δ 新增·干预 system_msg（从 InterventionParser 来的导演/演员提示）
 
         Returns:
             GenerationResult 含章节文本 + 摘要 + 时长
@@ -145,6 +147,7 @@ class ChapterGenerator:
         t0 = time.time()
         chapter_text = call_llm(
             prompt,
+            system_msg=system_msg,  # M-δ: 干预 system_msg
             temperature=self.temperature,
             max_tokens=self.max_tokens,
             use_json_format=False,

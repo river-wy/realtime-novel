@@ -29,6 +29,8 @@ from .core.schemas import (
 )
 from .services.chapter_generator import ChapterGenerator, GenerationResult
 from .services.onboarding import OnboardingFlow, OnboardingState
+from .services.intervention import InterventionParser, Intervention, InterventionMode
+from .services.rollback import RollbackManager, RollbackResult
 from .utils.version import __version__
 
 __all__ = [
@@ -44,6 +46,12 @@ __all__ = [
     # S4 (services)
     "ChapterGenerator",
     "GenerationResult",
+    # S5 (services)
+    "InterventionParser",
+    "Intervention",
+    "InterventionMode",
+    "RollbackManager",
+    "RollbackResult",
     # 7 件 Schema + 摘要 Schema (core)
     "WorldTreeSchema",
     "StyleCharterSchema",

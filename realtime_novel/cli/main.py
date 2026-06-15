@@ -157,8 +157,8 @@ def cmd_generate(args) -> int:
 
 
 def cmd_rollback(args) -> int:
-    """回档到指定 Node — M-δ 阶段实装"""
-    from realtime_novel import ProjectManager, WorldTree
+    """回档到指定 Node — M-δ 阶段实装（落盘式硬 reset）"""
+    from realtime_novel import ProjectManager, WorldTree, RollbackManager
 
     workspace = Path(args.workspace).resolve()
     pm = ProjectManager(workspace_root=workspace)
@@ -170,18 +170,119 @@ def cmd_rollback(args) -> int:
         return 1
 
     tree = WorldTree.from_dict(loaded.artifacts)
-    before = len(tree.world_tree.branches)
+    rm = RollbackManager(tree, loaded.project)
+
+    # 展示现有 Node 列表 (防误选)
+    print(f"⏪ rollback '{args.project_id}' → {args.node_id}")
+    print()
+    print("  现有 Node:")
+    for nid, title in rm.list_branches():
+        marker = "👉" if nid == args.node_id else "  "
+        print(f"   {marker} {nid}  ({title})")
+    print()
+
+    # 强确认: 输 ROLLBACK 才执行
+    if not getattr(args, "yes", False):
+        print("⚠️  ⚠️  ⚠️  回档是**不可逆**操作！")
+        print("⚠️  回档点之后的所有 Node 和章节会被永久删除")
+        print("⚠️  被裁掉的内容不可恢复")
+        print()
+        confirm_text = input(f"确认回档？输入 ROLLBACK（大写）以确认: ").strip()
+        if confirm_text != "ROLLBACK":
+            print("❌ 未确认, 取消回档")
+            return 1
+
+    # 执行回档
+    result = rm.rollback(args.node_id, confirm=True)
+    print()
+    print(f"✓ 回档完成 → {result.target_node_id}")
+    print(f"  · 删 {result.deleted_branches_count} Node")
+    print(f"  · 删 {result.deleted_chapters_count} 章节文件")
+    print(f"  · 剩 {result.remaining_chapters_count} 章节")
+    for w in result.warnings:
+        print(f"  {w}")
+    return 0
+
+
+def cmd_intervene(args) -> int:
+    """干预下一章生成 — M-δ 阶段实装"""
+    from realtime_novel import (
+        ProjectManager, WorldTree, ChapterGenerator,
+        InterventionParser, InterventionMode,
+    )
+    from realtime_novel.core.schemas import ChapterSummarySchema
+    import json
+
+    workspace = Path(args.workspace).resolve()
+    pm = ProjectManager(workspace_root=workspace)
 
     try:
-        deleted = tree.rollback_to(args.node_id)
-    except ValueError as e:
+        loaded = pm.load(args.project_id, strict=True)
+    except FileNotFoundError as e:
         print(f"❌ {e}")
         return 1
 
-    after = len(tree.world_tree.branches)
-    print(f"⏪ rollback '{args.project_id}' → {args.node_id}")
-    print(f"   删 {deleted} 节点: {before} → {after}")
-    print(f"   ⚠️  M-α 阶段是内存操作，未落盘（M-δ 阶段实装硬 reset）")
+    tree = WorldTree.from_dict(loaded.artifacts)
+
+    # 解析干预
+    parser = InterventionParser(loaded.project.project_dir)
+    mode = InterventionMode(args.mode)
+    intervention = parser.parse(args.text, chapter_num=args.chapter, mode=mode)
+    print(f"✓ 干预解析成功")
+    print(f"  · 模式: {intervention.mode}")
+    print(f"  · 影响章节: {intervention.chapter_num}")
+    print(f"  · 提取: {intervention.extracted_payload!r}")
+
+    # 演示: 仅生成 system_msg, 不真调 LLM（避免 LLM 开销)
+    # 真调加 --apply 参数
+    if not getattr(args, "apply", False):
+        print()
+        print(f"  · system_msg 预览:")
+        for line in intervention.system_msg.splitlines():
+            print(f"    {line}")
+        print()
+        print(f"💡 走完整生成加 --apply （会调 LLM）")
+        return 0
+
+    # 找下一章节号
+    demo_chapters = sorted(
+        int(p.stem.split("-")[-1])
+        for p in (workspace / "projects" / args.project_id / "chapters").glob("chapter-*.txt")
+    )
+    if not demo_chapters:
+        print(f"❌ 没找到 projects/{args.project_id}/chapters/ 下的 demo 章节")
+        return 1
+
+    next_chapter = demo_chapters[-1] + 1
+    last_chapter_full = (workspace / "projects" / args.project_id / "chapters" / f"chapter-{demo_chapters[-1]:02d}.txt").read_text(encoding="utf-8")
+
+    # 读历史摘要
+    summaries = []
+    summary_path = workspace / "docs" / "eval-notes" / "code" / "v0.2" / "output" / "case-1-urban-romance" / "chapter_summaries.json"
+    if summary_path.exists():
+        raw = json.loads(summary_path.read_text(encoding="utf-8"))
+        for s in raw[-3:]:
+            try:
+                summaries.append(ChapterSummarySchema.model_validate(s))
+            except Exception:
+                pass
+
+    # 用干预作为 system_msg 调生成
+    generator = ChapterGenerator(tree, loaded.project)
+    print(f"🚀 生成第 {next_chapter} 章 (应用干预) ...")
+    try:
+        result = generator.generate_next(
+            chapter_num=next_chapter,
+            chapter_summaries=summaries,
+            last_chapter_full=last_chapter_full,
+            system_msg=intervention.system_msg,  # M-δ: ChapterGenerator 新增 system_msg 参数
+        )
+    except Exception as e:
+        print(f"❌ 生成失败: {e}")
+        return 1
+
+    print(f"   ✓ {result.word_count} 字, {result.duration_sec:.1f}s")
+    print(f"   ✓ 落盘: {loaded.project.chapter_path(next_chapter).relative_to(workspace)}")
     return 0
 
 
@@ -223,11 +324,40 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=cmd_generate)
 
     # rollback
-    p = subparsers.add_parser("rollback", help="回档到指定 Node")
+    p = subparsers.add_parser("rollback", help="回档到指定 Node (M-δ 落盘)")
     _add_project_id_arg(p)
     _add_workspace_arg(p)
     p.add_argument("--node-id", required=True, help="回档目标 Node ID")
+    p.add_argument("--yes", action="store_true", help="跳过强确认（不推荐）")
     p.set_defaults(func=cmd_rollback)
+
+    # intervene
+    p = subparsers.add_parser("intervene", help="干预下一章生成 (M-δ 落盘)")
+    _add_project_id_arg(p)
+    _add_workspace_arg(p)
+    p.add_argument(
+        "--mode",
+        choices=["director", "actor"],
+        default="director",
+        help="干预模式: director(引导式) / actor(入戏式)",
+    )
+    p.add_argument(
+        "--chapter",
+        type=int,
+        required=True,
+        help="干预影响哪一章",
+    )
+    p.add_argument(
+        "--text",
+        required=True,
+        help="干预文本 (前缀: '我期望'/'我希望' → director, '我' → actor)",
+    )
+    p.add_argument(
+        "--apply",
+        action="store_true",
+        help="真调 LLM 应用干预 (默认仅解析, 不调 LLM)",
+    )
+    p.set_defaults(func=cmd_intervene)
 
     return parser
 

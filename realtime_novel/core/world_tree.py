@@ -47,14 +47,15 @@ class WorldTree:
 
     def to_dict(self) -> dict:
         """序列化为 dict（dict-of-dicts，文件名 → dict 内容）"""
+        # mode='json' 让 enum 序列化为字符串 (YAML/JSON 兼容)
         return {
-            "01-world-tree.yaml": self.world_tree.model_dump(exclude_none=True),
-            "02-style-charter.yaml": self.style_charter.model_dump(exclude_none=True),
-            "03-genre-resonance.yaml": self.genre_resonance.model_dump(exclude_none=True),
-            "04-main-plot.yaml": self.main_plot.model_dump(exclude_none=True),
-            "06-character-card.yaml": self.character_card.model_dump(exclude_none=True),
-            "05-sub-plot.yaml": self.sub_plot.model_dump(exclude_none=True),
-            "07-seed-table.yaml": self.seed_table.model_dump(exclude_none=True),
+            "01-world-tree.yaml": self.world_tree.model_dump(mode="json", exclude_none=True),
+            "02-style-charter.yaml": self.style_charter.model_dump(mode="json", exclude_none=True),
+            "03-genre-resonance.yaml": self.genre_resonance.model_dump(mode="json", exclude_none=True),
+            "04-main-plot.yaml": self.main_plot.model_dump(mode="json", exclude_none=True),
+            "06-character-card.yaml": self.character_card.model_dump(mode="json", exclude_none=True),
+            "05-sub-plot.yaml": self.sub_plot.model_dump(mode="json", exclude_none=True),
+            "07-seed-table.yaml": self.seed_table.model_dump(mode="json", exclude_none=True),
         }
 
     @classmethod
