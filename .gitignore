@@ -27,3 +27,8 @@ venv/
 .env
 .env.local
 *.private.json
+
+# Spec 产物（不入仓 · M-ε 阶段临时）
+# 理由: checkpoint.json 频繁改动, 不该污染 commit history
+# M-ε.5+ 阶段会从 .gitignore 移除, 统一入仓
+.spec/

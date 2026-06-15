@@ -11,6 +11,8 @@ dependencies = [
     "pydantic>=2.0",
     "pyyaml>=6.0",
     "certifi",  # LLM 客户端 SSL 绕开 macOS
+    "fastapi>=0.110",  # M-ε 引入 HTTP API
+    "uvicorn[standard]>=0.27",  # M-ε 引入 ASGI server
 ]
 
 [project.optional-dependencies]
@@ -19,8 +21,16 @@ dev = [
 ]
 
 # CLI 入口（python -m realtime_novel 也可）
+# M-ε 后: CLI 入口保留 (供脚本调用), 同时新增 HTTP API 入口
 [project.scripts]
 realtime-novel = "realtime_novel.cli:main"
+realtime-novel-api = "realtime_novel.api.app:run"  # uvicorn 入口
 
 [tool.setuptools.packages.find]
 include = ["realtime_novel*"]
+
+[tool.uvicorn]
+# realtime-novel-api 命令启动后默认参数
+host = "127.0.0.1"
+port = 8080
+log_level = "info"
