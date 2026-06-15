@@ -1,0 +1,28 @@
+# IDE 配置
+.idea/
+*.iml
+.vscode/
+.DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+*.so
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# 项目临时
+*.swp
+*.bak
+*.tmp
+
+# 评测输出（产物在 generated-stories/，评测 JSON 不入 Git）
+docs/eval-notes/code/v0.1/output/
+docs/eval-notes/code/v0.2/output/
+
+# 环境
+.env
+.env.local
+*.private.json
