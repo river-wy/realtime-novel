@@ -26,7 +26,7 @@ from realtime_novel import (
 )
 
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parents[2]  # tests/m2/ → 工程根
 PROJECTS_DIR = ROOT / "projects"
 DEMO_PROJECT = "demo-urban-romance"
 
@@ -64,9 +64,12 @@ def test_load_demo() -> tuple[ProjectManager, WorldTree, "Project"]:
 # ========== 验收 2: LLM 客户端可调用 ==========
 def test_llm_client() -> None:
     header("验收 2: LLM 客户端可调用（不实际生成，仅 ping）")
-    from realtime_novel.llm import call_llm, LUNARIS_ROOT
-    print(f"  ✓ lunaris backend 路径: {LUNARIS_ROOT}")
+    from realtime_novel.adapters.llm import call_llm
+    from realtime_novel.adapters.llm import get_llm_config
+    cfg = get_llm_config()["llm"]
     print(f"  ✓ llm_config 已加载")
+    print(f"    · baseUrl: {cfg.get('baseUrl', '?')}")
+    print(f"    · default_model: {cfg.get('default_model', '?')}")
 
     # 极小测试调用（10 tokens 足够）
     result = call_llm(

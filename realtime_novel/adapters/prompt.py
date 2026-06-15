@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import Dict, List, Optional, Union
 
-from .schemas import (
+from ..core.schemas import (
     WorldTreeSchema,
     StyleCharterSchema,
     GenreResonanceSchema,

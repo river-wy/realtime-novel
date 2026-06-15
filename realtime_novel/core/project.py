@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import List
 
 from .schemas import SCHEMA_REGISTRY
-from .io import read
+from ..adapters.io import read
 
 
 @dataclass
@@ -77,7 +77,7 @@ class ProjectManager:
         # 7 件空 YAML
         for schema_cls, filename in SCHEMA_REGISTRY:
             empty_doc = schema_cls()  # 用 Pydantic 默认值构造
-            from .io import write
+            from ..adapters.io import write
             write(project.file_path(filename), empty_doc.model_dump(exclude_none=True))
 
         return project

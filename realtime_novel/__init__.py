@@ -14,10 +14,9 @@ M-α 阶段产出（v0.3-product-skeleton.md §4）:
 设计文档: docs/design/03-schemas.md
 约束规则: .realtime-novel/conventions.md
 """
-from .project import ProjectManager, Project, LoadedProject
-from .world_tree import WorldTree
-from .chapter_generator import ChapterGenerator, GenerationResult
-from .schemas import (
+from .core.project import ProjectManager, Project, LoadedProject
+from .core.world_tree import WorldTree
+from .core.schemas import (
     WorldTreeSchema,
     StyleCharterSchema,
     GenreResonanceSchema,
@@ -28,20 +27,20 @@ from .schemas import (
     ChapterSummarySchema,
     SCHEMA_REGISTRY,
 )
-
-__version__ = "0.2.0-beta"
+from .services.chapter_generator import ChapterGenerator, GenerationResult
+from .utils.version import __version__
 
 __all__ = [
-    # S1
+    # S1 (core)
     "ProjectManager",
     "Project",
     "LoadedProject",
-    # S2
+    # S2 (core)
     "WorldTree",
-    # S4 (M-β 新增)
+    # S4 (services)
     "ChapterGenerator",
     "GenerationResult",
-    # 7 件 Schema + 摘要 Schema
+    # 7 件 Schema + 摘要 Schema (core)
     "WorldTreeSchema",
     "StyleCharterSchema",
     "GenreResonanceSchema",

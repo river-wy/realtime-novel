@@ -1,10 +1,10 @@
-"""tools/seed_demo.py — 从 docs/eval-notes/code/v0.2/cases/case-1-urban-romance/
+"""utils/seed_demo.py — 从 docs/eval-notes/code/v0.2/cases/case-1-urban-romance/
 装载 7 件 JSON 到 projects/demo-urban-romance/（YAML 形式）
 
 用法:
     cd /Users/wuyu/creativeToys/realtime-novel
     source .venv/bin/activate
-    python -m realtime_novel._seed_demo
+    python -m realtime_novel.utils.seed_demo
 """
 from __future__ import annotations
 
@@ -13,7 +13,8 @@ from pathlib import Path
 
 import yaml
 
-ROOT = Path(__file__).resolve().parent.parent
+# utils/seed_demo.py → 工程根（往上 3 级）
+ROOT = Path(__file__).resolve().parents[2]
 SOURCE_CASE = ROOT / "docs" / "eval-notes" / "code" / "v0.2" / "cases" / "case-1-urban-romance"
 TARGET_PROJECT = ROOT / "projects" / "demo-urban-romance"
 

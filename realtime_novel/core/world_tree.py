@@ -26,7 +26,7 @@ from .schemas import (
     SeedTableSchema,
     SCHEMA_REGISTRY,
 )
-from .io import read, write
+from ..adapters.io import read, write
 
 
 @dataclass

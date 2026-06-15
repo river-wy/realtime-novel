@@ -29,12 +29,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, List, Dict
 
-from .world_tree import WorldTree
-from .three_layer_prompt import build_full_prompt
-from .llm import call_llm
-from .schemas import ChapterSummarySchema
-from .io import write as io_write
-from .project import Project
+from ..core.world_tree import WorldTree
+from ..adapters.prompt import build_full_prompt
+from ..adapters.llm import call_llm
+from ..core.schemas import ChapterSummarySchema
+from ..adapters.io import write as io_write
+from ..core.project import Project
 
 
 # === 段落长度估算（v0.2 用的 3 段/章） ===

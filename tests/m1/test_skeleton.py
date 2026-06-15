@@ -24,7 +24,7 @@ from pathlib import Path
 
 from realtime_novel import ProjectManager, WorldTree
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parents[2]  # tests/m1/ → 工程根
 PROJECTS_DIR = ROOT / "projects"
 
 
@@ -185,7 +185,7 @@ def test_rollback() -> str:
         # 补充：手工构造多节点 WorldTree 验证硬 reset
         print()
         print(f"  📊 补充：手工构造 5 节点 WorldTree 验证硬 reset:")
-        from realtime_novel.schemas import WorldTreeSchema
+        from realtime_novel.core.schemas import WorldTreeSchema
         from realtime_novel import WorldTree as WT
         # 用 demo 的 7 件作为基础
         wt_multi = WorldTree.from_project_dir(PROJECTS_DIR / "demo-urban-romance")
@@ -232,7 +232,7 @@ def main() -> int:
     # 先装载 demo（如果还没有）
     if not (PROJECTS_DIR / "demo-urban-romance" / "01-world-tree.yaml").exists():
         header("前置：装载 demo 数据")
-        from realtime_novel._seed_demo import seed
+        from realtime_novel.utils.seed_demo import seed
         seed()
 
     results = []

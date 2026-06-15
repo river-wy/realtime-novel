@@ -4,13 +4,23 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "realtime_novel"
-version = "0.1.0-alpha"
+version = "0.3.0-alpha"
 description = "实时生成 + 可干预小说产品"
 requires-python = ">=3.11"
 dependencies = [
     "pydantic>=2.0",
     "pyyaml>=6.0",
+    "certifi",  # LLM 客户端 SSL 绕开 macOS
 ]
+
+[project.optional-dependencies]
+dev = [
+    # M-γ 时加: pytest
+]
+
+# CLI 入口（python -m realtime_novel 也可）
+[project.scripts]
+realtime-novel = "realtime_novel.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["realtime_novel*"]
