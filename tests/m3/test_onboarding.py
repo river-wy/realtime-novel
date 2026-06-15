@@ -9,6 +9,10 @@
 策略: 验收时不真跑 5 步交互（需人工输入），改用代码直接构造 OnboardingState,
       然后调内部方法生成 7 件 + 第 1 章。
 
+临时项目位置（按 .realtime-novel/conventions.md §9 #15）:
+- 临时项目写在 <工程根>/.tmp/m3-test/ 下面（不入仓，gitignore 已覆盖）
+- 不再用 ~/.openclaw/tmp/ 避免散落
+
 用法:
     cd /Users/wuyu/creativeToys/realtime-novel
     source .venv/bin/activate
@@ -30,6 +34,7 @@ from realtime_novel import (
 
 
 ROOT = Path(__file__).resolve().parents[2]
+TMP_ROOT = ROOT / ".tmp" / "m3-test"  # conventions.md §9 #15
 
 
 def line(s: str = "") -> None:
@@ -50,7 +55,12 @@ _TMP_DIR_HOLDER: list = []
 
 def test_create_project() -> ProjectManager:
     header("验收 1: ProjectManager.create('test-onboarding')")
-    tmp = tempfile.mkdtemp(prefix="realtime_novel_m3_")
+    # 按 conventions.md §9 #15: 临时项目在 <工程根>/.tmp/m3-test/
+    # 用 timestamp 后缀避免重跑冲突
+    import time
+    run_id = time.strftime("%Y%m%d_%H%M%S")
+    tmp = TMP_ROOT / f"run-{run_id}"
+    tmp.mkdir(parents=True, exist_ok=True)
     _TMP_DIR_HOLDER.append(tmp)  # 持有引用
 
     pm = ProjectManager(workspace_root=tmp)
@@ -63,7 +73,7 @@ def test_create_project() -> ProjectManager:
     print(f"  ✓ 创建项目: {project.project_dir}")
     print(f"  · chapters/ 已建")
     print(f"  · 7 件空 YAML 已落盘")
-    print(f"  · tmp 目录: {tmp} (全程持有)")
+    print(f"  · tmp 目录: {tmp} (全程持有，不入仓)")
     return pm
 
 

@@ -20,6 +20,9 @@ venv/
 *.swp
 *.bak
 *.tmp
+# 调试用临时文档（不入仓，详见 conventions.md §1.1）
+# 必须是工程根下隐藏目录 .tmp/  (避免与 *.tmp 后缀冲突)
+.tmp/
 
 # 评测输出（v0.1 / v0.2 的报告 + metrics + summaries + seed_table 入 Git，作为历史快照）
 # 后续 v0.3+ 的 output/ 可选择性忽略（按需）
