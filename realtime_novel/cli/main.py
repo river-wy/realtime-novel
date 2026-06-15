@@ -102,17 +102,17 @@ def cmd_generate(args) -> int:
     project = loaded.project
     tree = WorldTree.from_dict(loaded.artifacts)
 
-    # 找下一章节号（从 demo 原文取最近一章）
+    # 找下一章节号（从 demo 项目目录取最近一章）
     demo_chapters = sorted(
         int(p.stem.split("-")[-1])
-        for p in workspace.glob("generated-stories/*/chapter-*.txt")
+        for p in (workspace / "projects" / args.project_id / "chapters").glob("chapter-*.txt")
     )
     if not demo_chapters:
-        print("❌ 没找到 generated-stories/ 下的 demo 章节")
+        print(f"❌ 没找到 projects/{args.project_id}/chapters/ 下的 demo 章节")
         return 1
 
     next_chapter = demo_chapters[-1] + 1
-    last_chapter_full = (workspace / "generated-stories" / "case-1-urban-romance" / f"chapter-{demo_chapters[-1]:02d}.txt").read_text(encoding="utf-8")
+    last_chapter_full = (workspace / "projects" / args.project_id / "chapters" / f"chapter-{demo_chapters[-1]:02d}.txt").read_text(encoding="utf-8")
 
     # 读最近 3 章摘要（v0.2 输出）
     summaries = []

@@ -10,7 +10,7 @@
 
 `docs/` 是项目的**推导与设计材料**——产品设计、调研、评测、路线图。任何非工程代码的产物都进这里。
 
-工程代码在 [`realtime_novel/`](../realtime_novel/)（产品包）+ [`generated-stories/`](../generated-stories/)（生成产物）。评测代码在 [`docs/eval-notes/code/`](eval-notes/code/)（属于评测笔记的一部分）。
+工程代码在 [`realtime_novel/`](../realtime_novel/)（产品包）。生成产物随项目保存在 [`projects/{id}/chapters/`](../projects/)。评测代码在 [`docs/eval-notes/code/`](eval-notes/code/)（属于评测笔记的一部分）。
 
 ---
 

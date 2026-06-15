@@ -10,12 +10,16 @@
 ## [Unreleased]
 
 ### Changed (2026-06-15)
-- **工程结构重构**: 5 子包分层 (core/services/adapters/cli/utils)
-- **LLM 客户端完全独立**: 不再引用 lunaris 任何代码，独立持有 config.private.json
-- **验收脚本迁入 `tests/m1/m2/`**: 不再散落根目录
-- **新增 `__main__.py` + `cli/main.py`**: argparse 4 子命令 (new/load/generate/rollback)
-- **新增工程框架规范**: `.realtime-novel/conventions.md` 13 条强约束
-- **`realtime_novel` 包版本号**: 0.2.0-beta → 0.3.0-alpha
+- **生成产物随项目保存**: `generated-stories/` 合并入 `projects/demo-urban-romance/chapters/`（欧尼酱手动操作，git 自动检测为 rename，零数据丢失）
+- **代码 / 文档同步更新**: `tests/m2/test_chapter.py` + `cli/main.py` + 4 份文档改用新路径
+- **conventions.md §1.1 + §9 强约束** 同步：`generated-stories/` 从顶层白名单删除，新增强约束 #14
+- **v0.3 重构** (上一个 commit a5f9701)：
+  - 5 子包分层 (core/services/adapters/cli/utils)
+  - LLM 客户端完全独立
+  - 验收脚本迁入 `tests/m1/m2/`
+  - `__main__.py` + `cli/main.py` argparse 4 子命令
+  - `conventions.md` 13 条强约束
+  - `realtime_novel` 包版本号: 0.2.0-beta → 0.3.0-alpha
 
 ### Technical Details
 - `verify.py` → `tests/m1/test_skeleton.py`
@@ -68,7 +72,7 @@
 ### v0.2 真实 LLM 评测
 - Added: 5 份产品设计文档 (00-overview, 01-world-tree, 02-consistency, 03-schemas, 04-evaluation)
 - Added: `docs/eval-notes/code/v0.2/` 真 LLM 评测代码
-- Added: `generated-stories/case-1-urban-romance/` 21 万字 demo (20 章)
+- Added: `projects/demo-urban-romance/` 21 万字 demo (20 章，含 7 件 YAML)
 - Result: 4/5 指标达标 (种子回收率/基座约束/具体性密度/importance 优先采纳率)
 - Limitation: 0/0 overdue (planned_interval 偏长, M-γ 调参解决)
 

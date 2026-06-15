@@ -87,10 +87,9 @@ def test_llm_client() -> None:
 def test_generate_chapter(tree: WorldTree, project) -> ChapterSummarySchema:
     header("验收 3+4+5: 端到端生成 chapter-21")
 
-    # === 关键：demo 原文在 generated-stories/ 而非 projects/ ===
-    # 7 件产物在 projects/demo-urban-romance/
-    # 但 20 章 demo 原文在 generated-stories/case-1-urban-romance/
-    demo_chapters_dir = ROOT / "generated-stories" / "case-1-urban-romance"
+    # === 关键：demo 原文在 projects/demo-urban-romance/chapters/ ===
+    # 7 件产物与章节原文均在 projects/demo-urban-romance/ 下
+    demo_chapters_dir = PROJECTS_DIR / DEMO_PROJECT / "chapters"
     existing_chapters = sorted(
         int(p.stem.split("-")[-1])
         for p in demo_chapters_dir.glob("chapter-*.txt")
@@ -99,7 +98,7 @@ def test_generate_chapter(tree: WorldTree, project) -> ChapterSummarySchema:
     print(f"  demo 现有章节: {existing_chapters[:3]}...{existing_chapters[-3:]} (共 {len(existing_chapters)} 章)")
     print(f"  下一章节号: {next_chapter}")
 
-    # 读最近 1 章全文（从 generated-stories/ 取）
+    # 读最近 1 章全文（从 projects/demo-urban-romance/chapters/ 取）
     last_chapter_path = demo_chapters_dir / f"chapter-{existing_chapters[-1]:02d}.txt" if existing_chapters else None
     last_chapter_full = last_chapter_path.read_text(encoding="utf-8") if last_chapter_path and last_chapter_path.exists() else None
     print(f"  上一章全文: {len(last_chapter_full) if last_chapter_full else 0} 字")

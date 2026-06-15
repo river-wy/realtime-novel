@@ -46,7 +46,7 @@ v0.3 (产品骨架搭建)     ⏳ 推进中
 → [`docs/design/04-evaluation.md`](docs/design/04-evaluation.md) · 5 指标方法
 
 ### 📚 想看小说本身
-→ [`generated-stories/case-1-urban-romance/`](generated-stories/case-1-urban-romance/) · 20 章生成产物（21 万字）
+→ [`projects/demo-urban-romance/chapters/`](projects/demo-urban-romance/chapters/) · 21 章生成产物（21 万字 · demo + 1 章 M-β 验证）
 
 ---
 

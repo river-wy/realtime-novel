@@ -42,8 +42,7 @@
 | `realtime_novel/` | 产品代码包 | 5 子包结构（见 §1.2）|
 | `tests/` | 测试代码 | 验收脚本 + pytest 测试 |
 | `docs/` | 推导与设计材料 | 任何"非工程代码"的产物都进这里 |
-| `projects/` | 实际项目数据 | 装载 demo / 用户创建的项目 |
-| `generated-stories/` | 生成产物 | 章节文本（按 case 分目录）|
+| `projects/` | 实际项目数据 | 装载 demo / 用户创建的项目（含 7 件 YAML + chapters/）|
 | `.realtime-novel/` | 工程内规则 | 本文件所在 |
 | `.gitignore` | Git 忽略规则 | 必备 |
 | `.venv/` | Python 虚拟环境 | **不入仓**（gitignore 已覆盖）|
@@ -309,6 +308,7 @@ dependencies = [
 | 11 | 路线图唯一（`docs/roadmap/vX.Y-*.md` 只能 1 份 active）|
 | 12 | 数字编号只在 `docs/design/` 下用 |
 | 13 | `*.private.json` 不入仓 |
+| 14 | **生成产物随项目保存**（在 `projects/{id}/chapters/`，**不**单独建 `generated-stories/`）|
 
 ---
 
