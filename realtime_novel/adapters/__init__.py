@@ -1,28 +1,34 @@
-"""adapters — 外部依赖适配层
+"""realtime_novel.adapters 包入口
 
-适配外部世界的接口（本工程都是 OpenAI 兼容协议 + 文档格式）：
-- llm.py         LLM 客户端（完全独立，零外部依赖，2026-06-15 独立化）
-- prompt.py      3 层 prompt 组装
-- seed_weight.py 种子权重计算（02 §2.2 纯算法）
-- io.py          YAML/JSON 读写（按 docs/design/03-schemas.md §4）
+v0.4 LLM 适配层：统一对外接口 LLMAdapter
+- DeepSeek Provider (text, OpenAI 兼容 + Thinking)
+- Gemini Provider (image, Google 原生异步 submit+poll)
+- Router (按 role 路由 + fallback)
+- Retry (指数退避)
+- Streaming (流式回调)
 
-设计原则: adapters 内的模块是「产品代码」与「外部世界」之间的桥，
-可以独立替换实现而不影响 core/ 与 services/。
+v0.3 的 LLMClient（realtime_novel/adapters/llm.py）保持不变。
 """
-from .llm import call_llm
-from .prompt import build_full_prompt, build_base_layer, build_dynamic_layer, build_recent_layer
-from .seed_weight import rank_seeds, calc_weight, calc_overdue_score
-from .io import read, write
+from realtime_novel.adapters.types import (
+    LLMRequest, LLMResponse, LLMStreamChunk, ModelRole, ModelProvider,
+)
+from realtime_novel.adapters.providers.base import LLMProvider
+from realtime_novel.adapters.providers.deepseek import DeepSeekProvider
+from realtime_novel.adapters.providers.gemini import GeminiProvider
+from realtime_novel.adapters.llm_router import LLMRouter, get_router, reset_router
+from realtime_novel.adapters.retry import with_retry, AuthenticationError, RateLimitError
+from realtime_novel.adapters.streaming import stream_with_callback
+from realtime_novel.adapters.llm_adapter import LLMAdapter, get_llm_adapter, reset_llm_adapter
 
 __all__ = [
-    "call_llm",
-    "build_full_prompt",
-    "build_base_layer",
-    "build_dynamic_layer",
-    "build_recent_layer",
-    "rank_seeds",
-    "calc_weight",
-    "calc_overdue_score",
-    "read",
-    "write",
+    # types
+    "LLMRequest", "LLMResponse", "LLMStreamChunk", "ModelRole", "ModelProvider",
+    # providers
+    "LLMProvider", "DeepSeekProvider", "GeminiProvider",
+    # router
+    "LLMRouter", "get_router", "reset_router",
+    # retry + streaming
+    "with_retry", "AuthenticationError", "RateLimitError", "stream_with_callback",
+    # main entry
+    "LLMAdapter", "get_llm_adapter", "reset_llm_adapter",
 ]

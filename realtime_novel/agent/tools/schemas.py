@@ -1,0 +1,147 @@
+"""Tools 通用 Pydantic Schemas（13 个工具的 Input/Output）
+
+对应 core.md §B.1.3
+"""
+from __future__ import annotations
+
+from typing import Literal, Optional, Any
+from pydantic import BaseModel, Field
+
+
+# ============ Project 工具 ============
+
+class LoadProjectInput(BaseModel):
+    project_id: str = Field(..., min_length=1)
+
+
+class CreateProjectInput(BaseModel):
+    name: str = Field(..., min_length=1, max_length=100)
+    palette: str = Field(..., min_length=1)
+    initial_prompt: Optional[str] = None
+
+
+class DeleteProjectInput(BaseModel):
+    project_id: str = Field(..., min_length=1)
+    confirm: Literal[True]  # 强制 True
+
+
+class ProjectDetail(BaseModel):
+    id: str
+    name: str
+    palette: str
+    seven_artifacts: Optional[dict[str, Any]] = None
+    world_tree: Optional[dict[str, Any]] = None
+    chapters: Optional[list[dict]] = None
+
+
+# ============ Chapter 工具 ============
+
+class GenerateChapterInput(BaseModel):
+    project_id: str = Field(..., min_length=1)
+    intervention: Optional[str] = None
+    actor_feedback: Optional[str] = None
+    actor_character: Optional[str] = None
+
+
+class ReadChapterInput(BaseModel):
+    project_id: str = Field(..., min_length=1)
+    chapter_num: int = Field(..., ge=1)
+
+
+class ChapterContent(BaseModel):
+    num: int
+    title: str
+    content: str
+    word_count: int
+    generated_at: Optional[str] = None
+
+
+# ============ Base Edit 工具（7 件基座）============
+
+class UpdateBaseInput(BaseModel):
+    project_id: str = Field(..., min_length=1)
+    key: Literal["name", "palette", "world_tree", "main_plot", "style_charter", "seed_table", "genre_resonance"]
+    new_value: str = Field(..., min_length=1)
+
+
+class UpdateBaseResult(BaseModel):
+    project_id: str
+    key: str
+    old_value_preview: str
+    new_value_preview: str
+    chapters_affected: list[int]
+
+
+class RollbackBaseInput(BaseModel):
+    project_id: str = Field(..., min_length=1)
+    to_chapter: int = Field(..., ge=1)
+    confirm: Literal[True]
+
+
+# ============ Image 工具 ============
+
+class GenerateImageInput(BaseModel):
+    project_id: str = Field(..., min_length=1)
+    style_hint: Optional[str] = None
+
+
+class ImageResult(BaseModel):
+    project_id: str
+    image_url: str
+    generated_at: str
+    cache_hit: bool = False
+
+
+# ============ Memory 工具（向量检索）============
+
+class SearchMemoryInput(BaseModel):
+    project_id: str = Field(..., min_length=1)
+    query: str = Field(..., min_length=1)
+    top_k: int = Field(5, ge=1, le=20)
+
+
+class SearchMemoryResult(BaseModel):
+    entries: list[dict[str, Any]]
+
+
+# ============ v0.4 新工具（4 个）============
+
+class AdjustStyleInput(BaseModel):
+    project_id: str = Field(..., min_length=1)
+    style_directive: str = Field(..., min_length=1, max_length=500)
+
+
+class AdjustStyleResult(BaseModel):
+    project_id: str
+    style_charter_updated: bool
+
+
+class SwitchPovInput(BaseModel):
+    project_id: str = Field(..., min_length=1)
+    new_pov_character: str = Field(..., min_length=1)
+
+
+class SwitchPovResult(BaseModel):
+    project_id: str
+    previous_pov: str
+    new_pov: str
+
+
+class IntrospectCharacterInput(BaseModel):
+    project_id: str = Field(..., min_length=1)
+    character_name: str = Field(..., min_length=1)
+
+
+class IntrospectResult(BaseModel):
+    character_name: str
+    character_card: dict[str, Any]
+    inner_monologue: Optional[str] = None
+
+
+class WeavePlotInput(BaseModel):
+    project_id: str = Field(..., min_length=1)
+    plot_seed: str = Field(..., min_length=1)
+
+
+class WeavePlotResult(BaseModel):
+    next_chapter_plan: dict[str, Any]

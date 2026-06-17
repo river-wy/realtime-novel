@@ -32,3 +32,10 @@ venv/
 # 理由: checkpoint.json 频繁改动, 不该污染 commit history
 # M-ε.5+ 阶段会从 .gitignore 移除, 统一入仓
 .spec/
+
+# v0.4 运行时数据 (项目文件 + SQLite)
+# 理由: 测试生成的数据不入仓, 生产数据由部署环境提供
+# 真正项目文件可以由 chapter_writer 重新生成
+data/projects/
+data/novel.db
+data/novel.db-*
