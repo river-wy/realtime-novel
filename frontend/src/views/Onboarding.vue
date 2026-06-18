@@ -2,8 +2,8 @@
 /**
  * Onboarding 5 步引导（v0.5 接入后端）
  *
- * Step 1a: 必选标签 (题材/风格/基调)
- * Step 1b: 调色板 (装饰性偏好)
+ * Step 1: 必选标签 (题材/风格/基调)
+ * Step 2: 调色板 (装饰性偏好)
  * Step 2: 引导式自由文本
  * Step 3: 大纲确认
  * Step 4: 后台准备（v0.5 端到端：调 LLM 真实生成 7 件）
@@ -21,16 +21,16 @@ const projectsStore = useProjectsStore()
 const chaptersStore = useChaptersStore()
 
 const projectId = ref('')
-const currentStep = ref<OnboardingStep>('1a')
+const currentStep = ref<OnboardingStep>('1')
 const loading = ref(false)
 const error = ref<string | null>(null)
 
-// Step 1a 数据
+// Step 1 数据
 const genres = ref<string[]>([])
 const styles = ref<string[]>([])
 const tone = ref('')
 
-// Step 1b 数据
+// Step 2 数据
 const palette = ref<string[]>([])
 
 const GENRE_OPTIONS = ['都市', '古风', '玄幻', '修仙', '校园', '职场', '家庭', '悬疑', '科幻']
@@ -54,32 +54,29 @@ async function goNext() {
   loading.value = true
   error.value = null
   try {
-    if (currentStep.value === '1a') {
+    if (currentStep.value === '1') {
       if (genres.value.length === 0 || styles.value.length === 0 || !tone.value) {
         error.value = '请完整选择题材、风格、基调'
         return
       }
       await ensureProject()
-      await onboardingStep(projectId.value, '1a', {
+      await onboardingStep(projectId.value, '1', {
         genres: genres.value, styles: styles.value, tone: tone.value
       })
-      currentStep.value = '1b'
-    } else if (currentStep.value === '1b') {
-      await onboardingStep(projectId.value, '1b', { palette: palette.value })
       currentStep.value = '2'
     } else if (currentStep.value === '2') {
-      await onboardingStep(projectId.value, '2', { /* payload */ })
+      await onboardingStep(projectId.value, '2', { palette: palette.value })
       currentStep.value = '3'
     } else if (currentStep.value === '3') {
       await onboardingStep(projectId.value, '3', { /* payload */ })
       currentStep.value = '4'
     } else if (currentStep.value === '4') {
-      // Step 4: 后台准备（生成 7 件）
-      await onboardingStep(projectId.value, '4', {})
-      // Step 5: 生成第 1 章
-      await chaptersStore.generate(projectId.value)
+      await onboardingStep(projectId.value, '4', { /* payload */ })
       currentStep.value = '5'
-    } else {
+    } else if (currentStep.value === '5') {
+      // Step 5: 后台准备 + 生成第 1 章
+      await onboardingStep(projectId.value, '5', {})
+      await chaptersStore.generate(projectId.value)
       // 完成 → 跳转阅读
       await projectsStore.loadList()
       router.push({ name: 'reader', params: { projectId: projectId.value, chapterNum: 1 } })
@@ -96,16 +93,16 @@ async function goNext() {
   <div class="onboarding">
     <div class="step-indicator">
       <div
-        v-for="s in ['1a', '1b', '2', '3', '4', '5']"
+        v-for="s in ['1', '2', '3', '4', '5']"
         :key="s"
         class="step-dot"
-        :class="{ active: s === currentStep, done: ['1a','1b','2','3','4','5'].indexOf(s) < ['1a','1b','2','3','4','5'].indexOf(currentStep) }"
+        :class="{ active: s === currentStep, done: ['1','2','3','4','5'].indexOf(s) < ['1','2','3','4','5'].indexOf(currentStep) }"
       >{{ s }}</div>
     </div>
 
-    <!-- Step 1a -->
-    <section v-if="currentStep === '1a'" class="step fade-in">
-      <h1>📌 Step 1a · 必选标签</h1>
+    <!-- Step 1 -->
+    <section v-if="currentStep === '1'" class="step fade-in">
+      <h1>📌 Step 1 · 必选标签</h1>
       <h3>题材</h3>
       <div class="tag-grid">
         <button
@@ -138,9 +135,9 @@ async function goNext() {
       </div>
     </section>
 
-    <!-- Step 1b -->
-    <section v-else-if="currentStep === '1b'" class="step fade-in">
-      <h1>📌 Step 1b · 调色板</h1>
+    <!-- Step 2 -->
+    <section v-else-if="currentStep === '2'" class="step fade-in">
+      <h1>📌 Step 2 · 调色板</h1>
       <p>装饰性偏好（可跳过）</p>
       <div class="tag-grid">
         <button
@@ -153,35 +150,27 @@ async function goNext() {
       </div>
     </section>
 
-    <!-- Step 2/3 占位 -->
-    <section v-else-if="currentStep === '2' || currentStep === '3'" class="step fade-in">
+    <!-- Step 3/4 占位 -->
+    <section v-else-if="currentStep === '3' || currentStep === '4'" class="step fade-in">
       <h1>📌 Step {{ currentStep }}</h1>
       <p>引导式自由文本（v0.6 详细设计）</p>
       <p class="hint">本阶段引导内容待 v0.5.1 补充</p>
     </section>
 
-    <!-- Step 4 后台准备 -->
-    <section v-else-if="currentStep === '4'" class="step fade-in">
-      <h1>🛠 Step 4 · 后台准备</h1>
+    <!-- Step 5 后台准备 + 生成章节 -->
+    <section v-else-if="currentStep === '5'" class="step fade-in">
+      <h1>🛠 Step 5 · 后台准备</h1>
       <p>AI 正在生成 7 件基座 + 第 1 章...</p>
       <div v-if="loading" class="generating">
         <div class="spinner"></div>
         <span>30-60s</span>
       </div>
-    </section>
-
-    <!-- Step 5 完成 -->
-    <section v-else-if="currentStep === '5'" class="step fade-in">
-      <h1>🎉 Step 5 · 完成</h1>
-      <p>第 1 章已生成！</p>
-      <button class="btn btn-primary" @click="router.push({ name: 'reader', params: { projectId, chapterNum: 1 } })">
-        开始阅读 →
-      </button>
+      <p v-else-if="!error" class="hint">点击下一步开始生成</p>
     </section>
 
     <div v-if="error" class="error">{{ error }}</div>
 
-    <div class="actions" v-if="!['4', '5'].includes(currentStep)">
+    <div class="actions" v-if="!['5'].includes(currentStep)">
       <button class="btn btn-primary" @click="goNext" :disabled="loading">
         {{ loading ? '处理中...' : '下一步 →' }}
       </button>

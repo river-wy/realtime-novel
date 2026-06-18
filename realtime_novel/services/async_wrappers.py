@@ -310,7 +310,7 @@ class AsyncOnboardingFlow:
         """
         import json
         next_step_map = {
-            "1a": "1b", "1b": "2", "2": "3", "3": "4", "4": "5", "5": None,
+            "1": "2", "2": "3", "3": "4", "4": "5", "5": None,
         }
         now = datetime.now()
         with get_store().connection() as conn:
@@ -342,7 +342,7 @@ class AsyncOnboardingFlow:
                 from realtime_novel.services.onboarding import OnboardingFlow, OnboardingState
                 from realtime_novel.persistence import ProjectRepository
 
-                # 拿全 step 1a-3 的 state 用于生成 7 件
+                # 拿全 step 1-3 的 state 用于生成 7 件
                 with get_store().connection() as conn:
                     row = conn.execute(
                         "SELECT state_json FROM onboarding_state WHERE project_id = ?",
@@ -359,7 +359,7 @@ class AsyncOnboardingFlow:
                     styles=full_state.get("payload", {}).get("styles") or [],
                     tone=full_state.get("payload", {}).get("tone") or "",
                     palette=full_state.get("payload", {}).get("palette") or [],
-                    # 注：v0.5 简化版只取 1a payload；v0.5.1 完整版要累计 1a+1b+2+3
+                    # 注：v0.5 简化版只取 1 payload；v0.5.1 完整版要累计 1+2+3
                 )
                 # v0.5: 直接用 ProjectRepository.save_7_artifacts 替代 v0.3 复杂 _generate_7_artifacts
                 # Step 4 在 v0.5 实际是手动生成 7 件（简化版）
@@ -393,8 +393,8 @@ class AsyncOnboardingFlow:
 
 
 def _step_to_num(step: str) -> int:
-    """step 名 → 数字 (1a=1, 1b=2, 2=3, 3=4, 4=5, 5=6)"""
-    mapping = {"1a": 1, "1b": 2, "2": 3, "3": 4, "4": 5, "5": 6}
+    """step 名 → 数字 (1-5 顺序递增)"""
+    mapping = {"1": 1, "2": 2, "3": 3, "4": 4, "5": 5}
     return mapping.get(step, 0)
 
 

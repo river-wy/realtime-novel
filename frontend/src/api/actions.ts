@@ -5,7 +5,7 @@ import { api } from './client'
 
 // ============ Onboarding ============
 
-export type OnboardingStep = '1a' | '1b' | '2' | '3' | '4' | '5'
+export type OnboardingStep = '1' | '2' | '3' | '4' | '5'
 
 export interface OnboardingResult {
   step: string

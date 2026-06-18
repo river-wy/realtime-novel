@@ -26,7 +26,7 @@ _cs_repo = ChapterStatusRepository()
 # ============ /onboarding ============
 
 class OnboardingRequest(BaseModel):
-    step: Literal["1a", "1b", "2", "3", "4", "5"]
+    step: Literal["1", "2", "3", "4", "5"]
     payload: dict = Field(default_factory=dict)
 
 
