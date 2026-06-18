@@ -16,6 +16,14 @@ html, body {
   -moz-osx-font-smoothing: grayscale;
 }
 
+/* 始终显示垂直滚动条占位，避免路由切换时 header 左右抖动
+   (长内容页有滚动条，短内容页没滚动条 → 切换时 body 居中内容左右偏移)
+   overflow-y: scroll 强制 html 一直有滚动条，body 宽度永远稳定
+   视觉上短内容页的滚动条是空的，但不抖动 */
+html {
+  overflow-y: scroll;
+}
+
 body {
   min-height: 100vh;
   background:
