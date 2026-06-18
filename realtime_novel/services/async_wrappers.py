@@ -340,6 +340,16 @@ class AsyncOnboardingFlow:
                     (project_id, _step_to_num(step), now, now, json.dumps(state_data, ensure_ascii=False)),
                 )
 
+        # v0.5 拍板: Step 2 palette 只存 projects.palette (UI 主题色), **不**写 7 件
+        if step == "2":
+            palette_list = payload.get("palette", []) or []
+            if palette_list:
+                with get_store().connection() as conn:
+                    conn.execute(
+                        "UPDATE projects SET palette = ? WHERE id = ?",
+                        (",".join(palette_list), project_id),
+                    )
+
         # v0.6: Step 4 触发 7 件基座生成（用 Step 1-4 payload 拼 7 件）
         if step == "4":
             try:
@@ -469,7 +479,9 @@ class AsyncOnboardingFlow:
                         "taboos": [{"id": "T1", "text": p.get("taboos", "")}] if p.get("taboos") else [],
                         "notes": styles,
                         "limits": {"max_chapter_words": 3000},
-                        "metadata": {"genres": genres, "styles": styles, "palette": palette},
+                        # v0.5 拍板: palette **不**写 7 件基座 (只存 projects.palette)
+                        # 世界树基座只反映内容创作意图, 不反映 UI 偏好
+                        "metadata": {"genres": genres, "styles": styles},
                     },
                     genre_resonance={
                         "accept": [{"text": g, "weight": 0.8} for g in genres],
