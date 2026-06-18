@@ -30,8 +30,26 @@ const genres = ref<string[]>([])
 const styles = ref<string[]>([])
 const tone = ref<string[]>([])
 
-// Step 2 数据
+// Step 2 数据 — 视觉色调偏好（v0.6 重构：不再复用 STYLE_OPTIONS）
 const palette = ref<string[]>([])
+
+// 视觉色调选项（v0.6 新增：真正的"调色板"，影响后续生成图片/UI 主题）
+const PALETTE_OPTIONS = [
+  // 暗紫调（项目主色）
+  '樱色夜空', '暗夜星辰', '紫水晶',
+  // 明亮调
+  '晨光金黄', '雪国白', '春樱粉',
+  // 古风调
+  '墨青山水', '古风竹青', '丹青水墨',
+  // 赛博/工业调
+  '赛博朋克', '蒸汽黄铜', '霓虹都市',
+  // 自然调
+  '暮蓝海', '苍绿森林', '秋叶橙',
+  // 暖色调
+  '赤红朱砂', '焦橙火光', '落日金',
+  // 柔和调
+  '迷幻粉紫', '极光绿', '银河蓝',
+]
 
 // 题材（欧尼酱指定 + 补充）
 const GENRE_OPTIONS = [
@@ -172,16 +190,16 @@ async function goNext() {
 
     <!-- Step 2 -->
     <section v-else-if="currentStep === '2'" class="step fade-in">
-      <h1>📌 Step 2 · 调色板</h1>
-      <p>装饰性偏好（可跳过）</p>
+      <h1>📌 Step 2 · 视觉色调</h1>
+      <p>选几个喜欢的色调（影响后续图片生成 + UI 主题）</p>
       <div class="tag-grid">
         <button
-          v-for="s in STYLE_OPTIONS"
-          :key="s"
+          v-for="p in PALETTE_OPTIONS"
+          :key="p"
           class="tag"
-          :class="{ selected: palette.includes(s) }"
-          @click="toggle(palette, s)"
-        >{{ s }}</button>
+          :class="{ selected: palette.includes(p) }"
+          @click="toggle(palette, p)"
+        >{{ p }}</button>
       </div>
     </section>
 

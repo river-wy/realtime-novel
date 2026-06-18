@@ -321,7 +321,11 @@ class AsyncOnboardingFlow:
             ).fetchone()
             state_data = json.loads(existing["state_json"]) if existing else {}
             state_data["current_step"] = step
-            state_data["payload"] = payload
+            # 合并 payload（不覆盖前 step 的字段）
+            # 例: step 1 存 {genres, styles, tone}, step 2 存 {palette}
+            # 合并后: {genres, styles, tone, palette}
+            existing_payload = state_data.get("payload", {}) or {}
+            state_data["payload"] = {**existing_payload, **payload}
             state_data["updated_at"] = now.isoformat()
             if existing:
                 conn.execute(
