@@ -33,6 +33,18 @@ const tone = ref<string[]>([])
 // Step 2 数据 — 视觉色调偏好（v0.6 重构：不再复用 STYLE_OPTIONS）
 const palette = ref<string[]>([])
 
+// Step 3 数据 — 引导式自由文本（v0.5 实施）
+const coreRelationship = ref('')
+const emotionalAnchor = ref('')
+const taboos = ref('')
+const endingPreference = ref('')
+
+// Step 4 数据 — 大纲确认（v0.5 实施）
+const mainConflict = ref('')
+const subPlots = ref('')  // 一句话 × N
+const charactersDesc = ref('')  // JSON-ish 列表
+const seedsDesc = ref('')  // 一句话 × N
+
 // 视觉色调选项（v0.6 新增：真正的"调色板"，影响后续生成图片/UI 主题）
 const PALETTE_OPTIONS = [
   // 暗紫调（项目主色）
@@ -121,16 +133,31 @@ async function goNext() {
       await onboardingStep(projectId.value, '2', { palette: palette.value })
       currentStep.value = '3'
     } else if (currentStep.value === '3') {
-      await onboardingStep(projectId.value, '3', { /* payload */ })
+      if (!coreRelationship.value.trim() || !emotionalAnchor.value.trim()) {
+        error.value = '核心关系、情感锚点必填（其他可选）'
+        return
+      }
+      await onboardingStep(projectId.value, '3', {
+        core_relationship: coreRelationship.value,
+        emotional_anchor: emotionalAnchor.value,
+        taboos: taboos.value,
+        ending_preference: endingPreference.value,
+      })
       currentStep.value = '4'
     } else if (currentStep.value === '4') {
-      await onboardingStep(projectId.value, '4', { /* payload */ })
+      await onboardingStep(projectId.value, '4', {
+        main_conflict: mainConflict.value,
+        sub_plots: subPlots.value,
+        characters: charactersDesc.value,
+        seeds: seedsDesc.value,
+      })
       currentStep.value = '5'
     } else if (currentStep.value === '5') {
-      // Step 5: 后台准备 + 生成第 1 章
+      // Step 5: 后端统一触发 7件 + 第1章生成（v0.6 重构）
+      // 前端不再调 chaptersStore.generate，避免职责分散
+      // 后端 30-60s 生成，loading.value 保持 true，spinner 一直转
       await onboardingStep(projectId.value, '5', {})
-      await chaptersStore.generate(projectId.value)
-      // 完成 → 跳转阅读
+      // 后端生成完成 → 跳 reader
       await projectsStore.loadList()
       router.push({ name: 'reader', params: { projectId: projectId.value, chapterNum: 1 } })
     }
@@ -203,11 +230,88 @@ async function goNext() {
       </div>
     </section>
 
-    <!-- Step 3/4 占位 -->
-    <section v-else-if="currentStep === '3' || currentStep === '4'" class="step fade-in">
-      <h1>📌 Step {{ currentStep }}</h1>
-      <p>引导式自由文本（v0.6 详细设计）</p>
-      <p class="hint">本阶段引导内容待 v0.5.1 补充</p>
+    <!-- Step 3 引导式自由文本 -->
+    <section v-else-if="currentStep === '3'" class="step fade-in">
+      <h1>📌 Step 3 · 核心设定</h1>
+      <p class="hint">这 4 个字段是「软必填」，至少填前 2 个</p>
+
+      <div class="form-group">
+        <label>核心关系 <span class="required">*</span></label>
+        <textarea
+          v-model="coreRelationship"
+          placeholder="例：主角与失联 10 年的妹妹在数据黑市重逢"
+          rows="2"
+        ></textarea>
+      </div>
+
+      <div class="form-group">
+        <label>情感锚点 <span class="required">*</span></label>
+        <textarea
+          v-model="emotionalAnchor"
+          placeholder="例：孤独、寻找、不信任 AI"
+          rows="2"
+        ></textarea>
+      </div>
+
+      <div class="form-group">
+        <label>禁区 / 不写什么</label>
+        <textarea
+          v-model="taboos"
+          placeholder="例：不写 NPC 死亡，不写硬科幻设定（可空）"
+          rows="2"
+        ></textarea>
+      </div>
+
+      <div class="form-group">
+        <label>结局偏好</label>
+        <textarea
+          v-model="endingPreference"
+          placeholder="例：开放式 / HE / BE / 留白（可空）"
+          rows="2"
+        ></textarea>
+      </div>
+    </section>
+
+    <!-- Step 4 大纲确认 -->
+    <section v-else-if="currentStep === '4'" class="step fade-in">
+      <h1>📌 Step 4 · 大纲初稿</h1>
+      <p class="hint">这 4 个字段填你想写的主线/支线/人物/种子（可空，会用 LLM 默认值）</p>
+
+      <div class="form-group">
+        <label>主线核心矛盾</label>
+        <textarea
+          v-model="mainConflict"
+          placeholder="例：主角发现父亲失踪与 AI 觉醒战争有关，潜入地下黑市寻找真相"
+          rows="2"
+        ></textarea>
+      </div>
+
+      <div class="form-group">
+        <label>支线（每行一个）</label>
+        <textarea
+          v-model="subPlots"
+          placeholder="例：&#10;妹妹的神经记录被盗&#10;主同主角与老婆的感情修复"
+          rows="3"
+        ></textarea>
+      </div>
+
+      <div class="form-group">
+        <label>人物（每行一个，名字-身份-背景）</label>
+        <textarea
+          v-model="charactersDesc"
+          placeholder="例：&#10;林远-主角-28 岁杭州程序员&#10;林雪-妹妹-高中语文老师"
+          rows="3"
+        ></textarea>
+      </div>
+
+      <div class="form-group">
+        <label>种子（每行一个）</label>
+        <textarea
+          v-model="seedsDesc"
+          placeholder="例：&#10;1987 年的收音机&#10;永远没响的家里的电话"
+          rows="3"
+        ></textarea>
+      </div>
     </section>
 
     <!-- Step 5 后台准备 + 生成章节 -->
@@ -218,14 +322,30 @@ async function goNext() {
         <div class="spinner"></div>
         <span>30-60s</span>
       </div>
-      <p v-else-if="!error" class="hint">点击下一步开始生成</p>
+      <p v-else class="hint">点击下方按钮开始生成</p>
     </section>
 
     <div v-if="error" class="error">{{ error }}</div>
 
-    <div class="actions" v-if="!['5'].includes(currentStep)">
-      <button class="btn btn-primary" @click="goNext" :disabled="loading">
+    <div class="actions">
+      <!-- Step 1/2/3/4 显示'下一步' -->
+      <button
+        v-if="!['5'].includes(currentStep)"
+        class="btn btn-primary"
+        @click="goNext"
+        :disabled="loading"
+      >
         {{ loading ? '处理中...' : '下一步 →' }}
+      </button>
+      <!-- Step 5 显示'开始生成' (大按钮 + spinner) -->
+      <button
+        v-else
+        class="btn btn-primary btn-large"
+        @click="goNext"
+        :disabled="loading"
+      >
+        <span v-if="loading" class="spinner-inline"></span>
+        {{ loading ? 'AI 正在生成 7 件 + 第 1 章（30-60s）...' : '🚀 开始生成' }}
       </button>
     </div>
   </div>
@@ -284,6 +404,50 @@ async function goNext() {
   flex-wrap: wrap;
   gap: var(--space-2);
   margin-bottom: var(--space-4);
+}
+
+/* Step 3/4 form-group 样式 */
+.form-group {
+  margin-bottom: var(--space-4);
+}
+
+.form-group label {
+  display: block;
+  font-size: var(--text-sm);
+  color: var(--color-text);
+  margin-bottom: var(--space-2);
+  font-weight: 500;
+}
+
+.form-group .required {
+  color: var(--color-error);
+  margin-left: 2px;
+}
+
+.form-group textarea {
+  width: 100%;
+  resize: vertical;
+  font-family: var(--font-body);
+  font-size: var(--text-sm);
+  min-height: 60px;
+  padding: var(--space-3) var(--space-4);
+}
+
+.btn-large {
+  font-size: var(--text-lg);
+  padding: var(--space-4) var(--space-7);
+}
+
+.spinner-inline {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--color-night-3);
+  border-top-color: var(--color-accent-1);
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+  vertical-align: middle;
+  margin-right: var(--space-2);
 }
 
 .tag {

@@ -340,55 +340,184 @@ class AsyncOnboardingFlow:
                     (project_id, _step_to_num(step), now, now, json.dumps(state_data, ensure_ascii=False)),
                 )
 
-        # v0.5: Step 4 触发 7 件基座生成（不生成章节，章节由 Step 5 / POST /chapters 触发）
+        # v0.6: Step 4 触发 7 件基座生成（用 Step 1-4 payload 拼 7 件）
         if step == "4":
             try:
-                from realtime_novel.services.onboarding import OnboardingFlow, OnboardingState
                 from realtime_novel.persistence import ProjectRepository
-
-                # 拿全 step 1-3 的 state 用于生成 7 件
+                # 拿全 step 1-4 的 merged payload
                 with get_store().connection() as conn:
                     row = conn.execute(
                         "SELECT state_json FROM onboarding_state WHERE project_id = ?",
                         (project_id,),
                     ).fetchone()
-                    if row:
-                        full_state = json.loads(row["state_json"])
+                if not row:
+                    raise ValueError("onboarding state not found")
+                full_state = json.loads(row["state_json"])
+                p = full_state.get("payload", {})
 
-                # 构造 OnboardingState
-                ob_state = OnboardingState(
-                    project_id=project_id,
-                    current_step=4,
-                    genres=full_state.get("payload", {}).get("genres") or [],
-                    styles=full_state.get("payload", {}).get("styles") or [],
-                    tone=full_state.get("payload", {}).get("tone") or "",
-                    palette=full_state.get("payload", {}).get("palette") or [],
-                    # 注：v0.5 简化版只取 1 payload；v0.5.1 完整版要累计 1+2+3
-                )
-                # v0.5: 直接用 ProjectRepository.save_7_artifacts 替代 v0.3 复杂 _generate_7_artifacts
-                # Step 4 在 v0.5 实际是手动生成 7 件（简化版）
-                # TODO v0.5.1: 改调 LLM 真实生成
+                genres = p.get("genres", []) or []
+                styles = p.get("styles", []) or []
+                tone = p.get("tone", "冷叙述")
+                palette = p.get("palette", []) or []
+                main_conflict = p.get("main_conflict", "") or ""
+                sub_plots_raw = p.get("sub_plots", "") or ""
+                characters_raw = p.get("characters", "") or ""
+                seeds_raw = p.get("seeds", "") or ""
+
+                # 拼 7 件（结构化数据，来自 Step 1-4 用户输入）
+                # v0.6 简化版：不调 LLM 生成 7 件（耗时 1-2 分钟），用 Step 1-4 payload 拼 dict
+                # v0.7: 调 LLM 根据 payload 生成 7 件（更丰富）
+
+                # world_tree: era 推断（科幻 → 未来，古代 → 古代，等等）
+                era_map = {
+                    "都市": "现代", "校园": "现代", "职场": "现代", "家庭": "现代", "科幻": "未来", "赛博朋克": "未来",
+                    "古风": "古代", "武侠": "古代", "仙侠": "古代", "修仙": "古代", "玄幻": "架空", "奇幻": "架空",
+                    "末世": "未来", "重生": "现代", "穿越": "架空", "系统": "架空", "无限流": "架空", "无敌流": "架空",
+                    "游戏": "现代", "历史": "古代", "军旅": "现代", "电竞": "现代", "克苏鲁": "现代",
+                    "蒸汽朋克": "架空", "轻小说": "现代", "二次元": "现代", "异能": "现代", "灵异": "现代", "商战": "现代",
+                }
+                era = "现代"
+                for g in genres:
+                    if g in era_map:
+                        era = era_map[g]
+                        break
+
+                # 主题
+                theme = genres[0] if genres else "都市"
+
+                # 主线：拼 main_conflict + genres + theme
+                main_arc = main_conflict or f"{theme}题材下主角的成长与命运"
+
+                # 核心规则：从 taboos + core_relationship 推断
+                core_rules = [
+                    {"id": "R1", "statement": f"主线：{main_arc}", "enforcement": "hard", "applies_to": "all"},
+                    {"id": "R2", "statement": f"核心关系：{p.get('core_relationship', '') or '主角与各角色的羁绊'}", "enforcement": "soft", "applies_to": "all"},
+                ]
+                if p.get("taboos"):
+                    core_rules.append({"id": "R3", "statement": f"禁区: {p.get('taboos')}", "enforcement": "hard", "applies_to": "all"})
+
+                # 支线：按换行拆
+                sub_plot_threads = []
+                for line in sub_plots_raw.split("\n"):
+                    line = line.strip()
+                    if line:
+                        sub_plot_threads.append({
+                            "id": f"sub-{len(sub_plot_threads)+1:02d}",
+                            "title": line[:30],
+                            "description": line,
+                            "status": "pending",
+                            "priority": "side",
+                        })
+
+                # 人物：按换行拆 "名字-身份-背景"
+                # 身份映射：中文身份 → DB enum
+                role_map = {
+                    "主角": "protagonist", "主人公": "protagonist", "女主": "protagonist", "男主": "protagonist",
+                    "配角": "supporting", "妹妹": "supporting", "弟弟": "supporting", "姐姐": "supporting", "哥哥": "supporting",
+                    "反派": "antagonist", "邪派": "antagonist", "恶人": "antagonist", "魔王": "antagonist",
+                    "次主角": "deuteragonist", "二主角": "deuteragonist", "盟友": "deuteragonist", "伙伴": "deuteragonist",
+                    "路人": "minor", "配角1": "minor", "背景": "minor",
+                }
+                characters = []
+                for line in characters_raw.split("\n"):
+                    line = line.strip()
+                    if not line:
+                        continue
+                    parts = line.split("-")
+                    raw_role = parts[1].strip() if len(parts) > 1 else "supporting"
+                    mapped_role = role_map.get(raw_role, "supporting")  # 未知身份默认 supporting
+                    characters.append({
+                        "id": f"char-{len(characters)+1:03d}",
+                        "name": parts[0].strip() if parts else f"角色{len(characters)+1}",
+                        "role": mapped_role,
+                        "background": parts[2].strip() if len(parts) > 2 else line,
+                        "traits": [],
+                    })
+
+                # 种子：按换行拆
+                seeds = []
+                for i, line in enumerate(seeds_raw.split("\n")):
+                    line = line.strip()
+                    if line:
+                        seeds.append({
+                            "id": i + 1,
+                            "content": line,
+                            "importance": {"primary": "小巧思"},
+                            "size": "中线",
+                            "orientation": "氛围营造",
+                            "weight": 0.5,
+                            "status": "planted",
+                        })
+
+                # 写 7 件
                 repo = ProjectRepository()
                 repo.save_7_artifacts(
                     project_id=project_id,
-                    world_tree={"base": {"timeline": {"era": "现代"}, "geography": {"primary": "未设置"}}, "branches": [], "metadata": {}},
-                    style_charter={"prose_style": {}, "tone": {"primary": ob_state.tone or "冷叙述"}, "density": {}, "taboos": [], "limits": {}, "metadata": {}},
-                    genre_resonance={"accept": [], "reject": [], "anchors": [], "metadata": {}},
-                    main_plot={"current_beat": 0, "beats": [], "metadata": {}},
-                    sub_plot={"threads": [], "metadata": {}},
-                    character_card={"characters": [], "relationships": []},
-                    seed_table={"seeds": [], "metadata": {}},
+                    world_tree={
+                        "base": {
+                            "timeline": {"era": era, "anchor_event": main_arc[:50]},
+                            "geography": {"primary": f"{theme}题材下的故事舞台"},
+                            "core_rules": core_rules,
+                        },
+                        "branches": [],
+                        "metadata": {},
+                    },
+                    style_charter={
+                        "prose_style": {"primary": "散文式" if any(s in ["治愈", "唯美", "甜文"] for s in styles) else "紧凑"},
+                        "tone": {"primary": tone or "冷叙述"},
+                        "density": {"specificity": 0.7, "subjectivity": 0.6},
+                        "taboos": [{"id": "T1", "text": p.get("taboos", "")}] if p.get("taboos") else [],
+                        "notes": styles,
+                        "limits": {"max_chapter_words": 3000},
+                        "metadata": {"genres": genres, "styles": styles, "palette": palette},
+                    },
+                    genre_resonance={
+                        "accept": [{"text": g, "weight": 0.8} for g in genres],
+                        "reject": [],
+                        "anchors": [{"phrase": s, "sentiment": "positive"} for s in styles[:3]],
+                        "metadata": {},
+                    },
+                    main_plot={
+                        "current_beat": 0,
+                        "arc_phrase": main_arc,
+                        "beats": [
+                            {"id": "beat-1", "sequence": 1, "title": "开场", "description": main_arc[:50], "status": "active", "chapter_range": {"start": 1, "end": 5}},
+                            {"id": "beat-2", "sequence": 2, "title": "冲突", "description": "主角面对挑战", "status": "pending", "chapter_range": {"start": 6, "end": 15}},
+                            {"id": "beat-3", "sequence": 3, "title": "高潮", "description": "高潮与转折", "status": "pending", "chapter_range": {"start": 16, "end": 25}},
+                        ],
+                        "metadata": {"ending_preference": p.get("ending_preference", "")},
+                    },
+                    sub_plot={"threads": sub_plot_threads, "metadata": {}},
+                    character_card={"characters": characters, "relationships": []},
+                    seed_table={"seeds": seeds, "metadata": {}},
                 )
             except Exception as e:
-                # 不让 onboarding 崩，返回错误信息
                 import traceback
                 print(f"Onboarding Step 4 失败: {e}\n{traceback.format_exc()}")
+                # v0.6: 不再吞异常, 让 action_routes 统一返 HTTPException(500)
+                # 前端 catch 收到 e.message (含错误详情) 能正确显示
+                raise RuntimeError(f"7件生成失败: {str(e)}")
+
+        # v0.6: Step 5 触发生成第 1 章（调 LLM 真实生成 30-60s）
+        if step == "5":
+            try:
+                from realtime_novel.agent.state_graph_stub import generate_chapter_via_state_graph
+                # 调 LLM 生成第 1 章（state_graph_stub 会从 DB 读 7 件）
+                chapter_result = await generate_chapter_via_state_graph(
+                    project_id=project_id,
+                    intervention=None,  # 第一章无需干预
+                )
                 return {
                     "step": step,
-                    "next_step": None,  # 中断
+                    "next_step": None,
                     "payload": payload,
-                    "error": f"7件生成失败: {str(e)}",
+                    "chapter": chapter_result,
                 }
+            except Exception as e:
+                import traceback
+                print(f"Onboarding Step 5 失败: {e}\n{traceback.format_exc()}")
+                # v0.6: 不再吞异常, 让 action_routes 统一返 HTTPException(500)
+                raise RuntimeError(f"第1章生成失败: {str(e)}")
         return {
             "step": step,
             "next_step": next_step_map.get(step),
