@@ -31,7 +31,8 @@ class ProjectListResponse(BaseModel):
 
 class CreateProjectRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=100)
-    palette: str = Field(..., min_length=1)
+    # v0.7: palette 允许空字符串（Onboarding Step 2 才会选, Step 1 创建时为空）
+    palette: str = Field(default="", min_length=0, max_length=500)
     initial_prompt: Optional[str] = None
 
 

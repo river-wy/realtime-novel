@@ -16,7 +16,8 @@ class LoadProjectInput(BaseModel):
 
 class CreateProjectInput(BaseModel):
     name: str = Field(..., min_length=1, max_length=100)
-    palette: str = Field(..., min_length=1)
+    # v0.7: palette 允许空（Onboarding Step 2 才会选）
+    palette: str = Field(default="", min_length=0, max_length=500)
     initial_prompt: Optional[str] = None
 
 
