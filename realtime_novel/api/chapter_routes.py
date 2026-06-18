@@ -128,6 +128,7 @@ async def generate_chapter(
             "actor_character": req.actor_character,
         },
         result=result_dict,
+        project_id=project_id,
     )
     return GenerateChapterResponse(
         chapter_num=output.num,

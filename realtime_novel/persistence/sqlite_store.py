@@ -41,7 +41,18 @@ class SQLiteStore:
             for migration_file in sorted(migrations_dir.glob("v*.sql")):
                 version = migration_file.stem  # v001_init
                 if version not in applied:
-                    conn.executescript(migration_file.read_text())
+                    try:
+                        conn.executescript(migration_file.read_text())
+                    except Exception as e:
+                        # 幂等保护：ALTER TABLE 重复列错误不致命
+                        # 例如 v003 ALTER TABLE conversations ADD COLUMN status
+                        # 重复跑时 会报 "duplicate column name: status"
+                        # 但 migrations 表已记录为 applied，正常
+                        err_msg = str(e).lower()
+                        if "duplicate column" in err_msg or "already exists" in err_msg:
+                            pass  # 幂等
+                        else:
+                            raise
                     conn.execute(
                         "INSERT INTO migrations (version, applied_at) VALUES (?, ?)",
                         (version, datetime.now()),

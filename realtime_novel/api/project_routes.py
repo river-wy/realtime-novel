@@ -86,6 +86,7 @@ async def create_project(req: CreateProjectRequest):
         tool_name="create_project",
         args={"name": req.name, "palette": req.palette, "initial_prompt": req.initial_prompt},
         result=result,
+        project_id=result.get("id"),
     )
     return CreateProjectResponse(
         id=result.get("id", ""),
@@ -130,6 +131,7 @@ async def delete_project(
         tool_name="delete_project",
         args={"project_id": project_id, "confirm": confirm},
         result=result,
+        project_id=project_id,
     )
     # 统计 chapter 数
     from pathlib import Path

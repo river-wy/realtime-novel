@@ -28,6 +28,17 @@ class ChapterState(str, Enum):
     FAILED = "failed"
 
 
+class ConversationStatus(str, Enum):
+    """v0.5 新增：对话状态
+    - active: 当前进行中
+    - invalidated: 被新建对话取代（保留历史）
+    - archived: 用户主动归档
+    """
+    ACTIVE = "active"
+    INVALIDATED = "invalidated"
+    ARCHIVED = "archived"
+
+
 class CharacterRole(str, Enum):
     PROTAGONIST = "protagonist"
     DEUTERAGONIST = "deuteragonist"
@@ -59,16 +70,23 @@ class SubplotPriority(str, Enum):
 # ============ v001 Tables ============
 
 class Conversation(BaseModel):
+    """v0.5 重构：project_id 移除（不绑 project），加 status/invalidated_at/reason/summary/message_count"""
     id: str
-    project_id: Optional[str] = None
     user_id: str
     created_at: datetime
     last_active_at: datetime
+    status: ConversationStatus = ConversationStatus.ACTIVE
+    invalidated_at: Optional[datetime] = None
+    reason: Optional[str] = None
+    summary: Optional[str] = None  # v0.5 新增：对话压缩 summary
+    message_count: int = 0  # v0.5 新增：消息计数（用于触发 summary 压缩）
 
 
 class Message(BaseModel):
+    """v0.5 重构：加 project_id 字段（每条消息绑 project）"""
     id: str
     conversation_id: str
+    project_id: Optional[str] = None  # v0.5 新增
     role: MessageRole
     content: Optional[str] = None
     tool_calls: Optional[dict[str, Any]] = None

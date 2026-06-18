@@ -52,6 +52,7 @@ async def onboarding(project_id: str, req: OnboardingRequest):
         tool_name="onboarding_step",
         args={"step": req.step, "payload": req.payload},
         result=result if isinstance(result, dict) else {"raw": str(result)},
+        project_id=project_id,
     )
     return OnboardingResponse(
         step=req.step,
@@ -97,6 +98,7 @@ async def submit_intervention(project_id: str, req: InterventionRequest):
             "actor_character": req.actor_character,
         },
         result=result if isinstance(result, dict) else {"raw": str(result)},
+        project_id=project_id,
     )
     return InterventionResponse(
         project_id=project_id,
@@ -143,6 +145,7 @@ async def rollback_project(
         tool_name="rollback_to_node",
         args={"project_id": project_id, "to_chapter": to_chapter, "confirm": confirm},
         result=result_dict,
+        project_id=project_id,
     )
     return RollbackResponse(
         project_id=project_id,
@@ -185,6 +188,7 @@ async def generate_image(project_id: str, req: ImageRequest):
         tool_name="generate_image",
         args={"project_id": project_id, "style_hint": req.style_hint},
         result=result_dict,
+        project_id=project_id,
     )
     return ImageResponse(
         project_id=output.project_id,
@@ -231,6 +235,7 @@ async def update_base(project_id: str, req: UpdateBaseRequest):
         tool_name="update_base",
         args={"project_id": project_id, "key": req.key, "new_value_preview": req.new_value[:100]},
         result=result_dict,
+        project_id=project_id,
     )
     return UpdateBaseResponse(
         project_id=output.project_id,
