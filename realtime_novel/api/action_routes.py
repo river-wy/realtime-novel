@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
-from typing import Optional, Literal
+from typing import Optional, Literal, List, Union
 from datetime import datetime
 
 from realtime_novel.services.async_wrappers import (
@@ -25,6 +25,74 @@ _cs_repo = ChapterStatusRepository()
 
 # ============ /onboarding ============
 
+# ============ m-v0.5-onboarding s1.5: payload Pydantic schema 校验 ============
+
+class OnboardingPayloadStep1(BaseModel):
+    """Step 1 必选标签 (题材/风格/基调)"""
+    genres: List[str] = Field(min_length=1, description="题材, 至少 1 个")
+    styles: List[str] = Field(min_length=1, description="风格, 至少 1 个")
+    tone: List[str] = Field(min_length=1, description="基调, 至少 1 个")
+
+
+class OnboardingPayloadStep2(BaseModel):
+    """Step 2 UI 主题色 (调色板, 渲染阅读页用, **不**影响世界树)"""
+    palette: List[str] = Field(default_factory=list, description="主题色列表, 可空")
+
+
+class OnboardingPayloadStep3(BaseModel):
+    """Step 3 核心设定 (Agent 引导式填入)"""
+    core_relationship: str = Field(default="", description="核心关系")
+    emotional_anchor: str = Field(default="", description="情感锚点")
+    taboos: str = Field(default="", description="禁区")
+    ending_preference: str = Field(default="", description="结局偏好")
+
+
+class OnboardingPayloadStep4(BaseModel):
+    """Step 4 大纲初稿 (Agent 引导式填入)"""
+    main_conflict: str = Field(default="", description="主线核心矛盾")
+    sub_plots: str = Field(default="", description="支线, 每行 1 个")
+    characters: str = Field(default="", description="人物, 每行 '名字-身份-背景'")
+    seeds: str = Field(default="", description="种子, 每行 1 个")
+
+
+class OnboardingPayloadStep5(BaseModel):
+    """Step 5 生成第 1 章 (无可选 payload)"""
+    pass
+
+
+# Discriminated union (按 step 区分)
+OnboardingPayload = Union[
+    OnboardingPayloadStep1,
+    OnboardingPayloadStep2,
+    OnboardingPayloadStep3,
+    OnboardingPayloadStep4,
+    OnboardingPayloadStep5,
+]
+
+
+def _validate_onboarding_payload(step: str, payload: dict) -> dict:
+    """按 step 校验 payload (Pydantic 强类型)
+
+    Raises:
+        HTTPException 422: 字段缺失/类型错
+    """
+    payload_map = {
+        "1": OnboardingPayloadStep1,
+        "2": OnboardingPayloadStep2,
+        "3": OnboardingPayloadStep3,
+        "4": OnboardingPayloadStep4,
+        "5": OnboardingPayloadStep5,
+    }
+    schema_cls = payload_map.get(step)
+    if not schema_cls:
+        raise HTTPException(400, f"Unknown step: {step}")
+    try:
+        validated = schema_cls.model_validate(payload)
+        return validated.model_dump()
+    except Exception as e:
+        raise HTTPException(422, f"Step {step} payload 校验失败: {e}")
+
+
 class OnboardingRequest(BaseModel):
     step: Literal["1", "2", "3", "4", "5"]
     payload: dict = Field(default_factory=dict)
@@ -38,9 +106,15 @@ class OnboardingResponse(BaseModel):
 
 @router.post("/{project_id}/onboarding", response_model=OnboardingResponse)
 async def onboarding(project_id: str, req: OnboardingRequest):
-    """5 步启动链路（v0.4.1 落库）"""
+    """5 步启动链路（v0.4.1 落库）
+
+    m-v0.5-onboarding s1.5: payload Pydantic schema 校验
+    """
+    # s1.5: 强类型校验 (按 step 区分)
+    validated_payload = _validate_onboarding_payload(req.step, req.payload)
+
     try:
-        result = await _onboarding.step(project_id, req.step, req.payload)
+        result = await _onboarding.step(project_id, req.step, validated_payload)
     except FileNotFoundError as e:
         raise HTTPException(404, str(e))
     except Exception as e:
