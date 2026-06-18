@@ -21,11 +21,13 @@ class DeepSeekProvider(LLMProvider):
     provider_name = "deepseek-v4-pro-tencent"
     supported_roles = ["text"]
 
-    def __init__(self, app_id: str | None = None, base_url: str = "https://aigc.sankuai.com/v1/openai/native"):
-        self.app_id = app_id or os.environ.get("FRIDAY_APP_ID", "")
-        if not self.app_id:
-            raise ValueError("FRIDAY_APP_ID environment variable not set")
-        self.client = AsyncOpenAI(base_url=base_url, api_key=self.app_id)
+    def __init__(self, api_key: str | None = None, base_url: str = "https://aigc.sankuai.com/v1/openai/native"):
+        # friday 平台只用一个 Bearer token (app_id 即 api_key)
+        # 环境变量统一命名 FRIDAY_API_KEY (与 config.yaml app_id 字段语义对齐)
+        self.api_key = api_key or os.environ.get("FRIDAY_API_KEY", "")
+        if not self.api_key:
+            raise ValueError("FRIDAY_API_KEY environment variable not set")
+        self.client = AsyncOpenAI(base_url=base_url, api_key=self.api_key)
         self.model = "deepseek-v4-pro-tencent"
 
     async def complete(self, request: LLMRequest) -> LLMResponse:

@@ -17,9 +17,9 @@ BACKEND_PORT=7778
 HOST=127.0.0.1
 
 # FRIDAY 代理凭证（必需：v0.5+ 真实 LLM 链路需要）
+# friday 平台只用一个 Bearer token (config.yaml 的 app_id 字段即 api_key)
 # 启动前必须设环境变量：
-#   export FRIDAY_APP_ID=21899390080843030554
-#   export FRIDAY_APP_KEY=***
+#   export FRIDAY_API_KEY=21899390080843030554
 # 脚本会检查，没设会报错退出
 
 PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -32,16 +32,11 @@ mkdir -p "$LOG_DIR" "$PID_DIR"
 
 # ============ 前置检查 ============
 check_env() {
-    if [ -z "$FRIDAY_APP_ID" ]; then
-        echo "❌ FRIDAY_APP_ID 环境变量未设置"
+    if [ -z "$FRIDAY_API_KEY" ]; then
+        echo "❌ FRIDAY_API_KEY 环境变量未设置"
         echo "   启动 v0.5+ 真实 LLM 链路需要 friday 代理凭证"
         echo "   设置："
-        echo "     export FRIDAY_APP_ID=21899390080843030554"
-        echo "     export FRIDAY_APP_KEY=***"
-        exit 1
-    fi
-    if [ -z "$FRIDAY_APP_KEY" ]; then
-        echo "❌ FRIDAY_APP_KEY 环境变量未设置"
+        echo "     export FRIDAY_API_KEY=21899390080843030554"
         exit 1
     fi
 }

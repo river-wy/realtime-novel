@@ -26,7 +26,7 @@ from realtime_novel.agent.state_graph import reset_graph
 # ============ pytest 配置 ============
 
 # 在测试前设置环境变量（避免 import 顺序问题）
-os.environ.setdefault("FRIDAY_APP_ID", "test_app_id_for_unit_tests")
+os.environ.setdefault("FRIDAY_API_KEY", "test_app_id_for_unit_tests")
 
 
 # ============ temp_db fixture ============

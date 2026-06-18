@@ -30,12 +30,14 @@ class GeminiProvider(LLMProvider):
     POLL_INTERVAL = 3       # 轮询间隔（秒）
     POLL_TIMEOUT = 120      # 轮询超时（秒）
 
-    def __init__(self, app_id: str | None = None):
-        self.app_id = app_id or os.environ.get("FRIDAY_APP_ID", "")
-        if not self.app_id:
-            raise ValueError("FRIDAY_APP_ID environment variable not set")
+    def __init__(self, api_key: str | None = None):
+        # friday 平台只用一个 Bearer token (app_id 即 api_key)
+        # 环境变量统一命名 FRIDAY_API_KEY (与 config.yaml app_id 字段语义对齐)
+        self.api_key = api_key or os.environ.get("FRIDAY_API_KEY", "")
+        if not self.api_key:
+            raise ValueError("FRIDAY_API_KEY environment variable not set")
         self.headers = {
-            "Authorization": f"Bearer {self.app_id}",
+            "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
         }
 

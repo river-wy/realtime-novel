@@ -1,188 +1,254 @@
+<!--
+  Onboarding 5 步引导（v0.5 + m-v0.5-onboarding 拍板修复版）
+
+  拍板流程:
+    Step 1: 必选标签 (题材/风格/基调) → HTTP POST /onboarding step=1
+    Step 2: 视觉色调 (UI 主题, 不影响世界树) → HTTP POST /onboarding step=2
+    Step 3: 核心设定 (Agent 引导式 WS) → WS /api/chat onboarding_request_proposal + confirm
+    Step 4: 大纲初稿 (Agent 引导式 WS) → WS /api/chat onboarding_request_proposal + confirm
+    Step 5: 生成第 1 章 (大按钮 + spinner) → HTTP POST /onboarding step=5
+
+  v0.6 拍板修复:
+    - palette 移出 7 件基座 (只存 projects.palette)
+    - Step 3-4 不再是用户填 4+4 textarea, 改为 WS 聊天界面
+    - LLM 引导式提议 + 用户确认 + 写 7 件
+-->
 <script setup lang="ts">
-/**
- * Onboarding 5 步引导（v0.5 接入后端）
- *
- * Step 1: 必选标签 (题材/风格/基调)
- * Step 2: 调色板 (装饰性偏好)
- * Step 2: 引导式自由文本
- * Step 3: 大纲确认
- * Step 4: 后台准备（v0.5 端到端：调 LLM 真实生成 7 件）
- * Step 5: 第 1 章生成 + 跳转阅读
- */
-import { ref, computed } from 'vue'
+import { ref, computed, watch, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
-import { onboardingStep, type OnboardingStep } from '@/api/actions'
+import { onboardingStep } from '@/api/actions'
 import { createProject } from '@/api/projects'
 import { useProjectsStore } from '@/stores/projects'
-import { useChaptersStore } from '@/stores/chapters'
+import { useOnboardingChat } from '@/composables/useOnboardingChat'
 
 const router = useRouter()
 const projectsStore = useProjectsStore()
-const chaptersStore = useChaptersStore()
 
-const projectId = ref('')
-const currentStep = ref<OnboardingStep>('1')
+const projectId = ref<string>('')
+const currentStep = ref<1 | 2 | 3 | 4 | 5>(1)
 const loading = ref(false)
 const error = ref<string | null>(null)
 
-// Step 1 数据
+// ============ Step 1 数据 ============
 const genres = ref<string[]>([])
 const styles = ref<string[]>([])
 const tone = ref<string[]>([])
 
-// Step 2 数据 — 视觉色调偏好（v0.6 重构：不再复用 STYLE_OPTIONS）
+// ============ Step 2 数据 ============
 const palette = ref<string[]>([])
 
-// Step 3 数据 — 引导式自由文本（v0.5 实施）
-const coreRelationship = ref('')
-const emotionalAnchor = ref('')
-const taboos = ref('')
-const endingPreference = ref('')
+// ============ Step 3/4 WS 聊天 ============
+const chat = useOnboardingChat(() => projectId.value)
+const userInput = ref('')
+const chatContainer = ref<HTMLElement | null>(null)
 
-// Step 4 数据 — 大纲确认（v0.5 实施）
-const mainConflict = ref('')
-const subPlots = ref('')  // 一句话 × N
-const charactersDesc = ref('')  // JSON-ish 列表
-const seedsDesc = ref('')  // 一句话 × N
+/** Step 3 字段展示顺序 */
+const STEP3_FIELDS = [
+  { key: 'core_relationship', label: '核心关系', placeholder: '主角与失联 10 年的妹妹在数据黑市重逢' },
+  { key: 'emotional_anchor', label: '情感锚点', placeholder: '孤独、寻找、不信任 AI' },
+  { key: 'taboos', label: '禁区 / 不写什么', placeholder: '不写 NPC 死亡，不写硬科幻设定' },
+  { key: 'ending_preference', label: '结局偏好', placeholder: '开放式 / HE / BE / 留白' },
+] as const
 
-// 视觉色调选项（v0.6 新增：真正的"调色板"，影响后续生成图片/UI 主题）
+/** Step 4 字段展示顺序 */
+const STEP4_FIELDS = [
+  { key: 'main_conflict', label: '主线核心矛盾', placeholder: '主角发现父亲失踪与 AI 觉醒战争有关...' },
+  { key: 'sub_plots', label: '支线（每行 1 个）', placeholder: '妹妹的神经记录被盗\n主角与老婆的感情修复' },
+  { key: 'characters', label: '人物（每行 名字-身份-背景）', placeholder: '林远-主角-28 岁杭州程序员\n林雪-妹妹-高中语文老师' },
+  { key: 'seeds', label: '种子（每行 1 个）', placeholder: '1987 年的收音机\n永远没响的家里的电话' },
+] as const
+
+const currentFields = computed(() =>
+  currentStep.value === 3 ? STEP3_FIELDS : currentStep.value === 4 ? STEP4_FIELDS : [],
+)
+
+// ============ 选项定义 ============
+
 const PALETTE_OPTIONS = [
-  // 暗紫调（项目主色）
   '樱色夜空', '暗夜星辰', '紫水晶',
-  // 明亮调
   '晨光金黄', '雪国白', '春樱粉',
-  // 古风调
   '墨青山水', '古风竹青', '丹青水墨',
-  // 赛博/工业调
   '赛博朋克', '蒸汽黄铜', '霓虹都市',
-  // 自然调
   '暮蓝海', '苍绿森林', '秋叶橙',
-  // 暖色调
   '赤红朱砂', '焦橙火光', '落日金',
-  // 柔和调
   '迷幻粉紫', '极光绿', '银河蓝',
 ]
 
-// 题材（欧尼酱指定 + 补充）
 const GENRE_OPTIONS = [
-  // 原有
   '都市', '古风', '玄幻', '修仙', '校园', '职场', '家庭', '悬疑', '科幻',
-  // 新增
   '重生', '穿越', '末世', '系统', '无限流', '无敌流', '游戏',
   '奇幻', '武侠', '军旅', '历史', '商战', '电竞', '克苏鲁', '赛博朋克', '蒸汽朋克',
   '轻小说', '二次元', '异能', '灵异', '仙侠',
 ]
 
-// 风格（欧尼酱指定 + 补充）
 const STYLE_OPTIONS = [
-  // 原有
   '言情', '治愈', '悬疑', '战斗', '成长', '日常', '群像', '单女主', '双女主', '慢热', '快节奏', '成人向',
-  // 新增
   '脑洞', '热血', '杀伐果断', '扮猪吃虎', '高智商', '烧脑',
   '暗黑', '爽文', '轻松', '搞笑', '腹黑', '逆袭', '甜文', '虐心', '唯美', '史诗', '硬核',
   '吐槽', '毒舌', '中二', '无厘头',
 ]
 
-// 基调（欧尼酱指定 + 补充）
 const TONE_OPTIONS = [
-  // 原有
   '压抑', '温暖', '残酷', '治愈', '戏谑', '冷叙述', '史诗',
-  // 新增
   '爽文', '搞笑', '腹黑', '逆袭', '轻松',
   '黑暗', '绝望', '热血', '紧张', '浪漫', '温馨', '沉重', '辛辣', '讽刺',
 ]
 
-/**
- * 切换数组元素的选中状态
- * 收 Ref<string[]>，函数内用 .value 触发响应式更新
- * 模板里调用：@click="toggle(genres, g)" — Vue 会把 genres 自动解包成 string[] 传入，
- *  所以这里要特别处理：用 lambda 包裹显式传 ref 引用，或函数内部重新取 .value
- *
- * 当前实现：函数接受 string[]（Vue 解包后的值），splice/push 会修改原数组
- * （原数组是 ref.value 的引用，splice/push 会修改 ref.value 指向的数组 → 响应式触发 ✓）
- * — Vue 3 Proxy-based reactivity 能追踪数组方法调用 (push/pop/splice/shift 等)
- */
 function toggle(arr: string[], value: string) {
   const idx = arr.indexOf(value)
   if (idx >= 0) arr.splice(idx, 1)
   else arr.push(value)
 }
 
+// ============ 项目初始化 ============
+
 async function ensureProject() {
   if (projectId.value) return
   const name = `world-${Date.now().toString(36)}`
-  const r = await createProject(name, 'modern')
+  const r = await createProject(name, '')
   projectId.value = r.id
 }
 
-async function goNext() {
+// ============ Step 1-2 HTTP POST ============
+
+async function nextFromHttpStep() {
   loading.value = true
   error.value = null
   try {
-    if (currentStep.value === '1') {
+    if (currentStep.value === 1) {
       if (genres.value.length === 0 || styles.value.length === 0 || tone.value.length === 0) {
-        error.value = '请完整选择题材、风格、基调（至少 1 个）'
+        error.value = '请完整选择题材、风格、基调（每类至少 1 个）'
         return
       }
       await ensureProject()
       await onboardingStep(projectId.value, '1', {
-        genres: genres.value, styles: styles.value, tone: tone.value.join(',')  // 数组转字符串给 LLM prompt
+        genres: genres.value,
+        styles: styles.value,
+        tone: tone.value,
       })
-      currentStep.value = '2'
-    } else if (currentStep.value === '2') {
-      await onboardingStep(projectId.value, '2', { palette: palette.value })
-      currentStep.value = '3'
-    } else if (currentStep.value === '3') {
-      if (!coreRelationship.value.trim() || !emotionalAnchor.value.trim()) {
-        error.value = '核心关系、情感锚点必填（其他可选）'
-        return
-      }
-      await onboardingStep(projectId.value, '3', {
-        core_relationship: coreRelationship.value,
-        emotional_anchor: emotionalAnchor.value,
-        taboos: taboos.value,
-        ending_preference: endingPreference.value,
+      currentStep.value = 2
+    } else if (currentStep.value === 2) {
+      await onboardingStep(projectId.value, '2', {
+        palette: palette.value,
       })
-      currentStep.value = '4'
-    } else if (currentStep.value === '4') {
-      await onboardingStep(projectId.value, '4', {
-        main_conflict: mainConflict.value,
-        sub_plots: subPlots.value,
-        characters: charactersDesc.value,
-        seeds: seedsDesc.value,
-      })
-      currentStep.value = '5'
-    } else if (currentStep.value === '5') {
-      // Step 5: 后端统一触发 7件 + 第1章生成（v0.6 重构）
-      // 前端不再调 chaptersStore.generate，避免职责分散
-      // 后端 30-60s 生成，loading.value 保持 true，spinner 一直转
-      await onboardingStep(projectId.value, '5', {})
-      // 后端生成完成 → 跳 reader
-      await projectsStore.loadList()
-      router.push({ name: 'reader', params: { projectId: projectId.value, chapterNum: 1 } })
+      currentStep.value = 3
+      // 进入 Step 3: 打开 WS 连接
+      chat.open(3)
     }
   } catch (e: any) {
-    error.value = e.message
+    error.value = e.message || '请求失败'
   } finally {
     loading.value = false
   }
+}
+
+// ============ Step 3-4 WS 交互 ============
+
+/** "让 Agent 提议" 按钮 */
+function handleRequestProposal() {
+  chat.requestProposal(userInput.value.trim())
+  userInput.value = ''
+}
+
+/** 用户发修改意见（按 Enter） */
+function handleSendUserMessage() {
+  const text = userInput.value.trim()
+  if (!text) return
+  chat.requestProposal(text)
+  userInput.value = ''
+}
+
+/** "确认字段 → 写 7 件" 按钮 */
+async function handleConfirm() {
+  chat.confirm()
+}
+
+/** 监听 stepDone → 自动跳下一步 */
+watch(() => chat.stepDone.value, (done) => {
+  if (!done) return
+  if (currentStep.value === 3) {
+    // Step 3 done → Step 4 (重开 WS)
+    setTimeout(() => {
+      currentStep.value = 4
+      chat.open(4)
+    }, 1500)  // 给用户时间看到 "Step 3 完成" 提示
+  } else if (currentStep.value === 4) {
+    // Step 4 done → Step 5
+    setTimeout(() => {
+      currentStep.value = 5
+      chat.close()
+    }, 1500)
+  }
+})
+
+// 监听 chat messages → 滚到底
+watch(() => chat.messages.value.length, async () => {
+  await nextTick()
+  if (chatContainer.value) {
+    chatContainer.value.scrollTop = chatContainer.value.scrollHeight
+  }
+})
+
+// ============ Step 5 章节生成 ============
+
+async function generateChapter() {
+  loading.value = true
+  error.value = null
+  try {
+    await onboardingStep(projectId.value, '5', {})
+    await projectsStore.loadList()
+    router.push({ name: 'reader', params: { projectId: projectId.value, chapterNum: 1 } })
+  } catch (e: any) {
+    error.value = e.message || '章节生成失败'
+  } finally {
+    loading.value = false
+  }
+}
+
+// ============ 工具 ============
+
+function getStepTitle(step: number): string {
+  return ['', '必选标签', '视觉色调', '核心设定', '大纲初稿', '生成第 1 章'][step]
+}
+
+function getStepHint(step: number): string {
+  return [
+    '',
+    '题材 / 风格 / 基调（每类至少 1 个）',
+    '选几个喜欢的色调（影响 UI 主题，不影响世界树）',
+    '让 Agent 引导你填写 4 个核心设定',
+    '让 Agent 引导你填写 4 个大纲字段',
+    'AI 会读取前 4 步的所有信息生成第 1 章',
+  ][step]
 }
 </script>
 
 <template>
   <div class="onboarding">
+    <!-- 步骤指示器 -->
     <div class="step-indicator">
       <div
-        v-for="s in ['1', '2', '3', '4', '5']"
+        v-for="s in [1, 2, 3, 4, 5]"
         :key="s"
         class="step-dot"
-        :class="{ active: s === currentStep, done: ['1','2','3','4','5'].indexOf(s) < ['1','2','3','4','5'].indexOf(currentStep) }"
-      >{{ s }}</div>
+        :class="{
+          active: s === currentStep,
+          done: s < currentStep,
+        }"
+      >
+        <span v-if="s < currentStep">✓</span>
+        <span v-else>{{ s }}</span>
+      </div>
     </div>
 
-    <!-- Step 1 -->
-    <section v-if="currentStep === '1'" class="step fade-in">
-      <h1>📌 Step 1 · 必选标签</h1>
+    <!-- 步骤标题 -->
+    <header class="step-header">
+      <h1>📌 Step {{ currentStep }} · {{ getStepTitle(currentStep) }}</h1>
+      <p class="hint">{{ getStepHint(currentStep) }}</p>
+    </header>
+
+    <!-- ============== Step 1 ============== -->
+    <section v-if="currentStep === 1" class="step fade-in">
       <h3>题材</h3>
       <div class="tag-grid">
         <button
@@ -215,137 +281,141 @@ async function goNext() {
       </div>
     </section>
 
-    <!-- Step 2 -->
-    <section v-else-if="currentStep === '2'" class="step fade-in">
-      <h1>📌 Step 2 · 视觉色调</h1>
-      <p>选几个喜欢的色调（影响后续图片生成 + UI 主题）</p>
+    <!-- ============== Step 2 ============== -->
+    <section v-else-if="currentStep === 2" class="step fade-in">
       <div class="tag-grid">
         <button
           v-for="p in PALETTE_OPTIONS"
           :key="p"
-          class="tag"
+          class="tag tag-palette"
           :class="{ selected: palette.includes(p) }"
           @click="toggle(palette, p)"
         >{{ p }}</button>
       </div>
+      <p class="palette-note">
+        💡 提示：视觉色调仅影响阅读页 UI 主题，<strong>不影响</strong>故事的世界树 / 情节 / 角色。
+      </p>
     </section>
 
-    <!-- Step 3 引导式自由文本 -->
-    <section v-else-if="currentStep === '3'" class="step fade-in">
-      <h1>📌 Step 3 · 核心设定</h1>
-      <p class="hint">这 4 个字段是「软必填」，至少填前 2 个</p>
-
-      <div class="form-group">
-        <label>核心关系 <span class="required">*</span></label>
-        <textarea
-          v-model="coreRelationship"
-          placeholder="例：主角与失联 10 年的妹妹在数据黑市重逢"
-          rows="2"
-        ></textarea>
+    <!-- ============== Step 3-4 WS 聊天界面 ============== -->
+    <section v-else-if="currentStep === 3 || currentStep === 4" class="step chat-layout fade-in">
+      <!-- 左：对话消息流 -->
+      <div class="chat-pane">
+        <div class="chat-header">
+          <span class="chat-status" :class="{ connected: chat.connected.value }">
+            {{ chat.connecting.value ? '连接中...' : chat.connected.value ? '● 已连接' : '○ 未连接' }}
+          </span>
+        </div>
+        <div ref="chatContainer" class="chat-messages">
+          <div
+            v-for="(m, idx) in chat.messages.value"
+            :key="idx"
+            class="chat-msg"
+            :class="['role-' + m.role, { thinking: m.thinking }]"
+          >
+            <div class="chat-avatar">
+              {{ m.role === 'user' ? '我' : m.role === 'agent' ? 'AI' : 'sys' }}
+            </div>
+            <div class="chat-bubble">
+              <div v-if="m.thinking && chat.thinking.value" class="thinking-dots">
+                <span></span><span></span><span></span>
+              </div>
+              <pre v-else>{{ m.content }}</pre>
+            </div>
+          </div>
+        </div>
+        <div class="chat-input-row">
+          <input
+            v-model="userInput"
+            class="chat-input"
+            type="text"
+            placeholder="告诉 Agent 你的修改意见（如：'更黑暗一点' '主角是女性'）"
+            :disabled="!chat.connected.value || chat.thinking.value"
+            @keydown.enter="handleSendUserMessage"
+          />
+          <button
+            class="btn btn-secondary"
+            :disabled="!chat.connected.value || chat.thinking.value"
+            @click="handleSendUserMessage"
+          >发送</button>
+        </div>
       </div>
 
-      <div class="form-group">
-        <label>情感锚点 <span class="required">*</span></label>
-        <textarea
-          v-model="emotionalAnchor"
-          placeholder="例：孤独、寻找、不信任 AI"
-          rows="2"
-        ></textarea>
-      </div>
-
-      <div class="form-group">
-        <label>禁区 / 不写什么</label>
-        <textarea
-          v-model="taboos"
-          placeholder="例：不写 NPC 死亡，不写硬科幻设定（可空）"
-          rows="2"
-        ></textarea>
-      </div>
-
-      <div class="form-group">
-        <label>结局偏好</label>
-        <textarea
-          v-model="endingPreference"
-          placeholder="例：开放式 / HE / BE / 留白（可空）"
-          rows="2"
-        ></textarea>
+      <!-- 右：4 字段展示框 -->
+      <div class="fields-pane">
+        <div class="fields-header">
+          <h3>📋 {{ currentStep === 3 ? 'Step 3 · 核心设定' : 'Step 4 · 大纲初稿' }}</h3>
+          <p class="fields-hint">点下方「让 Agent 提议」生成，再「确认字段」写入 7 件基座</p>
+        </div>
+        <div class="fields-list">
+          <div
+            v-for="f in currentFields"
+            :key="f.key"
+            class="field-card"
+            :class="{ filled: chat.fields.value[f.key] }"
+          >
+            <label>{{ f.label }}</label>
+            <div v-if="chat.fields.value[f.key]" class="field-value">
+              <pre>{{ chat.fields.value[f.key] }}</pre>
+            </div>
+            <div v-else class="field-empty">
+              <span class="placeholder">{{ f.placeholder }}</span>
+            </div>
+          </div>
+        </div>
+        <div class="fields-actions">
+          <button
+            class="btn btn-primary btn-large"
+            :disabled="!chat.connected.value || chat.thinking.value"
+            @click="handleRequestProposal"
+          >
+            <span v-if="chat.thinking.value" class="spinner-inline"></span>
+            {{ chat.thinking.value ? 'Agent 思考中...' : (chat.hasFields.value ? '🔄 让 Agent 重新提议' : '✨ 让 Agent 提议') }}
+          </button>
+          <button
+            class="btn btn-success btn-large"
+            :disabled="!chat.hasFields.value || chat.thinking.value || chat.stepDone.value"
+            @click="handleConfirm"
+          >
+            {{ chat.stepDone.value ? '✅ 已写入 7 件' : '✅ 确认字段 → 写 7 件' }}
+          </button>
+        </div>
       </div>
     </section>
 
-    <!-- Step 4 大纲确认 -->
-    <section v-else-if="currentStep === '4'" class="step fade-in">
-      <h1>📌 Step 4 · 大纲初稿</h1>
-      <p class="hint">这 4 个字段填你想写的主线/支线/人物/种子（可空，会用 LLM 默认值）</p>
-
-      <div class="form-group">
-        <label>主线核心矛盾</label>
-        <textarea
-          v-model="mainConflict"
-          placeholder="例：主角发现父亲失踪与 AI 觉醒战争有关，潜入地下黑市寻找真相"
-          rows="2"
-        ></textarea>
-      </div>
-
-      <div class="form-group">
-        <label>支线（每行一个）</label>
-        <textarea
-          v-model="subPlots"
-          placeholder="例：&#10;妹妹的神经记录被盗&#10;主同主角与老婆的感情修复"
-          rows="3"
-        ></textarea>
-      </div>
-
-      <div class="form-group">
-        <label>人物（每行一个，名字-身份-背景）</label>
-        <textarea
-          v-model="charactersDesc"
-          placeholder="例：&#10;林远-主角-28 岁杭州程序员&#10;林雪-妹妹-高中语文老师"
-          rows="3"
-        ></textarea>
-      </div>
-
-      <div class="form-group">
-        <label>种子（每行一个）</label>
-        <textarea
-          v-model="seedsDesc"
-          placeholder="例：&#10;1987 年的收音机&#10;永远没响的家里的电话"
-          rows="3"
-        ></textarea>
+    <!-- ============== Step 5 章节生成 ============== -->
+    <section v-else-if="currentStep === 5" class="step fade-in">
+      <div class="generate-card">
+        <h2>🎬 准备生成第 1 章</h2>
+        <p>AI 会读取 Step 1-4 的所有信息（题材 / 风格 / 基调 / 核心设定 / 大纲），生成第 1 章 + 摘要。</p>
+        <p class="time-hint">预计耗时 30-60 秒</p>
+        <div v-if="loading" class="generating">
+          <div class="spinner"></div>
+          <span>AI 正在生成 7 件 + 第 1 章...</span>
+        </div>
+        <button
+          v-else
+          class="btn btn-primary btn-huge"
+          @click="generateChapter"
+        >
+          🚀 开始生成
+        </button>
       </div>
     </section>
 
-    <!-- Step 5 后台准备 + 生成章节 -->
-    <section v-else-if="currentStep === '5'" class="step fade-in">
-      <h1>🛠 Step 5 · 后台准备</h1>
-      <p>AI 正在生成 7 件基座 + 第 1 章...</p>
-      <div v-if="loading" class="generating">
-        <div class="spinner"></div>
-        <span>30-60s</span>
-      </div>
-      <p v-else class="hint">点击下方按钮开始生成</p>
-    </section>
+    <!-- 错误展示 -->
+    <div v-if="error || chat.error.value" class="error">
+      {{ error || chat.error.value }}
+    </div>
 
-    <div v-if="error" class="error">{{ error }}</div>
-
-    <div class="actions">
-      <!-- Step 1/2/3/4 显示'下一步' -->
+    <!-- Step 1-2 的 "下一步" 按钮 -->
+    <div v-if="currentStep === 1 || currentStep === 2" class="actions">
       <button
-        v-if="!['5'].includes(currentStep)"
         class="btn btn-primary"
-        @click="goNext"
+        @click="nextFromHttpStep"
         :disabled="loading"
       >
         {{ loading ? '处理中...' : '下一步 →' }}
-      </button>
-      <!-- Step 5 显示'开始生成' (大按钮 + spinner) -->
-      <button
-        v-else
-        class="btn btn-primary btn-large"
-        @click="goNext"
-        :disabled="loading"
-      >
-        <span v-if="loading" class="spinner-inline"></span>
-        {{ loading ? 'AI 正在生成 7 件 + 第 1 章（30-60s）...' : '🚀 开始生成' }}
       </button>
     </div>
   </div>
@@ -353,18 +423,18 @@ async function goNext() {
 
 <style scoped>
 .onboarding {
-  max-width: 720px;
+  max-width: 1200px;
   margin: 0 auto;
   padding: var(--space-6);
 }
 
+/* ============ 步骤指示器 ============ */
 .step-indicator {
   display: flex;
   gap: var(--space-2);
   justify-content: center;
   margin-bottom: var(--space-6);
 }
-
 .step-dot {
   width: 36px;
   height: 36px;
@@ -373,90 +443,57 @@ async function goNext() {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: var(--text-xs);
+  font-size: var(--text-sm);
   color: var(--color-text-dim);
   border: 2px solid transparent;
+  font-weight: 600;
 }
 .step-dot.active {
   background: var(--color-accent-1);
   color: white;
   border-color: var(--color-accent-2);
+  box-shadow: var(--shadow-glow);
 }
 .step-dot.done {
   background: var(--color-accent-3);
   color: white;
 }
 
-.step h1 {
-  font-size: var(--text-2xl);
+.step-header {
+  text-align: center;
   margin-bottom: var(--space-5);
+}
+.step-header h1 {
+  font-size: var(--text-2xl);
+  margin-bottom: var(--space-2);
   color: var(--color-accent-1);
 }
+.hint {
+  color: var(--color-text-faint);
+  font-size: var(--text-sm);
+}
 
+/* ============ Step 1/2 通用 ============ */
 .step h3 {
   font-size: var(--text-lg);
   margin: var(--space-5) 0 var(--space-3);
   color: var(--color-text-dim);
 }
-
 .tag-grid {
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-2);
   margin-bottom: var(--space-4);
 }
-
-/* Step 3/4 form-group 样式 */
-.form-group {
-  margin-bottom: var(--space-4);
-}
-
-.form-group label {
-  display: block;
-  font-size: var(--text-sm);
-  color: var(--color-text);
-  margin-bottom: var(--space-2);
-  font-weight: 500;
-}
-
-.form-group .required {
-  color: var(--color-error);
-  margin-left: 2px;
-}
-
-.form-group textarea {
-  width: 100%;
-  resize: vertical;
-  font-family: var(--font-body);
-  font-size: var(--text-sm);
-  min-height: 60px;
-  padding: var(--space-3) var(--space-4);
-}
-
-.btn-large {
-  font-size: var(--text-lg);
-  padding: var(--space-4) var(--space-7);
-}
-
-.spinner-inline {
-  display: inline-block;
-  width: 16px;
-  height: 16px;
-  border: 2px solid var(--color-night-3);
-  border-top-color: var(--color-accent-1);
-  border-radius: 50%;
-  animation: spin 1s linear infinite;
-  vertical-align: middle;
-  margin-right: var(--space-2);
-}
-
 .tag {
   padding: var(--space-2) var(--space-4);
   background: var(--color-night-2);
   border: 1px solid var(--color-night-3);
   border-radius: var(--radius-full);
   font-size: var(--text-sm);
+  color: var(--color-text);
   transition: all var(--motion-fast) var(--ease-out);
+  cursor: pointer;
 }
 .tag:hover {
   border-color: var(--color-accent-1);
@@ -466,41 +503,263 @@ async function goNext() {
   color: white;
   border-color: var(--color-accent-1);
 }
-
-.hint {
-  color: var(--color-text-faint);
+.tag-palette.selected {
+  background: linear-gradient(135deg, var(--color-accent-1), var(--color-accent-3));
+}
+.palette-note {
+  margin-top: var(--space-4);
+  padding: var(--space-3);
+  background: rgba(196, 181, 253, 0.08);
+  border-left: 3px solid var(--color-accent-2);
+  border-radius: var(--radius-sm);
   font-size: var(--text-sm);
+  color: var(--color-text-dim);
 }
 
-.actions {
-  text-align: center;
-  margin-top: var(--space-6);
+/* ============ Step 3-4 聊天布局 ============ */
+.chat-layout {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-5);
+  min-height: 540px;
 }
 
-.btn {
-  padding: var(--space-3) var(--space-5);
+@media (max-width: 900px) {
+  .chat-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* 左：对话消息流 */
+.chat-pane {
+  display: flex;
+  flex-direction: column;
+  background: var(--color-night-1);
+  border: 1px solid var(--color-night-3);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+.chat-header {
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--color-night-3);
+  background: var(--color-night-2);
+}
+.chat-status {
+  font-size: var(--text-xs);
+  color: var(--color-error);
+}
+.chat-status.connected {
+  color: var(--color-accent-3);
+}
+.chat-messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-height: 360px;
+  max-height: 480px;
+}
+.chat-msg {
+  display: flex;
+  gap: var(--space-2);
+  align-items: flex-start;
+  animation: fade-in-up 0.3s var(--ease-out);
+}
+.chat-msg.role-user {
+  flex-direction: row-reverse;
+}
+.chat-avatar {
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--color-accent-1);
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--text-xs);
+  font-weight: 600;
+}
+.chat-msg.role-user .chat-avatar {
+  background: var(--color-accent-3);
+}
+.chat-msg.role-system .chat-avatar {
+  background: var(--color-night-3);
+  color: var(--color-text-faint);
+}
+.chat-bubble {
+  max-width: 80%;
+  padding: var(--space-3) var(--space-4);
+  background: var(--color-night-2);
   border-radius: var(--radius-md);
+  font-size: var(--text-sm);
+  line-height: 1.6;
+}
+.chat-msg.role-user .chat-bubble {
+  background: var(--color-accent-1);
+  color: white;
+}
+.chat-bubble pre {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: var(--font-body);
+}
+.thinking-dots {
+  display: flex;
+  gap: 4px;
+  padding: 4px 0;
+}
+.thinking-dots span {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-accent-2);
+  animation: bounce 1.4s infinite;
+}
+.thinking-dots span:nth-child(2) { animation-delay: 0.2s; }
+.thinking-dots span:nth-child(3) { animation-delay: 0.4s; }
+@keyframes bounce {
+  0%, 80%, 100% { transform: scale(0.7); opacity: 0.4; }
+  40% { transform: scale(1); opacity: 1; }
+}
+.chat-input-row {
+  display: flex;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border-top: 1px solid var(--color-night-3);
+  background: var(--color-night-2);
+}
+.chat-input {
+  flex: 1;
+  padding: var(--space-3) var(--space-4);
+  background: var(--color-night-1);
+  border: 1px solid var(--color-night-3);
+  border-radius: var(--radius-md);
+  color: var(--color-text);
+  font-size: var(--text-sm);
+  font-family: var(--font-body);
+}
+.chat-input:focus {
+  outline: none;
+  border-color: var(--color-accent-1);
+}
+.chat-input:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* 右：4 字段展示框 */
+.fields-pane {
+  display: flex;
+  flex-direction: column;
+  background: var(--color-night-1);
+  border: 1px solid var(--color-night-3);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+.fields-header {
+  padding: var(--space-4);
+  border-bottom: 1px solid var(--color-night-3);
+  background: var(--color-night-2);
+}
+.fields-header h3 {
   font-size: var(--text-base);
-  font-weight: 500;
+  margin-bottom: var(--space-1);
+  color: var(--color-accent-2);
+}
+.fields-hint {
+  font-size: var(--text-xs);
+  color: var(--color-text-faint);
+}
+.fields-list {
+  flex: 1;
+  padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  overflow-y: auto;
+  min-height: 280px;
+  max-height: 360px;
+}
+.field-card {
+  padding: var(--space-3);
+  border: 1px solid var(--color-night-3);
+  border-radius: var(--radius-md);
+  background: var(--color-night-2);
   transition: all var(--motion-fast) var(--ease-out);
 }
-.btn-primary {
-  background: linear-gradient(135deg, var(--color-accent-1), var(--color-accent-3));
-  color: white;
-  box-shadow: var(--shadow-glow);
+.field-card.filled {
+  border-color: var(--color-accent-3);
+  background: rgba(196, 181, 253, 0.05);
 }
-.btn-primary:hover:not(:disabled) { transform: translateY(-2px); }
-.btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+.field-card label {
+  display: block;
+  font-size: var(--text-xs);
+  color: var(--color-text-dim);
+  margin-bottom: var(--space-2);
+  font-weight: 500;
+}
+.field-card.filled label {
+  color: var(--color-accent-3);
+}
+.field-value pre {
+  margin: 0;
+  font-family: var(--font-body);
+  font-size: var(--text-sm);
+  line-height: 1.6;
+  color: var(--color-text);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.field-empty {
+  font-size: var(--text-xs);
+  color: var(--color-text-faint);
+  font-style: italic;
+}
+.field-empty .placeholder {
+  opacity: 0.5;
+}
+.fields-actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  border-top: 1px solid var(--color-night-3);
+  background: var(--color-night-2);
+}
 
-.error {
-  background: rgba(248, 113, 113, 0.1);
-  border: 1px solid var(--color-error);
-  color: var(--color-error);
-  padding: var(--space-3);
-  border-radius: var(--radius-md);
+/* ============ Step 5 ============ */
+.generate-card {
+  text-align: center;
+  padding: var(--space-7);
+  background: var(--color-night-1);
+  border: 1px solid var(--color-night-3);
+  border-radius: var(--radius-lg);
+  max-width: 600px;
+  margin: 0 auto;
+}
+.generate-card h2 {
+  font-size: var(--text-xl);
+  margin-bottom: var(--space-3);
+  color: var(--color-accent-1);
+}
+.generate-card p {
+  color: var(--color-text-dim);
+  margin-bottom: var(--space-3);
+}
+.time-hint {
+  font-size: var(--text-sm);
+  color: var(--color-text-faint);
+}
+.btn-huge {
+  font-size: var(--text-lg);
+  padding: var(--space-5) var(--space-8);
   margin-top: var(--space-4);
 }
-
 .generating {
   display: flex;
   align-items: center;
@@ -509,7 +768,6 @@ async function goNext() {
   color: var(--color-accent-2);
   padding: var(--space-5);
 }
-
 .spinner {
   width: 32px;
   height: 32px;
@@ -519,7 +777,83 @@ async function goNext() {
   animation: spin 1s linear infinite;
 }
 
+/* ============ 通用按钮 ============ */
+.actions {
+  text-align: center;
+  margin-top: var(--space-6);
+}
+.btn {
+  padding: var(--space-3) var(--space-5);
+  border-radius: var(--radius-md);
+  font-size: var(--text-base);
+  font-weight: 500;
+  transition: all var(--motion-fast) var(--ease-out);
+  cursor: pointer;
+  border: none;
+}
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.btn-primary {
+  background: linear-gradient(135deg, var(--color-accent-1), var(--color-accent-3));
+  color: white;
+  box-shadow: var(--shadow-glow);
+}
+.btn-primary:hover:not(:disabled) {
+  transform: translateY(-2px);
+}
+.btn-secondary {
+  background: var(--color-night-3);
+  color: var(--color-text);
+}
+.btn-secondary:hover:not(:disabled) {
+  background: var(--color-night-2);
+}
+.btn-success {
+  background: linear-gradient(135deg, #4ade80, #22c55e);
+  color: white;
+}
+.btn-success:hover:not(:disabled) {
+  transform: translateY(-2px);
+}
+.btn-large {
+  font-size: var(--text-base);
+  padding: var(--space-3) var(--space-5);
+}
+
+.spinner-inline {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--color-night-3);
+  border-top-color: var(--color-accent-1);
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+  vertical-align: middle;
+  margin-right: var(--space-2);
+}
+
+/* ============ 错误 ============ */
+.error {
+  background: rgba(248, 113, 113, 0.1);
+  border: 1px solid var(--color-error);
+  color: var(--color-error);
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+  margin-top: var(--space-4);
+  text-align: center;
+}
+
+/* ============ 动画 ============ */
 @keyframes spin {
   to { transform: rotate(360deg); }
+}
+@keyframes fade-in-up {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.fade-in {
+  animation: fade-in-up 0.4s var(--ease-out);
 }
 </style>
