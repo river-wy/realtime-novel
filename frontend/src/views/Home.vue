@@ -7,6 +7,7 @@
 import { onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useProjectsStore } from '@/stores/projects'
+import heroImage from '@/assets/首页-主图.png'
 
 const router = useRouter()
 const projectsStore = useProjectsStore()
@@ -35,7 +36,8 @@ function startNewProject() {
         <div class="star"></div>
         <div class="star"></div>
       </div>
-      <h1 class="hero-title">📖 realtime-novel</h1>
+      <img :src="heroImage" alt="realtime-novel 主图" class="hero-image" />
+      <h1 class="hero-title">realtime-novel</h1>
       <p class="hero-subtitle">实时生成 · 可干预 · 可回档</p>
       <p class="hero-desc">基于 LLM 的小说创作平台。世界树 + 主线 + 人物 + 种子表，让 AI 写你心中的故事。</p>
       <div class="hero-actions">
@@ -132,6 +134,17 @@ function startNewProject() {
 .star:nth-child(3) { top: 60%; left: 25%; animation-delay: 1s; }
 .star:nth-child(4) { top: 75%; right: 30%; animation-delay: 1.5s; }
 .star:nth-child(5) { top: 45%; left: 50%; animation-delay: 2s; }
+
+.hero-image {
+  display: block;
+  max-width: 480px;
+  width: 100%;
+  height: auto;
+  margin: 0 auto var(--space-5);
+  position: relative;
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+}
 
 .hero-title {
   font-size: var(--text-4xl);

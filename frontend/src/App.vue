@@ -1,12 +1,16 @@
 <script setup lang="ts">
 import { RouterView, RouterLink } from 'vue-router'
+import logoImage from '@/assets/左上-logo.png'
 </script>
 
 <template>
   <div class="app-root">
     <nav class="top-nav">
       <div class="nav-inner">
-        <RouterLink to="/" class="brand">📖 realtime-novel</RouterLink>
+        <RouterLink to="/" class="brand">
+          <img :src="logoImage" alt="realtime-novel logo" class="brand-logo" />
+          <span>realtime-novel</span>
+        </RouterLink>
         <div class="nav-links">
           <RouterLink to="/">首页</RouterLink>
           <RouterLink to="/onboarding">新世界</RouterLink>
@@ -51,11 +55,20 @@ import { RouterView, RouterLink } from 'vue-router'
 }
 
 .brand {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
   font-family: 'Plus Jakarta Sans', sans-serif;
   font-weight: 700;
   font-size: 20px;
   color: var(--color-accent-1);
   text-decoration: none;
+}
+
+.brand-logo {
+  height: 32px;
+  width: auto;
+  display: block;
 }
 
 .nav-links {
