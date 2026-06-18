@@ -62,10 +62,20 @@ const TONE_OPTIONS = [
   '黑暗', '绝望', '热血', '紧张', '浪漫', '温馨', '沉重', '辛辣', '讽刺',
 ]
 
-function toggle(arr: any, value: string) {
-  const idx = arr.value.indexOf(value)
-  if (idx >= 0) arr.value.splice(idx, 1)
-  else arr.value.push(value)
+/**
+ * 切换数组元素的选中状态
+ * 收 Ref<string[]>，函数内用 .value 触发响应式更新
+ * 模板里调用：@click="toggle(genres, g)" — Vue 会把 genres 自动解包成 string[] 传入，
+ *  所以这里要特别处理：用 lambda 包裹显式传 ref 引用，或函数内部重新取 .value
+ *
+ * 当前实现：函数接受 string[]（Vue 解包后的值），splice/push 会修改原数组
+ * （原数组是 ref.value 的引用，splice/push 会修改 ref.value 指向的数组 → 响应式触发 ✓）
+ * — Vue 3 Proxy-based reactivity 能追踪数组方法调用 (push/pop/splice/shift 等)
+ */
+function toggle(arr: string[], value: string) {
+  const idx = arr.indexOf(value)
+  if (idx >= 0) arr.splice(idx, 1)
+  else arr.push(value)
 }
 
 async function ensureProject() {
