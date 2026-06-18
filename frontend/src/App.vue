@@ -8,7 +8,9 @@ import mainImage from '@/assets/首页-主图.png'
     <nav class="top-nav">
       <div class="nav-inner">
         <RouterLink to="/" class="brand">
-          <img :src="mainImage" alt="realtime-novel" class="brand-logo" />
+          <div class="brand-glow">
+            <img :src="mainImage" alt="realtime-novel" class="brand-logo" />
+          </div>
         </RouterLink>
         <div class="nav-links">
           <RouterLink to="/">首页</RouterLink>
@@ -60,12 +62,35 @@ import mainImage from '@/assets/首页-主图.png'
   line-height: 0;
 }
 
+/* 渐变光晕容器：让透明 PNG 融进深紫底 */
+.brand-glow {
+  padding: 6px 10px;
+  border-radius: var(--radius-md);
+  background:
+    radial-gradient(ellipse at center,
+      rgba(255, 143, 177, 0.18) 0%,
+      rgba(139, 92, 246, 0.10) 50%,
+      transparent 100%
+    );
+  transition: background var(--motion-base) var(--ease-out);
+}
+
+.brand-glow:hover {
+  background:
+    radial-gradient(ellipse at center,
+      rgba(255, 143, 177, 0.32) 0%,
+      rgba(139, 92, 246, 0.18) 50%,
+      transparent 100%
+    );
+}
+
 .brand-logo {
   height: 48px;
   width: auto;
   display: block;
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-sm);
   transition: transform var(--motion-fast) var(--ease-out);
+  filter: drop-shadow(0 0 8px rgba(255, 143, 177, 0.25));
 }
 
 .brand:hover .brand-logo {

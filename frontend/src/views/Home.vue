@@ -36,7 +36,9 @@ function startNewProject() {
         <div class="star"></div>
         <div class="star"></div>
       </div>
-      <img :src="heroImage" alt="realtime-novel 主图" class="hero-image" />
+      <div class="hero-glow">
+        <img :src="heroImage" alt="realtime-novel 主图" class="hero-image" />
+      </div>
       <h1 class="hero-title">realtime-novel</h1>
       <p class="hero-subtitle">实时生成 · 可干预 · 可回档</p>
       <p class="hero-desc">基于 LLM 的小说创作平台。世界树 + 主线 + 人物 + 种子表，让 AI 写你心中的故事。</p>
@@ -140,10 +142,39 @@ function startNewProject() {
   max-width: 720px;
   width: 100%;
   height: auto;
-  margin: 0 auto var(--space-5);
+  margin: 0 auto;
   position: relative;
   border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-card);
+  filter: drop-shadow(0 8px 32px rgba(255, 143, 177, 0.25))
+          drop-shadow(0 0 24px rgba(139, 92, 246, 0.2));
+}
+
+/* 渐变光晕容器：让透明 PNG 融进深紫底 */
+.hero-glow {
+  position: relative;
+  margin: 0 auto var(--space-6);
+  padding: 24px 32px;
+  border-radius: var(--radius-lg);
+  background:
+    radial-gradient(ellipse 80% 60% at center,
+      rgba(255, 143, 177, 0.22) 0%,
+      rgba(139, 92, 246, 0.14) 40%,
+      rgba(27, 15, 46, 0) 70%
+    );
+}
+
+.hero-glow::before {
+  content: '';
+  position: absolute;
+  inset: -8px;
+  border-radius: var(--radius-lg);
+  background:
+    radial-gradient(ellipse 70% 50% at center,
+      rgba(255, 143, 177, 0.10) 0%,
+      transparent 60%
+    );
+  z-index: -1;
+  filter: blur(8px);
 }
 
 .hero-title {
