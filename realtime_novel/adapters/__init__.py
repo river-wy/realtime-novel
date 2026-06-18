@@ -1,13 +1,12 @@
 """realtime_novel.adapters 包入口
 
-v0.4 LLM 适配层：统一对外接口 LLMAdapter
+v0.6: v0.3 adapters/llm.py 已删除，所有 LLM 调用走 LLMAdapter (v0.4+)
 - DeepSeek Provider (text, OpenAI 兼容 + Thinking)
 - Gemini Provider (image, Google 原生异步 submit+poll)
 - Router (按 role 路由 + fallback)
 - Retry (指数退避)
 - Streaming (流式回调)
-
-v0.3 的 LLMClient（realtime_novel/adapters/llm.py）保持不变。
+- types.py (LLMRequest, LLMResponse, LLMStreamChunk)
 """
 from realtime_novel.adapters.types import (
     LLMRequest, LLMResponse, LLMStreamChunk, ModelRole, ModelProvider,

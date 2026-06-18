@@ -27,6 +27,8 @@ class LLMRequest(BaseModel):
     v0.4.1 扩展：加 messages 字段（标准 OpenAI 格式）
     - 如果传了 messages：直接用（可包含 system / user / assistant / tool 消息）
     - 如果没传 messages：兼容旧代码，system_prompt + prompt 拼成单条 user
+
+    v0.6 新增：response_format 强制 JSON 输出（v0.3 路径清理用）
     """
     prompt: str = Field(default="", min_length=0)  # v0.4.1 改成可空（messages 模式不需要）
     messages: List[Dict[str, Any]] = Field(default_factory=list)  # v0.4.1 新增
@@ -35,6 +37,7 @@ class LLMRequest(BaseModel):
     max_tokens: int = Field(2048, ge=1, le=8192)
     system_prompt: Optional[str] = None
     stream: bool = False
+    response_format: Optional[Dict[str, Any]] = None  # v0.6 新增：{type: "json_object"}
 
 
 class LLMResponse(BaseModel):

@@ -28,9 +28,9 @@ from ..core.schemas import (
 )
 from ..core.exceptions import ProjectError
 from ..adapters.io import write as io_write
-from ..adapters.llm import call_llm
+from ..adapters.llm_adapter import get_llm_adapter
+from ..adapters.types import ModelRole
 from ..cli.interactive import prompt, confirm, multi_select, single_select
-from .chapter_generator import ChapterGenerator, GenerationResult
 from ..core.world_tree import WorldTree
 
 
@@ -562,23 +562,61 @@ class OnboardingFlow:
         self._save_state()
 
     def _llm_json(self, system: str, user: str) -> dict:
-        """调 LLM 拿 JSON（带重试 + 容错）"""
+        """调 LLM 拿 JSON（v0.6 改走 LLMAdapter）
+
+        带重试 + 容错，使用 LLMAdapter.complete_with_messages + response_format=json_object
+        """
+        import asyncio
         last_err: Exception | None = None
         for attempt in range(3):
             try:
-                raw = call_llm(
-                    user,
-                    system_msg=system,
-                    use_json_format=True,
-                    max_tokens=4096,
-                    temperature=0.5,
-                    timeout=120,
-                )
+                # 检查是否在 event loop 里
+                try:
+                    loop = asyncio.get_event_loop()
+                    if loop.is_running():
+                        # 在 event loop 里 → 用 thread pool
+                        import concurrent.futures
+                        with concurrent.futures.ThreadPoolExecutor() as ex:
+                            fut = ex.submit(self._llm_json_sync, system, user)
+                            raw = fut.result(timeout=180)
+                    else:
+                        raw = self._llm_json_sync(system, user)
+                except RuntimeError:
+                    raw = self._llm_json_sync(system, user)
                 return json.loads(raw)
             except Exception as e:
                 last_err = e
                 time.sleep(1)
         raise RuntimeError(f"LLM JSON 解析 3 次都失败: {last_err}")
+
+    def _llm_json_sync(self, system: str, user: str) -> str:
+        """v0.6 同步版 LLM JSON 调用（强制 JSON 输出）"""
+        from realtime_novel.adapters.types import LLMRequest
+        async def _call():
+            adapter = get_llm_adapter()
+            # 走 LLMRequest 以支持 response_format
+            request = LLMRequest(
+                prompt="",
+                messages=[{"role": "user", "content": user}],
+                system_prompt=system,
+                max_tokens=4096,
+                temperature=0.5,
+                response_format={"type": "json_object"},  # 强制 JSON 输出
+                role=ModelRole.TEXT,
+            )
+            return await adapter.complete(request)
+        # 处理 event loop
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                # 已经有 event loop → 用 thread
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor() as ex:
+                    return ex.submit(lambda: asyncio.run(_call())).result().content
+            else:
+                return asyncio.run(_call()).content
+        except RuntimeError:
+            return asyncio.run(_call()).content
 
     # 7 件生成函数
     def _gen_world_tree(self, user_input: str) -> dict:
@@ -790,21 +828,31 @@ class OnboardingFlow:
     # === Step 5 实现 ===
 
     def _generate_chapter_1(self) -> None:
-        """复用 S4 ChapterGenerator 生成第 1 章"""
-        # 加载 7 件 → WorldTree
-        from ..adapters.io import read
-        data = {}
-        from ..core.schemas import SCHEMA_REGISTRY
-        for _, filename in SCHEMA_REGISTRY:
-            data[filename] = read(self.project.file_path(filename))
-        tree = WorldTree.from_dict(data)
+        """v0.6 改走 state_graph_stub（v0.4+ 路径）
 
-        # 复用 S4
-        generator = ChapterGenerator(tree, self.project)
-        result = generator.generate_next(
-            chapter_num=1,
-            chapter_summaries=[],  # 新项目无历史摘要
-            last_chapter_full=None,
-            user_input=f"第 1 章\n主线核心矛盾: {self.state.main_conflict}",
-        )
-        self.state.chapter_1_path = str(self.project.chapter_path(1))
+        之前复用 v0.3 S4 ChapterGenerator（依赖 chapter_generator.py + 复杂 WorldTree 初始化）
+        v0.6 删除 chapter_generator.py 后，改用 state_graph_stub.generate_chapter_via_state_graph
+        """
+        import asyncio
+        from realtime_novel.agent.state_graph_stub import generate_chapter_via_state_graph
+
+        async def _gen():
+            return await generate_chapter_via_state_graph(
+                project_id=self.project.project_id,
+                intervention=f"第 1 章\n主线核心矛盾: {self.state.main_conflict}",
+            )
+
+        # 同步包装
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor() as ex:
+                    result = ex.submit(lambda: asyncio.run(_gen())).result()
+            else:
+                result = asyncio.run(_gen())
+        except RuntimeError:
+            result = asyncio.run(_gen())
+
+        # 记录章节路径
+        self.state.chapter_1_path = result.get("file_path", str(self.project.chapter_path(1)))

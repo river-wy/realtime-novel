@@ -31,12 +31,16 @@ class DeepSeekProvider(LLMProvider):
     async def complete(self, request: LLMRequest) -> LLMResponse:
         """同步调用（关 thinking，节省时间）"""
         start = time.time()
-        response = await self.client.chat.completions.create(
-            model=self.model,
-            messages=self._build_messages(request),
-            temperature=request.temperature,
-            max_tokens=request.max_tokens,
-        )
+        kwargs = {
+            "model": self.model,
+            "messages": self._build_messages(request),
+            "temperature": request.temperature,
+            "max_tokens": request.max_tokens,
+        }
+        # v0.6 新增：response_format 透传（强制 JSON 输出）
+        if request.response_format:
+            kwargs["response_format"] = request.response_format
+        response = await self.client.chat.completions.create(**kwargs)
         duration_ms = int((time.time() - start) * 1000)
         return LLMResponse(
             content=response.choices[0].message.content or "",
