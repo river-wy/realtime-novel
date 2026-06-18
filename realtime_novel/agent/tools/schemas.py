@@ -54,6 +54,7 @@ class ChapterContent(BaseModel):
     content: str
     word_count: int
     generated_at: Optional[str] = None
+    summary: Optional[str] = None  # v0.5 新增：1 句话 summary
 
 
 # ============ Base Edit 工具（7 件基座）============

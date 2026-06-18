@@ -1,0 +1,20 @@
+# Frontend dependencies
+node_modules/
+
+# Build output
+dist/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+*.swp
+*.bak
+*.log
+
+# Env
+.env
+.env.local
+*.private.json

@@ -26,6 +26,8 @@ class ChapterInfo(BaseModel):
     summary: Optional[str] = None
     status: str
     time: Optional[str] = None
+    word_count: Optional[int] = None
+    file_path: Optional[str] = None
 
 
 class ChapterListResponse(BaseModel):
@@ -53,22 +55,24 @@ class GenerateChapterResponse(BaseModel):
     word_count: int
     generated_at: str
     new_seeds_triggered: int = 0
+    summary: Optional[str] = None  # v0.5 新增：1 句话 summary
 
 
 @router.get("/{project_id}/chapters", response_model=ChapterListResponse)
 async def list_chapters(project_id: str):
-    """列章节"""
-    chapters_dir = Path(f"data/{project_id}/chapters")
+    """列章节（v0.5 走 DB，v0.4 走文件）"""
+    from realtime_novel.persistence import ChapterRepository
+    chap_repo = ChapterRepository()
+    rows = chap_repo.list_by_project(project_id, limit=200)
     chapters = []
-    if chapters_dir.exists():
-        for f in sorted(chapters_dir.glob("chapter_*.md")):
-            num = int(f.stem.split("_")[1])
-            chapters.append(ChapterInfo(
-                num=num,
-                title=f"第 {num} 章",
-                status="done",
-                time=datetime.fromtimestamp(f.stat().st_mtime).isoformat(),
-            ))
+    for r in rows:
+        chapters.append(ChapterInfo(
+            num=r.chapter_num,
+            title=r.title or f"第 {r.chapter_num} 章",
+            summary=r.summary,  # v0.5 新增
+            status="done",
+            time=r.generated_at.isoformat() if r.generated_at else None,
+        ))
     return ChapterListResponse(chapters=chapters)
 
 
@@ -77,22 +81,23 @@ async def read_chapter(
     project_id: str,
     n: int = Path(ge=1),
 ):
-    """读章节正文"""
-    chapter_path = Path(f"data/{project_id}/chapters/chapter_{n:03d}.md")
-    if not chapter_path.exists():
+    """读章节正文（v0.5 走 DB，正文从 file_path 读）"""
+    from realtime_novel.persistence import ChapterRepository
+    chap_repo = ChapterRepository()
+    row = chap_repo.get(project_id, n)
+    if not row:
         raise HTTPException(404, f"Chapter {n} not found")
+    # 正文从 file_path 读
+    chapter_path = Path(row.file_path)
+    if not chapter_path.exists():
+        raise HTTPException(404, f"Chapter file not found: {row.file_path}")
     content = chapter_path.read_text()
-    title = ""
-    for line in content.split("\n"):
-        if line.startswith("# "):
-            title = line[2:].strip()
-            break
     return ChapterContentResponse(
         num=n,
-        title=title or f"第 {n} 章",
+        title=row.title or f"第 {n} 章",
         content=content,
         word_count=len(content),
-        generated_at=datetime.fromtimestamp(chapter_path.stat().st_mtime).isoformat(),
+        generated_at=row.generated_at.isoformat() if row.generated_at else None,
     )
 
 
@@ -137,4 +142,5 @@ async def generate_chapter(
         word_count=output.word_count,
         generated_at=output.generated_at or datetime.now().isoformat(),
         new_seeds_triggered=0,
+        summary=getattr(output, "summary", None),
     )

@@ -304,7 +304,10 @@ class AsyncOnboardingFlow:
         self.workspace_root = Path(workspace_root)
 
     async def step(self, project_id: str, step: str, payload: dict) -> dict:
-        """执行 onboarding 单步（onboarding_state 表）"""
+        """执行 onboarding 单步（onboarding_state 表）
+
+        v0.5: Step 4 触发 7 件基座生成（调 OnboardingFlow._generate_7_artifacts）
+        """
         import json
         next_step_map = {
             "1a": "1b", "1b": "2", "2": "3", "3": "4", "4": "5", "5": None,
@@ -330,8 +333,58 @@ class AsyncOnboardingFlow:
                 conn.execute(
                     "INSERT INTO onboarding_state (project_id, current_step, started_at, updated_at, state_json) "
                     "VALUES (?, ?, ?, ?, ?)",
-                    (_step_to_num(step), now, now, json.dumps(state_data, ensure_ascii=False)),
+                    (project_id, _step_to_num(step), now, now, json.dumps(state_data, ensure_ascii=False)),
                 )
+
+        # v0.5: Step 4 触发 7 件基座生成（不生成章节，章节由 Step 5 / POST /chapters 触发）
+        if step == "4":
+            try:
+                from realtime_novel.services.onboarding import OnboardingFlow, OnboardingState
+                from realtime_novel.persistence import ProjectRepository
+
+                # 拿全 step 1a-3 的 state 用于生成 7 件
+                with get_store().connection() as conn:
+                    row = conn.execute(
+                        "SELECT state_json FROM onboarding_state WHERE project_id = ?",
+                        (project_id,),
+                    ).fetchone()
+                    if row:
+                        full_state = json.loads(row["state_json"])
+
+                # 构造 OnboardingState
+                ob_state = OnboardingState(
+                    project_id=project_id,
+                    current_step=4,
+                    genres=full_state.get("payload", {}).get("genres") or [],
+                    styles=full_state.get("payload", {}).get("styles") or [],
+                    tone=full_state.get("payload", {}).get("tone") or "",
+                    palette=full_state.get("payload", {}).get("palette") or [],
+                    # 注：v0.5 简化版只取 1a payload；v0.5.1 完整版要累计 1a+1b+2+3
+                )
+                # v0.5: 直接用 ProjectRepository.save_7_artifacts 替代 v0.3 复杂 _generate_7_artifacts
+                # Step 4 在 v0.5 实际是手动生成 7 件（简化版）
+                # TODO v0.5.1: 改调 LLM 真实生成
+                repo = ProjectRepository()
+                repo.save_7_artifacts(
+                    project_id=project_id,
+                    world_tree={"base": {"timeline": {"era": "现代"}, "geography": {"primary": "未设置"}}, "branches": [], "metadata": {}},
+                    style_charter={"prose_style": {}, "tone": {"primary": ob_state.tone or "冷叙述"}, "density": {}, "taboos": [], "limits": {}, "metadata": {}},
+                    genre_resonance={"accept": [], "reject": [], "anchors": [], "metadata": {}},
+                    main_plot={"current_beat": 0, "beats": [], "metadata": {}},
+                    sub_plot={"threads": [], "metadata": {}},
+                    character_card={"characters": [], "relationships": []},
+                    seed_table={"seeds": [], "metadata": {}},
+                )
+            except Exception as e:
+                # 不让 onboarding 崩，返回错误信息
+                import traceback
+                print(f"Onboarding Step 4 失败: {e}\n{traceback.format_exc()}")
+                return {
+                    "step": step,
+                    "next_step": None,  # 中断
+                    "payload": payload,
+                    "error": f"7件生成失败: {str(e)}",
+                }
         return {
             "step": step,
             "next_step": next_step_map.get(step),

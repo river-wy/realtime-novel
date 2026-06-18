@@ -71,6 +71,7 @@ class GenerateChapterTool(BaseTool):
                     content=chapter.get("content", ""),
                     word_count=len(chapter.get("content", "")),
                     generated_at=datetime.now().isoformat(),
+                    summary=chapter.get("summary"),  # v0.5 新增
                 )
             except Exception as e:
                 try:

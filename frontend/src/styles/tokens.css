@@ -1,0 +1,67 @@
+/* 樱色夜空主题 tokens
+ * 主色: 樱色夜空 #1B0F2E
+ * 强调: 樱粉 #FF8FB1 / 金 #FFC857 / 紫 #8B5CF6
+ */
+
+:root {
+  /* 夜空背景层 */
+  --color-night-1: #1B0F2E;
+  --color-night-2: #2A1B4A;
+  --color-night-3: #3D2A66;
+
+  /* 文字 */
+  --color-text: #F5F0FF;
+  --color-text-dim: #B8AED4;
+  --color-text-faint: #7A6FA0;
+
+  /* 强调色 */
+  --color-accent-1: #FF8FB1;       /* 樱粉 */
+  --color-accent-2: #FFC857;       /* 金 */
+  --color-accent-3: #8B5CF6;       /* 紫 */
+
+  /* 状态色 */
+  --color-success: #4ADE80;
+  --color-warning: #FBBF24;
+  --color-error: #F87171;
+
+  /* 间距 */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+  --space-8: 64px;
+
+  /* 圆角 */
+  --radius-sm: 6px;
+  --radius-md: 12px;
+  --radius-lg: 20px;
+  --radius-full: 9999px;
+
+  /* 阴影 */
+  --shadow-glow: 0 0 24px rgba(255, 143, 177, 0.3);
+  --shadow-card: 0 8px 32px rgba(0, 0, 0, 0.3);
+
+  /* 字体 */
+  --font-display: 'Plus Jakarta Sans', 'Zen Maru Gothic', sans-serif;
+  --font-body: 'Noto Sans SC', 'Plus Jakarta Sans', sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+
+  /* 字号 */
+  --text-xs: 12px;
+  --text-sm: 14px;
+  --text-base: 16px;
+  --text-lg: 18px;
+  --text-xl: 20px;
+  --text-2xl: 24px;
+  --text-3xl: 32px;
+  --text-4xl: 48px;
+
+  /* 动效 */
+  --motion-fast: 0.15s;
+  --motion-base: 0.25s;
+  --motion-slow: 0.4s;
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+}
