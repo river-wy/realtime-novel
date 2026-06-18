@@ -413,22 +413,29 @@ async def handle_onboarding_confirm(ws: WebSocket, user_id: str, data: dict):
     })
 
 
-async def _write_onboarding_to_artifacts(project_id: str, step: int, fields: dict) -> list:
-    """把 4 字段写入 7 件基座
+    from realtime_novel.services.onboarding_artifacts import (
+        assemble_7_artifacts, merge_payload_to_state, load_payload,
+    )
 
-    Step 3 4 字段 -> 7 件:
-    - core_relationship (Step 3) -> character_card.characters[].background
-    - emotional_anchor (Step 3) -> style_charter.notes 追加
-    - taboos (Step 3) -> style_charter.taboos 追加
-    - ending_preference (Step 3) -> main_plot.metadata.ending_preference
-    - main_conflict (Step 4) -> main_plot.arc_phrase + beats
-    - sub_plots (Step 4) -> sub_plot.threads
-    - characters (Step 4) -> character_card.characters
-    - seeds (Step 4) -> seed_table.seeds
+    # ============ m-v0.5-onboarding s2 重构 (2026-06-18 22:11) ============
+    # 把 4 字段合并到 onboarding_state.payload, 然后调 assemble_7_artifacts
+    # 完整拼 7 件 (不丢已有字段)
 
-    Returns:
-        artifacts_written: 写入了哪些 7 件表
-    """
+    if step not in (3, 4):
+        return []
+
+    # 1. 合并 fields 到 state_json.payload (Step 3 4 字段都进 payload)
+    try:
+        merge_payload_to_state(project_id, step, fields)
+    except ValueError as e:
+        # state 不存在 (用户跳过 Step 1-2 直接进 Step 3?) - 兼容: 静默继续
+        import logging
+        logging.warning(f"merge_payload_to_state failed: {e}")
+
+    # 2. 调 assemble_7_artifacts 完整拼 7 件
+    payload_full = load_payload(project_id)
+    artifacts_written = assemble_7_artifacts(project_id, payload_full)
+    return artifacts_written
     from realtime_novel.persistence import get_store
     import json
 
