@@ -39,7 +39,6 @@ function startNewProject() {
       <div class="hero-glow">
         <img :src="heroImage" alt="realtime-novel 主图" class="hero-image" />
       </div>
-      <h1 class="hero-title">realtime-novel</h1>
       <p class="hero-subtitle">实时生成 · 可干预 · 可回档</p>
       <p class="hero-desc">基于 LLM 的小说创作平台。世界树 + 主线 + 人物 + 种子表，让 AI 写你心中的故事。</p>
       <div class="hero-actions">
@@ -175,16 +174,6 @@ function startNewProject() {
     );
   z-index: -1;
   filter: blur(8px);
-}
-
-.hero-title {
-  font-size: var(--text-4xl);
-  background: linear-gradient(135deg, var(--color-accent-1), var(--color-accent-2));
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
-  margin-bottom: var(--space-3);
-  position: relative;
 }
 
 .hero-subtitle {
