@@ -1,6 +1,8 @@
 /**
  * Axios 客户端
- * baseURL: /api（Vite proxy 转发到 http://127.0.0.1:8080/api）
+ * baseURL: /api（Vite proxy 转发到后端）
+ * 后端实际端口：见 vite.config.ts 的 BACKEND_PORT（当前 7777）
+ * 不要在这里硬编码后端端口 — 走 /api 代理路径
  */
 import axios, { type AxiosInstance, type AxiosError } from 'axios'
 
