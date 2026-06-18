@@ -17,7 +17,7 @@ from pathlib import Path
 
 import httpx
 
-BASE = "http://127.0.0.1:8080"
+BASE = "http://127.0.0.1:7777"
 
 
 async def main():

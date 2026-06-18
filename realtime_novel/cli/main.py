@@ -22,7 +22,7 @@ _LEGACY_HINT = """
     临时启用: realtime-novel --legacy <subcommand> [args]
 
 💡 推荐: 用 HTTP API
-    启动: realtime-novel-api  (默认 http://127.0.0.1:8080)
+    启动: realtime-novel-api  (默认 http://127.0.0.1:7777)
     UI:   M-ε.5 frontend/ (即将实装)
 """
 

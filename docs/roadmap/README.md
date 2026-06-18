@@ -147,12 +147,12 @@ python -m realtime_novel <command> <args>
 - **框架**：Vite 5 + Vue 3.5 + TypeScript + Pinia + Vue Router + Axios
 - **样式**：Vanilla CSS + CSS 变量（**不引** Tailwind/UI 库）
 - **图标**：Phosphor Icons（**不引** Lucide）
-- **API 客户端**：baseURL = `http://127.0.0.1:8080/api`（阶段 2 部署后切换）
+- **API 客户端**：baseURL = `http://127.0.0.1:7777/api`（阶段 2 部署后切换）
 - **设计规范 subskill**：`novel-novel-design` v1.0（樱色夜空 #1B0F2E + 强调 #FF8FB1 / #FFC857 / #8B5CF6，3-DIAL 7/8/3）
 
 ### 怎么算完成
 
-- 4 页面在 `http://localhost:5173` 跑得通
+- 4 页面在 `http://localhost:5174` 跑得通
 - 跟后端联调成功（创建项目 → 读章节 → 干预 → 回档）
 - 桌面 1440×900 + 平板 1024×768 + H5 375×667 三档响应式
 - LCP < 2s / CLS < 0.1
