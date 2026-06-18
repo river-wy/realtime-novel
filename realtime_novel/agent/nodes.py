@@ -28,11 +28,21 @@ from realtime_novel.agent.tools import get_tool
 async def intake_node(state: AgentState) -> dict:
     """节点 1：解析用户输入，输出 intent
 
-    v0.4 简化版：keyword 匹配（不调 LLM）
+    v0.4.1 增强：可选调 LLM（传 history_messages + system_prompt）
+    - 如果 state.system_prompt 为空 → 走 v0.4 简化版（keyword 匹配）
+    - 如果 state.system_prompt 非空 → 调 LLM 解析 intent（带多轮上下文）
     """
-    msg = state.user_message.lower()
+    if not state.system_prompt:
+        # v0.4 简化版（keyword 匹配）
+        return _intake_keyword(state.user_message)
+    return await _intake_llm(state)
+
+
+def _intake_keyword(user_message: str) -> dict:
+    """v0.4 keyword 匹配版"""
+    msg = user_message.lower()
     if "删除" in msg or "delete" in msg:
-        intent = Intent.CHAT  # delete 走 agent 二次确认，先按 chat 处理
+        intent = Intent.CHAT
     elif "生成" in msg or "写" in msg or "generate" in msg or "下一章" in msg:
         intent = Intent.GENERATE
     elif "回滚" in msg or "rollback" in msg:
@@ -48,17 +58,71 @@ async def intake_node(state: AgentState) -> dict:
     return {"intent": intent}
 
 
+async def _intake_llm(state: AgentState) -> dict:
+    """v0.4.1 LLM 版（带多轮上下文）"""
+    from realtime_novel.adapters.llm_adapter import get_llm_adapter
+    from realtime_novel.adapters.types import ModelRole
+    from realtime_novel.agent.context_builder import build_messages_for_node
+
+    adapter = get_llm_adapter()
+
+    # 拼 messages（system + history + current user）
+    # 管家 system prompt 可以包含意图枚举
+    intent_enum_text = "\n".join([f"- {i.value}: {i.name}" for i in Intent])
+    full_system = f"""{state.system_prompt}
+
+## Intent 分类参考
+{intent_enum_text}
+
+## 输出格式
+只输出一个 intent 单词（不加解释）：
+generate / intervene / rollback / adjust_base / create_project / chat
+"""
+    messages = build_messages_for_node(
+        conversation_id=state.conversation_id,
+        current_user_message=state.user_message,
+        max_history=20,
+        system_prompt=None,  # system 走 system_prompt 字段
+    )
+    try:
+        response = await adapter.complete_with_messages(
+            messages=messages[1:],  # 去掉 system（下面传）
+            system_prompt=full_system,
+            max_tokens=20,
+            temperature=0.2,
+            role=ModelRole.TEXT,
+        )
+        intent_str = response.content.strip().lower()
+        # 解析为 Intent enum
+        try:
+            intent = Intent(intent_str)
+        except ValueError:
+            intent = Intent.CHAT  # fallback
+        return {"intent": intent, "history_messages": messages}
+    except Exception as e:
+        # LLM 失败 → fallback keyword
+        return _intake_keyword(state.user_message)
+
+
 # ============ consult_experts ============
 
 async def consult_experts_node(state: AgentState) -> dict:
-    """节点 2：并行咨询 3 个专家 stub"""
+    """节点 2：并行咨询 3 个专家 stub
+
+    v0.4.1：传 history_messages 让专家看到多轮上下文
+    """
     chapter_stub = ChapterGeneratorStub()
     world_stub = WorldTreeKeeperStub()
     memory_stub = MemoryKeeperStub()
+    # 拼 context（含 intent + history_messages）
+    common_context = {
+        "intent": state.intent.value if state.intent else "",
+        "history_messages": state.history_messages or [],
+    }
     results = await asyncio.gather(
-        chapter_stub.consult({"intent": state.intent.value if state.intent else ""}),
-        world_stub.consult({"intent": state.intent.value if state.intent else ""}),
-        memory_stub.consult({"intent": state.intent.value if state.intent else ""}),
+        chapter_stub.consult(common_context),
+        world_stub.consult(common_context),
+        memory_stub.consult(common_context),
     )
     opinions = []
     for r in results:
@@ -144,23 +208,78 @@ async def reflect_node(state: AgentState) -> dict:
 # ============ respond ============
 
 async def respond_node(state: AgentState) -> dict:
-    """节点 6：包装 result 为最终回复"""
+    """节点 6：包装 result 为最终回复
+
+    v0.4.1 增强：可选调 LLM 生成管家语气回复（带多轮上下文）
+    """
+    # 收集 tool result 摘要
     if not state.tool_calls:
-        return {"final_response": state.user_message}
-    last_tc = state.tool_calls[-1]
-    if last_tc.error:
-        return {"final_response": f"抱歉，处理失败：{last_tc.error}"}
-    # 取 result 第一个有内容的字段
-    if last_tc.result:
-        result = last_tc.result
-        # 尝试取 'content' / 'image_url' / 'opinion' 等
-        for key in ("content", "image_url", "opinion", "new_pov", "new_chapter_plan", "next_step"):
-            if key in result:
-                return {"final_response": str(result[key])}
-        # 兜底：序列化 result
-        import json
-        return {"final_response": json.dumps(result, ensure_ascii=False, indent=2)[:500]}
-    return {"final_response": "完成"}
+        tool_summary = "无工具调用"
+    else:
+        last_tc = state.tool_calls[-1]
+        if last_tc.error:
+            tool_summary = f"工具调用失败: {last_tc.error}"
+        elif last_tc.result:
+            import json
+            tool_summary = json.dumps(last_tc.result, ensure_ascii=False)[:500]
+        else:
+            tool_summary = "完成"
+
+    if not state.system_prompt:
+        # v0.4 简化版（直接拼结果）
+        if not state.tool_calls:
+            return {"final_response": state.user_message}
+        if state.tool_calls[-1].error:
+            return {"final_response": f"抱歉，处理失败：{state.tool_calls[-1].error}"}
+        if state.tool_calls[-1].result:
+            for key in ("content", "image_url", "opinion", "new_pov", "new_chapter_plan", "next_step"):
+                if key in state.tool_calls[-1].result:
+                    return {"final_response": str(state.tool_calls[-1].result[key])}
+            import json
+            return {"final_response": json.dumps(state.tool_calls[-1].result, ensure_ascii=False, indent=2)[:500]}
+        return {"final_response": "完成"}
+
+    # v0.4.1 LLM 版（带多轮上下文 + 管家语气）
+    return await _respond_llm(state, tool_summary)
+
+
+async def _respond_llm(state: AgentState, tool_summary: str) -> dict:
+    """v0.4.1 LLM 版 respond（管家语气 + 多轮上下文）"""
+    from realtime_novel.adapters.llm_adapter import get_llm_adapter
+    from realtime_novel.adapters.types import ModelRole
+    from realtime_novel.agent.context_builder import build_messages_for_node
+
+    adapter = get_llm_adapter()
+
+    full_system = f"""{state.system_prompt}
+
+## 任务
+根据工具调用结果，用你的身份语气生成自然语言回复给用户。
+
+## 工具调用结果
+{tool_summary}
+"""
+    # 拿 history（包括上轮 assistant + 工具调用的 tool 消息）
+    messages = build_messages_for_node(
+        conversation_id=state.conversation_id,
+        current_user_message=state.user_message,
+        max_history=20,
+        system_prompt=None,
+    )
+    try:
+        response = await adapter.complete_with_messages(
+            messages=messages[1:],
+            system_prompt=full_system,
+            max_tokens=500,
+            temperature=0.7,
+            role=ModelRole.TEXT,
+        )
+        return {
+            "final_response": response.content,
+            "history_messages": messages,
+        }
+    except Exception:
+        return {"final_response": tool_summary[:500]}
 
 
 # ============ 条件边 ============

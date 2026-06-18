@@ -58,3 +58,7 @@ class AgentState(BaseModel):
     # LangGraph 内部
     messages: list[dict[str, Any]] = Field(default_factory=list)
     interrupt_requested: bool = False
+
+    # v0.4.1: LLM 调用的多轮上下文（从 messages 表拿，节点调 LLM 时传）
+    history_messages: list[dict[str, Any]] = Field(default_factory=list)
+    system_prompt: Optional[str] = None  # v0.4.1: 节点调 LLM 用的 system prompt

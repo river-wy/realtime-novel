@@ -1,125 +1,102 @@
-"""v0.4 Async 包装层（不重写 v0.3 逻辑）
+"""v0.4.1 Async 包装层 — 全部走 DB（v0.4.1 文件→DB 迁移完成）
 
-设计：v0.3 内部服务是同步实现，v0.4 通过 AsyncProjectManager（仅基于 ProjectManager）
-保持兼容，ChapterGenerator/OnboardingFlow/InterventionParser/RollbackManager 的
-v0.3 内部实现被 tools 层直接调同步方法（+ asyncio.to_thread）。
+设计：
+- v0.4 文件系统为根，v0.4.1 全部以 DB 为根
+- ProjectRepository / ChapterRepository 是一等公民
+- 章节正文仍保留文件（`data/{project_id}/chapters/chapter_NNN.md`），但 metadata 入 DB
+- 工具层（P0/P1 重构后）调这里
 
-v0.4 变更：
-- AsyncProjectManager: 修 workspace_root 参数适配 v0.3 ProjectManager
-- 其他 Async 包装暂时是 stub，Phase 2-3 时由 tools 层按需直接调 v0.3 同步方法
+v0.4.1 变更：
+- 所有方法走 ProjectRepository / ChapterRepository
+- 旧文件兼容：仍保留 `data/projects/{id}/chapters/` 文件夹，但 metadata 从 DB 读
 """
 from __future__ import annotations
 
 import asyncio
 import shutil
+import time
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Dict, Any, List
 
-from realtime_novel.core.project import ProjectManager
+from realtime_novel.persistence import (
+    ProjectRepository, ChapterRepository, get_store,
+    ProjectDeletedRepository,
+)
 
 
 class AsyncProjectManager:
-    """v0.3 ProjectManager 异步包装 + v0.4 新增 delete（v1.3 软删方案 b）"""
+    """v0.4.1 异步项目管理器（DB 优先）
+
+    替代 v0.4 文件系统实现，所有操作走 ProjectRepository
+    """
 
     def __init__(self, workspace_root: Path | str = "data"):
-        # v0.3 ProjectManager 接受 workspace_root，自动加 'projects' 子目录
-        self._sync = ProjectManager(workspace_root=Path(workspace_root))
-        self.projects_root = Path(workspace_root) / "projects"
         self.workspace_root = Path(workspace_root)
+        self.projects_root = Path(workspace_root) / "projects"
+        self.chapters_root = self.projects_root  # 章节文件路径统一在 projects/{id}/chapters/
         self.trash_root = self.projects_root / ".trash"
+        self._proj_repo = ProjectRepository()
+        self._chap_repo = ChapterRepository()
+
+    # ============ CRUD ============
 
     async def create(self, name: str, palette: str, initial_prompt: Optional[str] = None) -> dict:
-        """v0.4 create(name, palette, prompt) - v0.4 独立实现
-
-        不调 v0.3 ProjectManager.create()（依赖 pydantic v1 旧接口，与 v0.4 环境冲突）
-        v0.4 直接用文件系统 + YAML 初始化项目骨架
-        """
-        import time
-        import yaml
+        """创建项目（projects 表 + 项目目录）"""
+        # 1. DB 落项目
+        project = self._proj_repo.create(project_id=name, name=name, palette=palette)
+        # 2. 创建项目目录（章节文件根）
         project_path = self.projects_root / name
-        if project_path.exists():
-            raise FileExistsError(f"Project {name} already exists")
-        project_path.mkdir(parents=True)
-        (project_path / "chapters").mkdir()
-        # 7_artifacts.yaml 默认内容
-        artifacts = {
-            "name": name,
-            "palette": palette,
-            "initial_prompt": initial_prompt or "",
-            "created_at": time.time(),
-            "world_tree": {},
-            "main_plot": "",
-            "style_charter": {"raw": ""},
-            "seed_table": [],
-            "genre_resonance": {},
-            "current_pov": "",
+        project_path.mkdir(parents=True, exist_ok=True)
+        (project_path / "chapters").mkdir(parents=True, exist_ok=True)
+        return {
+            "id": project.id,
+            "name": project.name,
+            "palette": project.palette,
         }
-        (project_path / "7_artifacts.yaml").write_text(
-            yaml.safe_dump(artifacts, allow_unicode=True)
-        )
-        # project.yaml
-        (project_path / "project.yaml").write_text(
-            yaml.safe_dump({"id": name, "name": name, "palette": palette}, allow_unicode=True)
-        )
-        # world_tree.json
-        import json
-        (project_path / "world_tree.json").write_text(json.dumps({"characters": [], "locations": []}))
-        return {"id": name, "name": name, "palette": palette}
 
     async def load(self, project_id: str) -> Optional[dict]:
-        """v0.4 独立 load（不调 v0.3）"""
-        import json
-        project_path = self.projects_root / project_id
-        if not project_path.exists():
+        """加载项目（DB 优先）"""
+        project = self._proj_repo.get(project_id)
+        if not project:
             return None
-        # 读 7_artifacts.yaml
-        import yaml
-        yaml_path = project_path / "7_artifacts.yaml"
-        artifacts = {}
-        if yaml_path.exists():
-            artifacts = yaml.safe_load(yaml_path.read_text()) or {}
-        # 列章节
+        # 7 件基座（DB 读）
+        all_artifacts = self._proj_repo.load_all_artifacts(project_id)
+        # 章节列表（DB 读 metadata，正文按 file_path 拼）
+        chapter_rows = self._chap_repo.list_by_project(project_id, limit=200)
         chapters = []
-        chapters_dir = project_path / "chapters"
-        if chapters_dir.exists():
-            for f in sorted(chapters_dir.glob("chapter_*.md")):
-                num = int(f.stem.split("_")[1])
-                chapters.append({"num": num, "title": f"第 {num} 章"})
+        for c in chapter_rows:
+            chapters.append({
+                "num": c.chapter_num,
+                "title": c.title or f"第 {c.chapter_num} 章",
+                "summary": c.summary,
+                "word_count": c.word_count,
+                "file_path": c.file_path,
+            })
         return {
-            "id": project_id,
-            "name": artifacts.get("name", project_id),
-            "palette": artifacts.get("palette", ""),
-            "seven_artifacts": artifacts,
-            "world_tree": artifacts.get("world_tree", {}),
+            "id": project.id,
+            "name": project.name,
+            "palette": project.palette,
+            "current_pov": project.current_pov,
+            "seven_artifacts": all_artifacts,  # 兼容旧字段名
+            "world_tree": all_artifacts.get("01-world-tree.yaml", {}),
             "chapters": chapters,
         }
 
     async def list_projects(self, limit: int = 20, offset: int = 0) -> list[dict]:
-        """v0.4 独立 list（直接读文件系统）"""
-        import yaml
-        if not self.projects_root.exists():
-            return []
+        """列项目（DB 优先）"""
+        projects = self._proj_repo.list_all(limit=limit + offset)
         result = []
-        for d in sorted(self.projects_root.iterdir()):
-            if d.is_dir() and d.name != ".trash":
-                # 读 metadata
-                artifacts_path = d / "7_artifacts.yaml"
-                palette = ""
-                chapter_count = 0
-                if artifacts_path.exists():
-                    artifacts = yaml.safe_load(artifacts_path.read_text()) or {}
-                    palette = artifacts.get("palette", "")
-                chapters_dir = d / "chapters"
-                if chapters_dir.exists():
-                    chapter_count = len(list(chapters_dir.glob("chapter_*.md")))
-                result.append({
-                    "id": d.name,
-                    "name": d.name,
-                    "palette": palette,
-                    "chapter_count": chapter_count,
-                })
-        return result[offset:offset + limit]
+        for p in projects[offset:]:
+            # 章节数从 DB 读
+            chapter_count = self._chap_repo.count_chapters(p.id)
+            result.append({
+                "id": p.id,
+                "name": p.name,
+                "palette": p.palette,
+                "chapter_count": chapter_count,
+            })
+        return result
 
     async def update_base(
         self,
@@ -129,63 +106,108 @@ class AsyncProjectManager:
     ) -> dict:
         """改 7 件基座（spec §6.1 PATCH /base）
 
-        返回 {old_value, new_value, chapters_affected}
+        兼容旧 API：`new_value: str` 整段写入。
+        v0.4.1 推荐改用 `update_artifact`（结构化）。
         """
-        import yaml
-        project_path = self.projects_root / project_id
-        if not project_path.exists():
-            raise FileNotFoundError(f"Project not found: {project_id}")
-        yaml_path = project_path / "7_artifacts.yaml"
-        if yaml_path.exists():
-            data = yaml.safe_load(yaml_path.read_text()) or {}
-        else:
-            data = {}
-        old_value = str(data.get(key, ""))[:100]
-        data[key] = new_value
-        yaml_path.write_text(yaml.safe_dump(data, allow_unicode=True))
-        # 列章节
-        chapters_dir = project_path / "chapters"
-        affected = []
-        if chapters_dir.exists():
-            for f in chapters_dir.glob("chapter_*.md"):
-                num = int(f.stem.split("_")[1])
-                affected.append(num)
+        # 兼容路径：把 str 当作整段 JSON/YAML 写入对应表
+        import json
+        try:
+            parsed = json.loads(new_value)
+        except Exception:
+            parsed = new_value  # 字符串原样存
+
+        # 7 件表名映射（v0.4 key 名 → v0.4.1 表名）
+        key_to_table = {
+            "world_tree": "world_tree",
+            "style_charter": "style_charter",
+            "genre_resonance": "genre_resonance",
+            "main_plot": "main_plot",
+            "sub_plot": "sub_plot",
+            "character_card": None,  # 跨 characters + character_relationships
+            "seed_table": "seeds",
+        }
+        table = key_to_table.get(key)
+        old_preview = ""
+        if table:
+            with get_store().connection() as conn:
+                row = conn.execute(
+                    f"SELECT * FROM {table} WHERE project_id = ?", (project_id,)
+                ).fetchone()
+                if row:
+                    old_preview = str(dict(row))[:100]
+
+        # 读其他 6 件保持不变
+        world_tree = parsed if key == "world_tree" else self._load_one(project_id, "world_tree")
+        style_charter = parsed if key == "style_charter" else self._load_one(project_id, "style_charter")
+        genre_resonance = parsed if key == "genre_resonance" else self._load_one(project_id, "genre_resonance")
+        main_plot = parsed if key == "main_plot" else self._load_one(project_id, "main_plot")
+        sub_plot = parsed if key == "sub_plot" else self._load_one(project_id, "sub_plot")
+        character_card = parsed if key == "character_card" else self._load_one(project_id, "character_card")
+        seed_table = parsed if key == "seed_table" else self._load_one(project_id, "seed_table")
+
+        self._proj_repo.save_7_artifacts(
+            project_id=project_id,
+            world_tree=world_tree,
+            style_charter=style_charter,
+            genre_resonance=genre_resonance,
+            main_plot=main_plot,
+            sub_plot=sub_plot,
+            character_card=character_card,
+            seed_table=seed_table,
+        )
+
+        chapters = self._chap_repo.list_by_project(project_id, limit=200)
+        affected = [c.chapter_num for c in chapters]
         return {
             "project_id": project_id,
             "key": key,
-            "old_value_preview": old_value,
+            "old_value_preview": old_preview,
             "new_value_preview": new_value[:100],
             "chapters_affected": affected,
         }
 
+    def _load_one(self, project_id: str, key: str) -> Dict[str, Any]:
+        """从 DB 读 7 件之一（dict 形式）"""
+        all_data = self._proj_repo.load_all_artifacts(project_id)
+        mapping = {
+            "world_tree": "01-world-tree.yaml",
+            "style_charter": "02-style-charter.yaml",
+            "genre_resonance": "03-genre-resonance.yaml",
+            "main_plot": "04-main-plot.yaml",
+            "sub_plot": "05-sub-plot.yaml",
+            "character_card": "06-character-card.yaml",
+            "seed_table": "07-seed-table.yaml",
+        }
+        return all_data.get(mapping.get(key, ""), {})
+
     async def rollback(self, project_id: str, to_chapter: int, confirm: bool = False) -> dict:
-        """回档到指定章节（spec §6.1 POST /rollback）
+        """回档到指定章节（cascade 删 chapters + 关联表）
 
         返回 {kept_chapters, removed_chapters}
         """
         if not confirm:
             raise ValueError("rollback requires confirm=True")
-        project_path = self.projects_root / project_id
-        if not project_path.exists():
-            raise FileNotFoundError(f"Project not found: {project_id}")
-        chapters_dir = project_path / "chapters"
-        kept = 0
-        removed = 0
-        if chapters_dir.exists():
-            for f in chapters_dir.glob("chapter_*.md"):
-                num = int(f.stem.split("_")[1])
-                if num > to_chapter:
-                    f.unlink()
-                    removed += 1
-                else:
-                    kept += 1
-        # 同步 chapter_status
-        from realtime_novel.persistence import get_store
+        # DB cascade 删章节 metadata + 关联表
+        kept = self._chap_repo.count_chapters(project_id)
+        removed = self._chap_repo.rollback_to(project_id, to_chapter)
+        kept = kept - removed
+        # 同步 chapter_status 表
         with get_store().connection() as conn:
             conn.execute(
                 "DELETE FROM chapter_status WHERE project_id = ? AND chapter_num > ?",
                 (project_id, to_chapter),
             )
+        # 文件系统清理：删 > to_chapter 的 chapter_NNN.md
+        project_path = self.projects_root / project_id
+        chapters_dir = project_path / "chapters"
+        if chapters_dir.exists():
+            for f in chapters_dir.glob("chapter_*.md"):
+                try:
+                    num = int(f.stem.split("_")[1])
+                    if num > to_chapter:
+                        f.unlink()
+                except (ValueError, IndexError):
+                    continue
         return {
             "project_id": project_id,
             "to_chapter": to_chapter,
@@ -199,11 +221,10 @@ class AsyncProjectManager:
         与 delete() 区别：额外写 projects_deleted 表
         返回 {trash_path, deleted_at}
         """
-        from realtime_novel.persistence import ProjectDeletedRepository
-        # 软删前先读元数据（删后文件已 mv，读不到）
+        # 软删前先读元数据
         project = await self.load(project_id) or {}
         result = await self.delete(project_id, confirm=confirm)
-        # 写 projects_deleted 表（用删前的元数据）
+        # 写 projects_deleted 表
         pd_repo = ProjectDeletedRepository()
         await pd_repo.add(
             project_id=project_id,
@@ -214,7 +235,7 @@ class AsyncProjectManager:
         return result
 
     async def delete(self, project_id: str, confirm: bool = False) -> dict:
-        """v0.4 新增：软删除（v1.3 方案 b）"""
+        """删除项目（mv 到 trash + 软标记 projects.deleted_at）"""
         if not confirm:
             raise ValueError("delete requires confirm=True")
         project_path = self.projects_root / project_id
@@ -224,6 +245,8 @@ class AsyncProjectManager:
         timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
         trash_path = self.trash_root / f"{project_id}-{timestamp}"
         await asyncio.to_thread(shutil.move, str(project_path), str(trash_path))
+        # 软标记（DB）
+        self._proj_repo.soft_delete(project_id)
         return {
             "project_id": project_id,
             "trash_path": str(trash_path),
@@ -240,21 +263,20 @@ class AsyncProjectManager:
         if target.exists():
             raise FileExistsError(f"Project {project_id} already exists")
         await asyncio.to_thread(shutil.move, str(trash_path), str(target))
+        # DB 取消软删标记
+        with get_store().connection() as conn:
+            conn.execute(
+                "UPDATE projects SET deleted_at = NULL WHERE id = ?",
+                (project_id,),
+            )
         return {"project_id": project_id, "restored_from": str(trash_path)}
 
 
-# ============ 占位 stub（Phase 2-3 工具层按需直接调 v0.3 同步方法）============
+# ============ 其他 Async 包装（走 DB 适配）============
 
 class AsyncChapterGenerator:
-    """v0.4 章节生成占位
+    """v0.4 章节生成占位（v0.4.1 不变，仍委托给 state_graph_stub）"""
 
-    v0.4 实际实现位于 realtime_novel/agent/state_graph_stub.py (generate_chapter_via_state_graph)
-    路径 1: tool 层直接调 state_graph_stub（不经过 AsyncChapterGenerator）
-    路径 2: 本类提供向后兼容，v0.5+ 接入真实 v0.3 ChapterGenerator
-
-    v0.3 ChapterGenerator 接受 WorldTree/Project 实例（不是 project_id 字符串），
-    与 v0.4 的 async 上下文不兼容，所以 v0.4 暂时不包装 v0.3。
-    """
     def __init__(self, workspace_root: Path | str = "data"):
         self.workspace_root = Path(workspace_root)
 
@@ -265,7 +287,7 @@ class AsyncChapterGenerator:
         actor_feedback: str | None = None,
         actor_character: str | None = None,
     ) -> dict:
-        """委托给 state_graph_stub.generate_chapter_via_state_graph"""
+        """委托给 state_graph_stub.generate_chapter_via_state_graph（DB-aware）"""
         from realtime_novel.agent.state_graph_stub import generate_chapter_via_state_graph
         return await generate_chapter_via_state_graph(
             project_id=project_id,
@@ -276,30 +298,40 @@ class AsyncChapterGenerator:
 
 
 class AsyncOnboardingFlow:
-    """v0.4 onboarding 简化版（5 步状态机跟踪）
-
-    v0.3 OnboardingFlow 接受 Project 实例；v0.4 接受 project_id + step + payload
-    5 步状态用 SQLite 记录（v0.4 简化版：内存 dict 记录）
-    """
+    """v0.4.1 onboarding 状态机 — state 走 DB（onboarding_state 表）"""
 
     def __init__(self, workspace_root: Path | str = "data"):
         self.workspace_root = Path(workspace_root)
-        # 5 步状态: project_id -> {step, next_step, payload}
-        self._state: dict = {}
 
     async def step(self, project_id: str, step: str, payload: dict) -> dict:
-        """执行 onboarding 单步
-
-        step ∈ {1a, 1b, 2, 3, 4, 5}
-        简化版：只记录状态 + 返回 next_step
-        """
+        """执行 onboarding 单步（onboarding_state 表）"""
+        import json
         next_step_map = {
             "1a": "1b", "1b": "2", "2": "3", "3": "4", "4": "5", "5": None,
         }
-        self._state[project_id] = {
-            "current_step": step,
-            "payload": payload,
-        }
+        now = datetime.now()
+        with get_store().connection() as conn:
+            # upsert state
+            existing = conn.execute(
+                "SELECT state_json FROM onboarding_state WHERE project_id = ?",
+                (project_id,),
+            ).fetchone()
+            state_data = json.loads(existing["state_json"]) if existing else {}
+            state_data["current_step"] = step
+            state_data["payload"] = payload
+            state_data["updated_at"] = now.isoformat()
+            if existing:
+                conn.execute(
+                    "UPDATE onboarding_state SET current_step = ?, state_json = ?, updated_at = ? "
+                    "WHERE project_id = ?",
+                    (_step_to_num(step), json.dumps(state_data, ensure_ascii=False), now, project_id),
+                )
+            else:
+                conn.execute(
+                    "INSERT INTO onboarding_state (project_id, current_step, started_at, updated_at, state_json) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    (_step_to_num(step), now, now, json.dumps(state_data, ensure_ascii=False)),
+                )
         return {
             "step": step,
             "next_step": next_step_map.get(step),
@@ -307,12 +339,14 @@ class AsyncOnboardingFlow:
         }
 
 
-class AsyncInterventionParser:
-    """v0.4 intervention 简化版（写文件 v0.4-interventions.yaml）
+def _step_to_num(step: str) -> int:
+    """step 名 → 数字 (1a=1, 1b=2, 2=3, 3=4, 4=5, 5=6)"""
+    mapping = {"1a": 1, "1b": 2, "2": 3, "3": 4, "4": 5, "5": 6}
+    return mapping.get(step, 0)
 
-    v0.3 InterventionParser 接受 project_dir；v0.4 接受 project_id
-    """
-    import yaml as _yaml
+
+class AsyncInterventionParser:
+    """v0.4.1 intervention 简化版（DB 落 chapters.intervention 字段）"""
 
     def __init__(self, workspace_root: Path | str = "data"):
         self.workspace_root = Path(workspace_root)
@@ -324,37 +358,42 @@ class AsyncInterventionParser:
         actor_feedback: str | None = None,
         actor_character: str | None = None,
     ) -> dict:
-        """写干预到项目干预文件"""
-        from datetime import datetime
-        project_path = self.workspace_root / "projects" / project_id
-        intervention_path = project_path / "interventions.yaml"
-        if intervention_path.exists():
-            data = self._yaml.safe_load(intervention_path.read_text()) or {"items": []}
-        else:
-            data = {"items": []}
-        data["items"].append({
-            "timestamp": datetime.now().isoformat(),
-            "intervention": intervention or "",
-            "actor_feedback": actor_feedback or "",
-            "actor_character": actor_character or "",
-        })
-        intervention_path.parent.mkdir(parents=True, exist_ok=True)
-        intervention_path.write_text(self._yaml.safe_dump(data, allow_unicode=True))
-        return {"project_id": project_id, "accepted": True, "total": len(data["items"])}
+        """写干预到下一章（最新章节的 intervention 字段）"""
+        from realtime_novel.persistence import ChapterRepository
+        chap_repo = ChapterRepository()
+        latest = chap_repo.get_latest(project_id)
+        if not latest:
+            # 还没有章节，新建一个空槽位
+            return {
+                "project_id": project_id,
+                "accepted": False,
+                "reason": "no chapter yet",
+            }
+        # 更新最新章节的 intervention
+        from realtime_novel.persistence import get_store
+        with get_store().connection() as conn:
+            conn.execute(
+                "UPDATE chapters SET intervention = ?, actor_feedback = ?, actor_character = ?, updated_at = ? "
+                "WHERE project_id = ? AND chapter_num = ?",
+                (intervention or "", actor_feedback or "", actor_character or "",
+                 datetime.now(), project_id, latest.chapter_num),
+            )
+        return {
+            "project_id": project_id,
+            "chapter_num": latest.chapter_num,
+            "accepted": True,
+        }
 
 
 class AsyncRollbackManager:
-    """v0.4 rollback 占位（实际由 AsyncProjectManager.rollback 实现）
+    """v0.4.1 rollback 委托"""
 
-    保留本类以兼容老调用代码（action_routes.py 在 P0 重构后已不直接调用本类）
-    """
     def __init__(self, workspace_root: Path | str = "data"):
         self.workspace_root = Path(workspace_root)
 
     async def rollback(
         self, project_id: str, to_chapter: int, confirm: bool = False
     ) -> dict:
-        """委托给 AsyncProjectManager.rollback"""
         from realtime_novel.services.async_wrappers import AsyncProjectManager
         pm = AsyncProjectManager(workspace_root=self.workspace_root)
         return await pm.rollback(project_id, to_chapter, confirm=confirm)

@@ -1,11 +1,12 @@
 """LLM Adapter Types - Pydantic Schema
 
 对应 infra.md §B.2.2 + novel-llm-adapter.json
+v0.4.1: LLMRequest 加 messages 字段，支持多轮对话上下文
 """
 from __future__ import annotations
 
 from enum import Enum
-from typing import Optional
+from typing import Optional, List, Dict, Any
 from pydantic import BaseModel, Field
 
 
@@ -21,8 +22,14 @@ class ModelProvider(str, Enum):
 
 
 class LLMRequest(BaseModel):
-    """统一的 LLM 调用请求"""
-    prompt: str = Field(..., min_length=1)
+    """统一的 LLM 调用请求
+
+    v0.4.1 扩展：加 messages 字段（标准 OpenAI 格式）
+    - 如果传了 messages：直接用（可包含 system / user / assistant / tool 消息）
+    - 如果没传 messages：兼容旧代码，system_prompt + prompt 拼成单条 user
+    """
+    prompt: str = Field(default="", min_length=0)  # v0.4.1 改成可空（messages 模式不需要）
+    messages: List[Dict[str, Any]] = Field(default_factory=list)  # v0.4.1 新增
     role: ModelRole = ModelRole.TEXT
     temperature: float = Field(0.7, ge=0, le=2)
     max_tokens: int = Field(2048, ge=1, le=8192)

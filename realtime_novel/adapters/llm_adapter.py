@@ -32,6 +32,32 @@ class LLMAdapter:
         provider = self.router.get_provider(request.role)
         return await with_retry(provider.complete, request, max_retries=3, base_delay=1.0)
 
+    async def complete_with_messages(
+        self,
+        messages: list[dict],
+        system_prompt: Optional[str] = None,
+        temperature: float = 0.7,
+        max_tokens: int = 2048,
+        role: ModelRole = ModelRole.TEXT,
+    ) -> LLMResponse:
+        """v0.4.1 新增：多轮对话便捷调用
+
+        Args:
+            messages: OpenAI 格式 messages 数组（不含 system）
+                [{"role": "user", "content": "..."}, ...]
+            system_prompt: system prompt（可选）
+            temperature/max_tokens/role: 其他参数
+        """
+        request = LLMRequest(
+            prompt="",  # messages 模式下不需要
+            messages=messages,
+            system_prompt=system_prompt,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            role=role,
+        )
+        return await self.complete(request)
+
     async def stream(
         self, request: LLMRequest
     ) -> AsyncIterator[LLMStreamChunk]:

@@ -72,10 +72,26 @@ class DeepSeekProvider(LLMProvider):
             )
 
     def _build_messages(self, request: LLMRequest) -> list[dict]:
+        """构建 messages 数组
+
+        v0.4.1 优先用 messages 字段（多轮对话）：
+        - 如果 request.messages 非空：直接用 + 补 system_prompt（如果不存在）
+        - 如果 request.messages 空：兼容旧代码（system_prompt + prompt 拼成单条 user）
+        """
         msgs = []
-        if request.system_prompt:
-            msgs.append({"role": "system", "content": request.system_prompt})
-        msgs.append({"role": "user", "content": request.prompt})
+
+        if request.messages:
+            # 多轮模式：直接用 messages 数组
+            msgs.extend(request.messages)
+            # 如果传了 system_prompt 且 messages 里没有 system，拼到首位
+            if request.system_prompt and not any(m.get("role") == "system" for m in msgs):
+                msgs.insert(0, {"role": "system", "content": request.system_prompt})
+        else:
+            # 兼容模式：单条 user
+            if request.system_prompt:
+                msgs.append({"role": "system", "content": request.system_prompt})
+            if request.prompt:
+                msgs.append({"role": "user", "content": request.prompt})
         return msgs
 
     def count_tokens(self, text: str) -> int:

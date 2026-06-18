@@ -59,8 +59,12 @@ class ChapterContent(BaseModel):
 # ============ Base Edit 工具（7 件基座）============
 
 class UpdateBaseInput(BaseModel):
+    """v0.4 兼容 API：整段写入
+
+    v0.4.1 推荐改用 EditArtifactInput（结构化增删改）
+    """
     project_id: str = Field(..., min_length=1)
-    key: Literal["name", "palette", "world_tree", "main_plot", "style_charter", "seed_table", "genre_resonance"]
+    key: Literal["name", "palette", "world_tree", "main_plot", "style_charter", "seed_table", "genre_resonance", "character_card", "sub_plot"]
     new_value: str = Field(..., min_length=1)
 
 
@@ -70,6 +74,41 @@ class UpdateBaseResult(BaseModel):
     old_value_preview: str
     new_value_preview: str
     chapters_affected: list[int]
+
+
+class EditArtifactInput(BaseModel):
+    """v0.4.1 新增：结构化增量编辑（推荐使用）
+
+    业务含义：
+    - 管家 Agent 调 LLM 解析 user message → 调本工具
+    - 不传整段 JSON，传结构化 diff（add/update/delete）
+    - 工具内部做 Pydantic 校验 + DB 落盘
+
+    优势：
+    - 不会"忘了其他字段"（diff 友好）
+    - LLM 不需要输出完整 YAML/JSON
+    - 支持关系图操作（加关系、改弧光）
+    """
+    project_id: str = Field(..., min_length=1)
+    target: Literal[
+        "project_name", "project_palette", "current_pov",
+        "character", "relationship", "core_rule",
+        "timeline", "geography",
+        "seed", "subplot", "beat",
+    ]
+    operation: Literal["add", "update", "delete"]
+    identifier: Optional[str] = None  # update/delete 用（ID）
+    data: Optional[dict] = None  # add/update 用（完整字段或 diff）
+
+
+class EditArtifactResult(BaseModel):
+    project_id: str
+    target: str
+    operation: str
+    identifier: Optional[str] = None
+    success: bool
+    affected: Optional[dict] = None
+    error: Optional[str] = None
 
 
 class RollbackBaseInput(BaseModel):

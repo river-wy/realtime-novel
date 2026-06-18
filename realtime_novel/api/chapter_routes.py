@@ -15,6 +15,7 @@ from realtime_novel.agent.tools.schemas import (
     ReadChapterInput, GenerateChapterInput,
 )
 from realtime_novel.persistence import ChapterStatusRepository, ChapterState  # noqa: F401
+from realtime_novel.api.messages import record_tool_call, get_or_create_conversation
 
 router = APIRouter(prefix="/api/projects", tags=["chapters"])
 
@@ -100,7 +101,7 @@ async def generate_chapter(
     project_id: str,
     req: GenerateChapterRequest,
 ):
-    """生成下一章（60-100s 端到端）— 薄路由，只调 tool"""
+    """生成下一章（60-100s 端到端）— 薄路由，只调 tool（v0.4.1 落库）"""
     tool = get_tool("generate_chapter")
     input_obj = GenerateChapterInput(
         project_id=project_id,
@@ -114,6 +115,20 @@ async def generate_chapter(
         if output.code == "CONCURRENT_GENERATION":
             raise HTTPException(409, output.message)
         raise HTTPException(500, f"Chapter generation failed: {output.message}")
+    # v0.4.1 落库
+    conv_id = get_or_create_conversation(user_id="default", project_id=project_id)
+    result_dict = output.model_dump() if hasattr(output, "model_dump") else {"_raw": str(output)}
+    record_tool_call(
+        conversation_id=conv_id,
+        tool_name="generate_chapter",
+        args={
+            "project_id": project_id,
+            "intervention": req.intervention,
+            "actor_feedback": req.actor_feedback,
+            "actor_character": req.actor_character,
+        },
+        result=result_dict,
+    )
     return GenerateChapterResponse(
         chapter_num=output.num,
         title=output.title,

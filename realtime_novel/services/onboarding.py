@@ -483,7 +483,14 @@ class OnboardingFlow:
     # === Step 4 实现 ===
 
     def _generate_7_artifacts(self) -> None:
-        """调 LLM 把设定生成 7 件 YAML"""
+        """调 LLM 把设定生成 7 件 — v0.4.1 全部入 DB
+
+        流程：
+        1. 构造 prompt
+        2. 调 7 次 LLM（或 1 次大调用解析）生成 7 件 dict
+        3. Pydantic 校验 7 件
+        4. 走 ProjectRepository.save_7_artifacts 落 DB
+        """
         # 构造 prompt
         user_input = f"""题材: {self.state.genres}
 风格: {self.state.styles}
@@ -501,57 +508,57 @@ class OnboardingFlow:
 人物: {self.state.characters}
 种子: {self.state.seeds}"""
 
-        # === 世界树 ===
-        print("    · 生成 01-world-tree.yaml ...")
+        # === 7 次 LLM 生成（v0.4.1 暂保留，将来可改 1 次大调用）===
+        print("    · 生成 world_tree ...")
         wt = self._gen_world_tree(user_input)
-        io_write(self.project.file_path("01-world-tree.yaml"), wt)
 
-        # === 风格宪法 ===
-        print("    · 生成 02-style-charter.yaml ...")
+        print("    · 生成 style_charter ...")
         sc = self._gen_style_charter(user_input)
-        io_write(self.project.file_path("02-style-charter.yaml"), sc)
 
-        # === 题材共鸣 ===
-        print("    · 生成 03-genre-resonance.yaml ...")
+        print("    · 生成 genre_resonance ...")
         gr = self._gen_genre_resonance(user_input)
-        io_write(self.project.file_path("03-genre-resonance.yaml"), gr)
 
-        # === 主线大纲 ===
-        print("    · 生成 04-main-plot.yaml ...")
+        print("    · 生成 main_plot ...")
         mp = self._gen_main_plot(user_input)
-        io_write(self.project.file_path("04-main-plot.yaml"), mp)
 
-        # === 人物卡 ===
-        print("    · 生成 06-character-card.yaml ...")
+        print("    · 生成 character_card ...")
         cc = self._gen_character_card(user_input)
-        io_write(self.project.file_path("06-character-card.yaml"), cc)
 
-        # === 支线大纲 ===
-        print("    · 生成 05-sub-plot.yaml ...")
+        print("    · 生成 sub_plot ...")
         sp = self._gen_sub_plot(user_input)
-        io_write(self.project.file_path("05-sub-plot.yaml"), sp)
 
-        # === 种子表 ===
-        print("    · 生成 07-seed-table.yaml ...")
+        print("    · 生成 seed_table ...")
         st = self._gen_seed_table(user_input)
-        io_write(self.project.file_path("07-seed-table.yaml"), st)
 
-        # 校验 7 件 Pydantic
-        loaded = dict()
-        for schema_cls, filename in [
-            (WorldTreeSchema, "01-world-tree.yaml"),
-            (StyleCharterSchema, "02-style-charter.yaml"),
-            (GenreResonanceSchema, "03-genre-resonance.yaml"),
-            (MainPlotSchema, "04-main-plot.yaml"),
-            (CharacterCardSchema, "06-character-card.yaml"),
-            (SubPlotSchema, "05-sub-plot.yaml"),
-            (SeedTableSchema, "07-seed-table.yaml"),
+        # Pydantic 校验 7 件（不落盘）
+        loaded_validated = {}
+        for schema_cls, filename, data in [
+            (WorldTreeSchema, "01-world-tree.yaml", wt),
+            (StyleCharterSchema, "02-style-charter.yaml", sc),
+            (GenreResonanceSchema, "03-genre-resonance.yaml", gr),
+            (MainPlotSchema, "04-main-plot.yaml", mp),
+            (CharacterCardSchema, "06-character-card.yaml", cc),
+            (SubPlotSchema, "05-sub-plot.yaml", sp),
+            (SeedTableSchema, "07-seed-table.yaml", st),
         ]:
-            from ..adapters.io import read
-            data = read(self.project.file_path(filename))
-            loaded[filename] = schema_cls.model_validate(data)
-        print(f"  ✓ 7 件 YAML 落盘 + Pydantic 校验通过")
-        # 保存状态（无论谁调都该持久化）
+            loaded_validated[filename] = schema_cls.model_validate(data)
+
+        # 入 DB（v0.4.1 走 ProjectRepository，不写 YAML 文件）
+        from realtime_novel.persistence import ProjectRepository
+        repo = ProjectRepository()
+        repo.save_7_artifacts(
+            project_id=self.project.project_id,
+            world_tree=wt,
+            style_charter=sc,
+            genre_resonance=gr,
+            main_plot=mp,
+            sub_plot=sp,
+            character_card=cc,
+            seed_table=st,
+        )
+        print(f"  ✓ 7 件 Pydantic 校验通过 + 入 DB")
+
+        # 保存状态
         self._save_state()
 
     def _llm_json(self, system: str, user: str) -> dict:

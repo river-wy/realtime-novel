@@ -13,6 +13,7 @@ from realtime_novel.services.async_wrappers import (
     AsyncOnboardingFlow, AsyncInterventionParser, AsyncProjectManager, AsyncRollbackManager,
 )
 from realtime_novel.persistence import ChapterStatusRepository, get_store
+from realtime_novel.api.messages import record_tool_call, get_or_create_conversation
 
 router = APIRouter(prefix="/api/projects", tags=["actions"])
 _onboarding = AsyncOnboardingFlow()
@@ -37,13 +38,21 @@ class OnboardingResponse(BaseModel):
 
 @router.post("/{project_id}/onboarding", response_model=OnboardingResponse)
 async def onboarding(project_id: str, req: OnboardingRequest):
-    """5 步启动链路"""
+    """5 步启动链路（v0.4.1 落库）"""
     try:
         result = await _onboarding.step(project_id, req.step, req.payload)
     except FileNotFoundError as e:
         raise HTTPException(404, str(e))
     except Exception as e:
         raise HTTPException(500, str(e))
+    # v0.4.1 落库
+    conv_id = get_or_create_conversation(user_id="default", project_id=project_id)
+    record_tool_call(
+        conversation_id=conv_id,
+        tool_name="onboarding_step",
+        args={"step": req.step, "payload": req.payload},
+        result=result if isinstance(result, dict) else {"raw": str(result)},
+    )
     return OnboardingResponse(
         step=req.step,
         result=result if isinstance(result, dict) else {"raw": str(result)},
@@ -67,9 +76,9 @@ class InterventionResponse(BaseModel):
 
 @router.post("/{project_id}/interventions", response_model=InterventionResponse)
 async def submit_intervention(project_id: str, req: InterventionRequest):
-    """提交剧情干预"""
+    """提交剧情干预（v0.4.1 落库）"""
     try:
-        await _intervention.add(
+        result = await _intervention.add(
             project_id,
             req.intervention,
             req.actor_feedback,
@@ -77,6 +86,18 @@ async def submit_intervention(project_id: str, req: InterventionRequest):
         )
     except Exception as e:
         raise HTTPException(500, str(e))
+    # v0.4.1 落库
+    conv_id = get_or_create_conversation(user_id="default", project_id=project_id)
+    record_tool_call(
+        conversation_id=conv_id,
+        tool_name="intervene",
+        args={
+            "intervention": req.intervention,
+            "actor_feedback": req.actor_feedback,
+            "actor_character": req.actor_character,
+        },
+        result=result if isinstance(result, dict) else {"raw": str(result)},
+    )
     return InterventionResponse(
         project_id=project_id,
         accepted=True,
@@ -100,7 +121,7 @@ async def rollback_project(
     to_chapter: int = Query(..., ge=1),
     confirm: bool = Query(..., description="Must be true"),
 ):
-    """⚠️ 危险操作：回档 — 薄路由，调 rollback_base tool"""
+    """⚠️ 危险操作：回档 — 薄路由，调 rollback_base tool（v0.4.1 落库）"""
     if not confirm:
         raise HTTPException(400, "confirm query param must be true")
     from realtime_novel.agent.tools import get_tool
@@ -114,9 +135,18 @@ async def rollback_project(
         if output.code == "CONCURRENT_ROLLBACK":
             raise HTTPException(409, output.message)
         raise HTTPException(500, output.message)
+    # v0.4.1 落库
+    conv_id = get_or_create_conversation(user_id="default", project_id=project_id)
+    result_dict = output.model_dump() if hasattr(output, "model_dump") else {"_raw": str(output)}
+    record_tool_call(
+        conversation_id=conv_id,
+        tool_name="rollback_to_node",
+        args={"project_id": project_id, "to_chapter": to_chapter, "confirm": confirm},
+        result=result_dict,
+    )
     return RollbackResponse(
         project_id=project_id,
-        kept_chapters=0,  # v0.4 简化不返回，tool 里没暴露
+        kept_chapters=0,
         removed_chapters=0,
         new_node_tree_state=None,
         rolled_back_at=datetime.now().isoformat(),
@@ -138,7 +168,7 @@ class ImageResponse(BaseModel):
 
 @router.post("/{project_id}/image", response_model=ImageResponse)
 async def generate_image(project_id: str, req: ImageRequest):
-    """生成主立绘 — 薄路由，调 generate_image tool"""
+    """生成主立绘 — 薄路由，调 generate_image tool（v0.4.1 落库）"""
     from realtime_novel.agent.tools import get_tool
     from realtime_novel.agent.tools.schemas import GenerateImageInput
     from realtime_novel.agent.tools.base import ToolError
@@ -147,6 +177,15 @@ async def generate_image(project_id: str, req: ImageRequest):
     output = await tool.run(input_obj)
     if isinstance(output, ToolError):
         raise HTTPException(500, f"Image generation failed: {output.message}")
+    # v0.4.1 落库
+    conv_id = get_or_create_conversation(user_id="default", project_id=project_id)
+    result_dict = output.model_dump() if hasattr(output, "model_dump") else {"_raw": str(output)}
+    record_tool_call(
+        conversation_id=conv_id,
+        tool_name="generate_image",
+        args={"project_id": project_id, "style_hint": req.style_hint},
+        result=result_dict,
+    )
     return ImageResponse(
         project_id=output.project_id,
         image_url=output.image_url,
@@ -173,7 +212,7 @@ class UpdateBaseResponse(BaseModel):
 
 @router.patch("/{project_id}/base", response_model=UpdateBaseResponse)
 async def update_base(project_id: str, req: UpdateBaseRequest):
-    """改 7 件基座 — 薄路由，调 update_base tool"""
+    """改 7 件基座 — 薄路由，调 update_base tool（v0.4.1 落库）"""
     from realtime_novel.agent.tools import get_tool
     from realtime_novel.agent.tools.schemas import UpdateBaseInput
     from realtime_novel.agent.tools.base import ToolError
@@ -184,6 +223,15 @@ async def update_base(project_id: str, req: UpdateBaseRequest):
     output = await tool.run(input_obj)
     if isinstance(output, ToolError):
         raise HTTPException(500, f"Update base failed: {output.message}")
+    # v0.4.1 落库
+    conv_id = get_or_create_conversation(user_id="default", project_id=project_id)
+    result_dict = output.model_dump() if hasattr(output, "model_dump") else {"_raw": str(output)}
+    record_tool_call(
+        conversation_id=conv_id,
+        tool_name="update_base",
+        args={"project_id": project_id, "key": req.key, "new_value_preview": req.new_value[:100]},
+        result=result_dict,
+    )
     return UpdateBaseResponse(
         project_id=output.project_id,
         key=output.key,

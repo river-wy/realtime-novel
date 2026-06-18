@@ -10,6 +10,7 @@ from typing import Optional, Any
 
 from realtime_novel.services.async_wrappers import AsyncProjectManager
 from realtime_novel.persistence import ProjectDeletedRepository  # noqa: F401
+from realtime_novel.api.messages import record_tool_call, get_or_create_conversation
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
 _pm = AsyncProjectManager()
@@ -73,11 +74,19 @@ async def list_projects(
 
 @router.post("", response_model=CreateProjectResponse, status_code=201)
 async def create_project(req: CreateProjectRequest):
-    """创建项目"""
+    """创建项目（v0.4.1 落库到 messages 表）"""
     try:
         result = await _pm.create(req.name, req.palette, req.initial_prompt)
     except FileExistsError as e:
         raise HTTPException(409, f"Project already exists: {req.name}")
+    # v0.4.1 落库（业务接口调用走 record_tool_call）
+    conv_id = get_or_create_conversation(user_id="default", project_id=result.get("id"))
+    record_tool_call(
+        conversation_id=conv_id,
+        tool_name="create_project",
+        args={"name": req.name, "palette": req.palette, "initial_prompt": req.initial_prompt},
+        result=result,
+    )
     return CreateProjectResponse(
         id=result.get("id", ""),
         name=req.name,
@@ -114,7 +123,15 @@ async def delete_project(
         result = await _pm.soft_delete(project_id, confirm=True)
     except FileNotFoundError as e:
         raise HTTPException(404, str(e))
-    # 统计 chapter 数（从 trash_path 数）
+    # v0.4.1 落库
+    conv_id = get_or_create_conversation(user_id="default", project_id=project_id)
+    record_tool_call(
+        conversation_id=conv_id,
+        tool_name="delete_project",
+        args={"project_id": project_id, "confirm": confirm},
+        result=result,
+    )
+    # 统计 chapter 数
     from pathlib import Path
     chapters_removed = 0
     if Path(result["trash_path"]).exists():
