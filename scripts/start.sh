@@ -57,18 +57,51 @@ check_dependencies() {
     fi
 }
 
-check_port_free() {
+# 杀端口占用进程（只杀本项目相关的）
+# 判断: 进程 cmdline 包含 realtime_novel 或 vite --port 对应端口
+kill_port_if_used() {
     local port=$1
     local name=$2
-    if lsof -nP -iTCP:$port -sTCP:LISTEN 2>/dev/null | grep -q LISTEN; then
-        echo "⚠️  端口 $port ($name) 已被占用"
-        lsof -nP -iTCP:$port -sTCP:LISTEN 2>/dev/null
+    # 找占用该端口的 PIDs
+    local pids=$(lsof -nP -iTCP:$port -sTCP:LISTEN -t 2>/dev/null)
+    if [ -z "$pids" ]; then
+        return 0  # 端口空闲
+    fi
+
+    echo "⚠️  端口 $port ($name) 已被占用，尝试清理..."
+    local killed=0
+    local kept=0
+    for pid in $pids; do
+        # 取进程命令行
+        local cmdline=$(ps -p $pid -o command= 2>/dev/null | tr -d '\n')
+        if echo "$cmdline" | grep -qE "realtime_novel|realtime-novel.*vite|vite --port $port"; then
+            echo "   kill PID $pid (realtime-novel 进程): $cmdline"
+            kill $pid 2>/dev/null
+            sleep 1
+            # 还活着就 kill -9
+            if kill -0 $pid 2>/dev/null; then
+                kill -9 $pid 2>/dev/null
+            fi
+            killed=$((killed + 1))
+        else
+            echo "   ⚠️  跳过 PID $pid (不是本项目进程): $cmdline"
+            kept=$((kept + 1))
+        fi
+    done
+
+    # 如果有非本项目进程占用 → 报错退出
+    if [ $kept -gt 0 ]; then
         echo ""
-        echo "选择："
-        echo "  - 停止占用进程（lsof -i :$port 查 PID）"
-        echo "  - 或改 start.sh 里的端口常量"
+        echo "❌ 端口 $port 被 $kept 个非项目进程占用，无法自动清理"
+        echo "   请手动: lsof -i :$port 查 PID，确认是否可以 kill"
         return 1
     fi
+
+    if [ $killed -gt 0 ]; then
+        echo "   ✓ 清理了 $killed 个进程"
+        sleep 1
+    fi
+    return 0
 }
 
 # ============ 启动后端 ============
@@ -125,8 +158,8 @@ main() {
 
     check_env
     check_dependencies
-    check_port_free $BACKEND_PORT "后端" || exit 1
-    check_port_free $FRONTEND_PORT "前端" || exit 1
+    kill_port_if_used $BACKEND_PORT "后端" || exit 1
+    kill_port_if_used $FRONTEND_PORT "前端" || exit 1
 
     start_backend
     start_frontend
