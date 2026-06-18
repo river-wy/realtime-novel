@@ -11,21 +11,21 @@ const routes: RouteRecordRaw[] = [
     path: '/onboarding',
     name: 'onboarding',
     component: () => import('@/views/Onboarding.vue'),
-    meta: { title: '新世界引导' }
+    meta: { title: '新世界' }
   },
   {
     path: '/reader/:projectId/:chapterNum?',
     name: 'reader',
     component: () => import('@/views/Reader.vue'),
     props: true,
-    meta: { title: '章节阅读' }
+    meta: { title: '阅读' }
   },
   {
     path: '/world/:projectId?',
     name: 'world',
     component: () => import('@/views/World.vue'),
     props: true,
-    meta: { title: '世界管理' }
+    meta: { title: '世界' }
   }
 ]
 
@@ -35,6 +35,12 @@ const router = createRouter({
   scrollBehavior() {
     return { top: 0 }
   }
+})
+
+// 路由切换时更新浏览器标签页 title
+router.afterEach((to) => {
+  const sub = (to.meta?.title as string) || ''
+  document.title = sub ? `${sub} · 小说 · 世界` : '小说 · 世界'
 })
 
 export default router
