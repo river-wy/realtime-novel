@@ -22,6 +22,9 @@ venv/
 # 调试用临时文档（不入仓，详见 conventions.md §1.1）
 # 必须是工程根下隐藏目录 .tmp/
 .tmp/
+# 启动脚本生成的日志和 PID（start.sh 用）
+tmp/logs/
+tmp/pids/
 
 # 环境
 .env
