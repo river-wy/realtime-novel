@@ -28,7 +28,7 @@ const error = ref<string | null>(null)
 // Step 1 数据
 const genres = ref<string[]>([])
 const styles = ref<string[]>([])
-const tone = ref('')
+const tone = ref<string[]>([])
 
 // Step 2 数据
 const palette = ref<string[]>([])
@@ -90,13 +90,13 @@ async function goNext() {
   error.value = null
   try {
     if (currentStep.value === '1') {
-      if (genres.value.length === 0 || styles.value.length === 0 || !tone.value) {
-        error.value = '请完整选择题材、风格、基调'
+      if (genres.value.length === 0 || styles.value.length === 0 || tone.value.length === 0) {
+        error.value = '请完整选择题材、风格、基调（至少 1 个）'
         return
       }
       await ensureProject()
       await onboardingStep(projectId.value, '1', {
-        genres: genres.value, styles: styles.value, tone: tone.value
+        genres: genres.value, styles: styles.value, tone: tone.value.join(',')  // 数组转字符串给 LLM prompt
       })
       currentStep.value = '2'
     } else if (currentStep.value === '2') {
@@ -164,8 +164,8 @@ async function goNext() {
           v-for="t in TONE_OPTIONS"
           :key="t"
           class="tag"
-          :class="{ selected: tone === t }"
-          @click="tone = t"
+          :class="{ selected: tone.includes(t) }"
+          @click="toggle(tone, t)"
         >{{ t }}</button>
       </div>
     </section>
