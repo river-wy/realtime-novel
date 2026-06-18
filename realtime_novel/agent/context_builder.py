@@ -159,6 +159,187 @@ def _format_world_tree_compact(world_tree: dict) -> str:
     return "\n".join(parts) if parts else "（世界树无核心信息）"
 
 
+# s1.4 新增: 5 个 helper 格式化 7 件基座其余字段
+
+def _format_style_charter(style_charter: dict) -> str:
+    """压缩 style_charter 为字符串（文笔家用）
+
+    包含: prose_style / tone / density / taboos / notes / limits
+    """
+    if not style_charter or not isinstance(style_charter, dict):
+        return "（文风宪法为空）"
+
+    parts = []
+
+    # prose_style
+    prose = style_charter.get('prose_style', {}) or {}
+    if prose.get('primary'):
+        parts.append(f"文风: {prose['primary']}")
+
+    # tone (Step 1 用户选)
+    tone = style_charter.get('tone', {}) or {}
+    if tone.get('primary'):
+        parts.append(f"基调: {tone['primary']}")
+
+    # density
+    density = style_charter.get('density', {}) or {}
+    if density:
+        density_str = ", ".join([f"{k}={v}" for k, v in density.items() if v is not None])
+        if density_str:
+            parts.append(f"密度: {density_str}")
+
+    # taboos (Step 3 用户填)
+    taboos = style_charter.get('taboos', []) or []
+    if taboos:
+        taboo_strs = []
+        for t in taboos:
+            if isinstance(t, dict):
+                taboo_strs.append(t.get('text') or t.get('statement', ''))
+            elif isinstance(t, str):
+                taboo_strs.append(t)
+        taboo_strs = [s for s in taboo_strs if s]
+        if taboo_strs:
+            parts.append(f"禁区: {'; '.join(taboo_strs)}")
+
+    # notes (Step 1 styles + Step 3 emotional_anchor)
+    notes = style_charter.get('notes', []) or []
+    notes_strs = [str(n) for n in notes if n]
+    if notes_strs:
+        parts.append(f"备注: {'; '.join(notes_strs)}")
+
+    # limits
+    limits = style_charter.get('limits', {}) or {}
+    if limits:
+        limits_str = ", ".join([f"{k}={v}" for k, v in limits.items() if v is not None])
+        if limits_str:
+            parts.append(f"限制: {limits_str}")
+
+    return "\n".join(parts) if parts else "（文风宪法无具体内容）"
+
+
+def _format_main_plot(main_plot: dict) -> str:
+    """压缩 main_plot 为字符串（文笔家用）
+
+    包含: arc_phrase (Step 4 main_conflict) + beats (Step 4 拆的节奏)
+    """
+    if not main_plot or not isinstance(main_plot, dict):
+        return "（主线为空）"
+
+    parts = []
+
+    arc = main_plot.get('arc_phrase')
+    if arc:
+        parts.append(f"核心弧光: {arc}")
+
+    beats = main_plot.get('beats', []) or []
+    if beats:
+        parts.append("节奏:")
+        for b in beats[:10]:
+            title = b.get('title', '')
+            desc = b.get('description', '')
+            status = b.get('status', '')
+            chapter_range = b.get('chapter_range', {})
+            cr_str = ""
+            if chapter_range and 'start' in chapter_range:
+                cr_str = f" [ch{chapter_range.get('start', '?')}-{chapter_range.get('end', '?')}]"
+            line = f"  - {title}"
+            if desc:
+                line += f": {desc[:80]}"
+            if status:
+                line += f" ({status})"
+            line += cr_str
+            parts.append(line)
+
+    return "\n".join(parts) if parts else "（主线无具体内容）"
+
+
+def _format_sub_plot(threads: list) -> str:
+    """压缩 sub_plot threads 为字符串（文笔家用）
+
+    threads: list[dict] from sub_plot.threads[]
+    """
+    if not threads:
+        return "（支线为空）"
+    lines = []
+    for t in threads[:10]:
+        title = t.get('title', '')
+        desc = t.get('description', '')
+        status = t.get('status', '')
+        priority = t.get('priority', '')
+        line = f"- {title}"
+        if desc:
+            line += f": {desc[:80]}"
+        if status:
+            line += f" [{status}]"
+        if priority:
+            line += f" ({priority})"
+        lines.append(line)
+    return "\n".join(lines) if lines else "（支线无具体内容）"
+
+
+def _format_characters(characters: list) -> str:
+    """压缩 character_card characters 为字符串（文笔家用）
+
+    characters: list[dict] from character_card.characters[]
+    字段: name, role, background, traits, speech_style, arc
+    """
+    if not characters:
+        return "（人物为空）"
+    lines = []
+    for c in characters[:15]:
+        name = c.get('name', '?')
+        role = c.get('role', '')
+        background = c.get('background', '')
+        traits = c.get('traits', []) or []
+        speech = c.get('speech_style', '')
+
+        line = f"- {name}"
+        if role:
+            line += f" ({role})"
+        line += ":"
+        if background:
+            line += f"\n  背景: {background[:100]}"
+        if traits:
+            line += f"\n  特征: {', '.join(traits[:5])}"
+        if speech:
+            line += f"\n  说话风格: {speech[:50]}"
+        lines.append(line)
+    return "\n\n".join(lines) if lines else "（人物无具体内容）"
+
+
+def _format_seeds(seeds: list) -> str:
+    """压缩 seed_table seeds 为字符串（文笔家用）
+
+    seeds: list[dict] from seed_table.seeds[]
+    字段: id, content, importance, size, orientation, status
+    """
+    if not seeds:
+        return "（种子为空）"
+    lines = []
+    for s in seeds[:20]:
+        content = s.get('content', '')
+        importance = s.get('importance', {}) or {}
+        size = s.get('size', '')
+        orientation = s.get('orientation', '')
+        status = s.get('status', '')
+
+        imp_str = importance.get('primary', '') if isinstance(importance, dict) else str(importance)
+        line = f"- {content[:80]}"
+        meta_parts = []
+        if imp_str:
+            meta_parts.append(imp_str)
+        if size:
+            meta_parts.append(size)
+        if orientation:
+            meta_parts.append(orientation)
+        if status:
+            meta_parts.append(status)
+        if meta_parts:
+            line += f" [{', '.join(meta_parts)}]"
+        lines.append(line)
+    return "\n".join(lines) if lines else "（种子无具体内容）"
+
+
 # ============ 3 个角色的 messages 拼装 ============
 
 
@@ -277,16 +458,26 @@ def build_messages_for_chapter_generator(
 
     结构：
     1. system: 章节生成 prompt
-    2. world_tree: 基座数据
-    3. chapter_summaries: 分级结构（20 章前 1 句，20 章内 detailed）
-    4. history: 最近 3-5 轮 user/assistant 消息
-    5. current: user message
+    2. world_tree: 基座 (叙事核心)
+    3. style_charter: 文风宪法 (基调/禁区/密度)  [s1.4 新增]
+    4. main_plot: 主线 (核心矛盾/节奏)             [s1.4 新增]
+    5. sub_plot: 支线                              [s1.4 新增]
+    6. character_card: 人物                        [s1.4 新增]
+    7. seed_table: 种子                            [s1.4 新增]
+    8. chapter_summaries: 分级结构 (20 章前 1 句, 20 章内 detailed)
+    9. history: 最近 3-5 轮 user/assistant 消息
+    10. current: user message
     """
     messages = []
     messages.append({"role": "system", "content": system_prompt})
 
     data = _load_project_data(project_id)
     world_tree = data.get("01-world-tree.yaml", {})
+    style_charter = data.get("02-style-charter.yaml", {})
+    main_plot_raw = data.get("04-main-plot.yaml", {})
+    sub_plot_raw = data.get("05-sub-plot.yaml", {})
+    character_card = data.get("06-character-card.yaml", {})
+    seed_table = data.get("07-seed-table.yaml", {})
     chapters = data.get("chapters", [])
 
     # 2. world_tree 基座
@@ -294,7 +485,40 @@ def build_messages_for_chapter_generator(
         "role": "user",
         "content": f"## 世界树基座\n{_format_world_tree_compact(world_tree)}",
     })
-    # 3. chapter_summaries 分级结构
+    # 3. style_charter 文风宪法 (s1.4 新增)
+    if style_charter:
+        messages.append({
+            "role": "user",
+            "content": f"## 文风宪法\n{_format_style_charter(style_charter)}",
+        })
+    # 4. main_plot 主线 (s1.4 新增)
+    if main_plot_raw and (main_plot_raw.get('arc_phrase') or main_plot_raw.get('beats')):
+        messages.append({
+            "role": "user",
+            "content": f"## 主线剧情\n{_format_main_plot(main_plot_raw)}",
+        })
+    # 5. sub_plot 支线 (s1.4 新增)
+    threads = sub_plot_raw.get('threads', []) if isinstance(sub_plot_raw, dict) else []
+    if threads:
+        messages.append({
+            "role": "user",
+            "content": f"## 支线剧情\n{_format_sub_plot(threads)}",
+        })
+    # 6. character_card 人物 (s1.4 新增)
+    characters = character_card.get('characters', []) if isinstance(character_card, dict) else []
+    if characters:
+        messages.append({
+            "role": "user",
+            "content": f"## 人物\n{_format_characters(characters)}",
+        })
+    # 7. seed_table 种子 (s1.4 新增)
+    seeds = seed_table.get('seeds', []) if isinstance(seed_table, dict) else []
+    if seeds:
+        messages.append({
+            "role": "user",
+            "content": f"## 种子\n{_format_seeds(seeds)}",
+        })
+    # 8. chapter_summaries 分级结构
     messages.append({
         "role": "user",
         "content": f"## 章节 summary 分级（20 章前 1 句，20 章内 detailed）\n{_format_chapter_summaries_graded(chapters, detailed_window=20)}",
