@@ -208,16 +208,18 @@ async def handle_user_message(ws: WebSocket, user_id: str, data: dict):
     """处理单条 user_message：触发状态机 + 流式推送 (v0.4 P1-2: progress_callback 透传到 act_node)"""
     conv_repo = ConversationRepository()
     try:
-        # 1. 创建/获取 conversation
+        # 1. 创建/获取 active conversation
+        # v0.5 拍板 (讨论 1.2): user-valid conversation 一对一, **不**绑 project
+        # project_id 只用于 message 上下文 (前端用), conversation 本身是 user 维度
         conversation = await conv_repo.create_conversation(
             user_id=user_id,
-            project_id=data.get("project_id"),
         )
-        # 2. 写 user message
+        # 2. 写 user message (project_id 存在 message 上下文里, v0.5 拍板 1.2)
         user_msg = await conv_repo.add_message(
             conversation_id=conversation.id,
             role=MessageRole.USER,
             content=data["content"],
+            project_id=data.get("project_id"),
         )
         # 3. 推 thinking
         await ws.send_json({
@@ -266,13 +268,13 @@ async def handle_user_message(ws: WebSocket, user_id: str, data: dict):
             "content": final_state.final_response or "完成",
         })
 
-        # 7. 写 assistant message
+        # 7. 写 assistant message (project_id 存到 message 上下文, v0.5 拍板 1.2)
         await conv_repo.add_message(
             conversation_id=conversation.id,
             role=MessageRole.ASSISTANT,
             content=final_state.final_response or "",
             tool_calls={"calls": [tc.model_dump() for tc in final_state.tool_calls]},
-            thinking={"plan": final_state.plan or ""},
+            project_id=data.get("project_id"),
         )
 
     except asyncio.CancelledError:
