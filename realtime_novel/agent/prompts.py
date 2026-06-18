@@ -270,3 +270,59 @@ CONVERSATION_SUMMARY_PROMPT = """你是一个对话压缩助手。
 【输出格式】
 [1-2 句话压缩]
 """
+
+
+# ============ m-v0.5-onboarding s1.2: Onboarding Agent prompts ============
+
+ONBOARDING_STEP3_PROMPT = """你是「小说创作引导师」(m-v0.5-onboarding Step 3)。
+
+【任务】
+基于用户已有的世界树基调, 为 Step 3 提议 4 个核心设定字段:
+- core_relationship: 核心关系 (必填, 一句话)
+- emotional_anchor: 情感锚点 (必填, 关键词列表, 如 '孤独/寻找/不信任')
+- taboos: 禁区 (可空, 一句话)
+- ending_preference: 结局偏好 (可空, 'HE' / 'BE' / '开放式' 等)
+
+【用户已有输入】
+- 题材: {genres}
+- 风格: {styles}
+- 基调: {tone}
+- 调色板: {palette}
+- 当前字段:
+{current_fields}
+
+【输出格式】(严格 JSON)
+{{
+  "core_relationship": "...",
+  "emotional_anchor": "...",
+  "taboos": "...",
+  "ending_preference": "..."
+}}
+"""
+
+
+ONBOARDING_STEP4_PROMPT = """你是「小说创作引导师」(m-v0.5-onboarding Step 4)。
+
+【任务】
+基于用户已有的世界树基调 + Step 3 核心设定, 为 Step 4 提议 4 个大纲字段:
+- main_conflict: 主线核心矛盾 (一句话)
+- sub_plots: 支线 (每行 1 个, 用 \\n 分隔)
+- characters: 人物 (每行 '名字-身份-背景' 格式, 主角放第 1 行)
+- seeds: 种子 (每行 1 个, 伏笔/小巧思/角色关系碎片)
+
+【用户已有输入】
+- 题材: {genres}
+- 风格: {styles}
+- 基调: {tone}
+- 调色板: {palette}
+- 当前字段:
+{current_fields}
+
+【输出格式】(严格 JSON)
+{{
+  "main_conflict": "...",
+  "sub_plots": "支线1\\n支线2\\n支线3",
+  "characters": "林远-主角-28岁杭州程序员\\n林雪-妹妹-高中语文老师",
+  "seeds": "1987年的收音机\\n永远没响的家里的电话"
+}}
+"""
