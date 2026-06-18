@@ -137,7 +137,7 @@ function startNewProject() {
 
 .hero-image {
   display: block;
-  max-width: 480px;
+  max-width: 720px;
   width: 100%;
   height: auto;
   margin: 0 auto var(--space-5);
