@@ -30,6 +30,18 @@ function goToChapter(n: number) {
   router.push({ name: 'reader', params: { projectId: projectId.value, chapterNum: n } })
 }
 
+/** v0.8: 切换项目探索度 */
+async function onExplorationChange(newLevel: string) {
+  if (!['conservative', 'standard', 'wild'].includes(newLevel)) return
+  try {
+    await projectsStore.updateExplorationLevel(projectId.value, newLevel as any)
+    console.log(`[Reader] 探索度已切换为 ${newLevel}`)
+  } catch (e: any) {
+    console.error('[Reader] 切换探索度失败', e)
+    alert(`切换失败: ${e.message}`)
+  }
+}
+
 async function nextChapter() {
   const n = chapterNum.value + 1
   try {
@@ -61,6 +73,19 @@ watch(() => route.params, loadAll)
       <div class="project-info" v-if="projectsStore.current">
         <h1 class="project-name">{{ projectsStore.current.name }}</h1>
         <span class="palette">{{ projectsStore.current.palette }}</span>
+        <!-- v0.8: 探索度下拉 (conservative/standard/wild) -->
+        <div class="exploration-control" v-if="projectsStore.current">
+          <label class="exploration-label">探索度</label>
+          <select
+            class="exploration-select"
+            :value="projectsStore.current.exploration_level"
+            @change="onExplorationChange(($event.target as HTMLSelectElement).value)"
+          >
+            <option value="conservative">🛡️ 保守</option>
+            <option value="standard">⚖️ 标准</option>
+            <option value="wild">🌌 狂野</option>
+          </select>
+        </div>
       </div>
       <button class="drawer-toggle" @click="showDrawer = !showDrawer">📚 章节列表</button>
     </header>
@@ -195,6 +220,30 @@ watch(() => route.params, loadAll)
   background: rgba(139, 92, 246, 0.2);
   padding: 2px 8px;
   border-radius: var(--radius-sm);
+}
+
+/* v0.8: 探索度控制 */
+.exploration-control {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-left: var(--space-3);
+}
+.exploration-label {
+  font-size: var(--text-xs);
+  color: var(--color-text-dim);
+}
+.exploration-select {
+  padding: 2px 8px;
+  font-size: var(--text-xs);
+  background: var(--color-night-3);
+  color: var(--color-text);
+  border: 1px solid var(--color-night-2);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.exploration-select:hover {
+  border-color: var(--color-accent, #8b5cf6);
 }
 
 .drawer-toggle {

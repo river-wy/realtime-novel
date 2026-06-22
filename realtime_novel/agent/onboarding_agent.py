@@ -1,7 +1,5 @@
 """OnboardingAgent — 管家 Agent 引导式多轮对话 (Step 3 + Step 4)
 
-m-v0.5-onboarding s1.2 实现
-
 负责:
 - 接收 user_message + context=onboarding_step_N
 - 读 state_json (Step 1 已存 genres/styles/tone + Step 2 palette)
@@ -11,7 +9,7 @@ m-v0.5-onboarding s1.2 实现
 - 用户确认 → 调 edit_artifact 写 7 件 → 推 onboarding_confirmed
 
 设计原则:
-- 每次 consult 都重新拼 messages (无状态, 拍板 3.2)
+- 每次 consult 都重新拼 messages
 - 用 ChapterGeneratorSpecialist W2 类似的 LLM 调用方式
 - LLM 4 字段输入/输出严格用 Pydantic schema 校验
 """
@@ -32,56 +30,58 @@ from realtime_novel.agent.prompts import (
 # ============ Pydantic schema (LLM 输出严格) ============
 
 class Step3Fields(BaseModel):
-    """Step 3 核心设定 4 字段"""
-    core_relationship: str = Field(default="", description="核心关系 (Step 3 必填)")
-    emotional_anchor: str = Field(default="", description="情感锚点 (Step 3 必填)")
-    taboos: str = Field(default="", description="禁区 (可空)")
-    ending_preference: str = Field(default="", description="结局偏好 (可空)")
+    """Step 3 故事引擎 3 字段 """
+    story_core: str = Field(default="", description="故事内核: 主角要做什么 + 什么阻止 + 如何发展")
+    characters: str = Field(default="", description="主要角色: 主角/对手/盟友, 每行 '名字-身份-和主角关系'")
+    opening_scene: str = Field(default="", description="开篇场景: 场景 + 主角不可逆选择")
 
 
 class Step4Fields(BaseModel):
-    """Step 4 大纲初稿 4 字段"""
-    main_conflict: str = Field(default="", description="主线核心矛盾")
-    sub_plots: str = Field(default="", description="支线 (每行 1 个)")
-    characters: str = Field(default="", description="人物 (每行 '名字-身份-背景')")
-    seeds: str = Field(default="", description="种子 (每行 1 个)")
+    """Step 4 故事路径 4 字段 """
+    main_arc: str = Field(default="", description="主线节点: 3-5 个剧情转折, 每行 1 个")
+    sub_plots: str = Field(default="", description="支线, 每行 1 个")
+    seeds: str = Field(default="", description="种子/钩子, 每行 1 个")
+    reader_feeling: str = Field(default="", description="读者情绪: 读者合上书那一刻心里留下什么")
 
 
 # ============ 提示词模板 ============
-# prompts.py 加 2 个, 但也在这里定义 inline (避免 import 循环)
 _STEP3_SYSTEM_FALLBACK = """你是「小说创作引导师」。
 
 【任务】
-基于用户已有的世界树基调 (genre/styles/tone) 和 palette, 为 Step 3 提议 4 个核心设定字段:
-- core_relationship: 核心关系 (必填, 一句话)
-- emotional_anchor: 情感锚点 (必填, 关键词列表, 如 '孤独/寻找/不信任')
-- taboos: 禁区 (可空, 一句话)
-- ending_preference: 结局偏好 (可空, 'HE' / 'BE' / '开放式' 等)
+基于用户已有的世界树基调, 为 Step 3 提议 3 个「故事引擎」字段:
+- story_core: 故事内核 (必填, 主角要做什么 + 什么阻止 + 如何发展)
+- characters: 主要角色 (必填, 每行 '名字-身份-和主角关系', 含主角/对手/盟友)
+- opening_scene: 开篇场景 (必填, 第一章场景 + 主角不可逆选择)
+
+【补充原则 - 重要】
+你可以基于用户已有信息合理补充细节 (例如: 补充「为什么」「性格」「氛围」), 但不要改变用户已给的核心冲突方向。
 
 【输出格式】(严格 JSON)
 {
-  "core_relationship": "...",
-  "emotional_anchor": "...",
-  "taboos": "...",
-  "ending_preference": "..."
+  "story_core": "主角想查父亲真相, 但发现父亲被 AI 觉醒组织所杀",
+  "characters": "林远-查清真相-变成 AI\\n幽灵-释放 AI 觉醒军-再次失去同伴\\n张敏-重新开始-林远再次失踪",
+  "opening_scene": "2087 新东京酸雨, 林远破解加密后没删痕迹就退出 (此刻他已被追踪)"
 }
 """
 
 _STEP4_SYSTEM_FALLBACK = """你是「小说创作引导师」。
 
 【任务】
-基于用户已有的世界树基调 (genre/styles/tone) + Step 3 核心设定, 为 Step 4 提议 4 个大纲字段:
-- main_conflict: 主线核心矛盾 (一句话)
-- sub_plots: 支线 (每行 1 个, 用 \\\\n 分隔)
-- characters: 人物 (每行 '名字-身份-背景' 格式, 主角放第 1 行)
-- seeds: 种子 (每行 1 个, 伏笔/小巧思/角色关系碎片)
+基于 Step 3 故事引擎, 为 Step 4 提议 4 个「故事路径」字段:
+- main_arc: 主线节点 (3-5 个剧情转折, 每行 1 个)
+- sub_plots: 支线 (每行 1 个)
+- seeds: 种子/钩子 (每行 1 个)
+- reader_feeling: 读者情绪 (一句话, 读者合上书那一刻心里留下什么)
+
+【补充原则 - 重要】
+你可以基于 Step 3 信息合理补充 (如: 把 main_arc 补到 3-5 个, 推断 reader_feeling), 但不要改变主线方向, 也不要让读者情绪与基调矛盾。
 
 【输出格式】(严格 JSON)
 {
-  "main_conflict": "...",
-  "sub_plots": "支线1\\\\n支线2\\\\n支线3",
-  "characters": "林远-主角-28岁杭州程序员\\\\n林雪-妹妹-高中语文老师",
-  "seeds": "1987年的收音机\\\\n永远没响的家里的电话"
+  "main_arc": "开篇: 接到委托\\n中段: 发现 AI 觉醒组织\\n高潮: 直面幽灵\\n结尾: 做出选择",
+  "sub_plots": "妹妹重逢后\\n与张敏感情修复",
+  "seeds": "1987 录音带\\n红色电话",
+  "reader_feeling": "如果 AI 已经觉醒, 我会不会也不舍得关掉它"
 }
 """
 
@@ -127,18 +127,38 @@ class OnboardingAgent:
         full_state = json.loads(row["state_json"])
         p = full_state.get("payload", {})
 
-        # 2. 拼 messages
+        # 2. 拼 messages — v0.8.2 改用 context_builder (与 reading 阶段统一架构)
+        from realtime_novel.agent.context_builder import (
+            build_messages_for_onboarding_step3,
+            build_messages_for_onboarding_step4,
+        )
+        from realtime_novel.agent.specialists import get_llm_params_for_project
         sys_prompt = self._get_system_prompt(step, p, current_fields)
 
-        # 3. 调 LLM
+        if step == 3:
+            messages = build_messages_for_onboarding_step3(
+                project_id=project_id,
+                current_user_message=user_message,
+                system_prompt=sys_prompt,
+            )
+        else:
+            messages = build_messages_for_onboarding_step4(
+                project_id=project_id,
+                current_user_message=user_message,
+                system_prompt=sys_prompt,
+            )
+
+        # 3. 调 LLM (v0.8.2: 按项目 exploration_level 取参数)
+        # v0.7: B+C 探索性 - Temperature 0.9 + max_tokens 2500 (允许 AI 充分补细节)
         adapter = get_llm_adapter()
         from realtime_novel.adapters.types import LLMRequest
+        llm_params = get_llm_params_for_project(project_id, role="onboarding")
         request = LLMRequest(
             prompt="",
-            messages=[{"role": "user", "content": user_message or "请提议 4 字段"}],
-            system_prompt=sys_prompt,
-            max_tokens=1500,
-            temperature=0.7,
+            messages=messages,
+            max_tokens=llm_params["max_tokens"],
+            temperature=llm_params["temperature"],
+            frequency_penalty=llm_params.get("frequency_penalty", 0.0),
             response_format={"type": "json_object"},
             role=ModelRole.TEXT,
         )

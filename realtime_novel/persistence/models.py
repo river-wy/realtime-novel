@@ -144,6 +144,8 @@ class Project(BaseModel):
     id: str
     name: str
     palette: str = ""
+    # v0.8: 探索度旋钮 (conservative/standard/wild)
+    exploration_level: str = "standard"
     current_pov: Optional[str] = None
     created_at: datetime
     updated_at: datetime

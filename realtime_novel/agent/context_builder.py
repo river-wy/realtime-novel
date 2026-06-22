@@ -1,7 +1,4 @@
-"""context_builder — v0.5 多轮上下文组装（按角色裁剪）
-
-v0.4.1 基础版：从 messages 表拿 history + 拼 current user
-v0.5 完整版：按角色裁剪 messages（讨论 3.2 拍板）
+"""context_builder — 多轮上下文组装（按角色裁剪）
 
 3 个角色的 messages 拼装：
 - 小说家 (user 维度, 不绑 project):
@@ -13,6 +10,7 @@ v0.5 完整版：按角色裁剪 messages（讨论 3.2 拍板）
 """
 from __future__ import annotations
 
+import json
 from typing import List, Dict, Any, Optional, Literal
 
 from realtime_novel.persistence import get_store, ProjectRepository, ChapterRepository
@@ -52,9 +50,9 @@ def _row_to_message(row: dict) -> Optional[Dict[str, Any]]:
 
 
 def load_history_messages(
-    conversation_id: str,
-    max_history: int = 10,
-    exclude_message_id: Optional[str] = None,
+        conversation_id: str,
+        max_history: int = 10,
+        exclude_message_id: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """从 messages 表取历史 N 条（按 created_at 升序），转 OpenAI 格式"""
     with get_store().connection() as conn:
@@ -75,9 +73,6 @@ def load_history_messages(
         if msg:
             messages.append(msg)
     return messages
-
-
-# ============ v0.5 完整版（按角色裁剪）============
 
 
 def _load_project_data(project_id: str) -> Dict[str, Any]:
@@ -171,15 +166,21 @@ def _format_style_charter(style_charter: dict) -> str:
 
     parts = []
 
-    # prose_style
     prose = style_charter.get('prose_style', {}) or {}
     if prose.get('primary'):
-        parts.append(f"文风: {prose['primary']}")
+        prose_parts = [prose['primary']]
+        if prose.get('sentence_length'):
+            prose_parts.append(f"句式={prose['sentence_length']}")
+        if prose.get('paragraph_style'):
+            prose_parts.append(f"段落={prose['paragraph_style']}")
+        parts.append("文风: " + " · ".join(prose_parts))
 
-    # tone (Step 1 用户选)
     tone = style_charter.get('tone', {}) or {}
     if tone.get('primary'):
-        parts.append(f"基调: {tone['primary']}")
+        tone_parts = [tone['primary']]
+        if tone.get('psychological_per_paragraph'):
+            tone_parts.append(f"心理活动≤{tone['psychological_per_paragraph']}句/段")
+        parts.append("基调: " + " · ".join(tone_parts))
 
     # density
     density = style_charter.get('density', {}) or {}
@@ -344,10 +345,10 @@ def _format_seeds(seeds: list) -> str:
 
 
 def build_messages_for_steward(
-    user_id: str,
-    current_user_message: str,
-    system_prompt: str,
-    max_history: int = 20,
+        user_id: str,
+        current_user_message: str,
+        system_prompt: str,
+        max_history: int = 20,
 ) -> List[Dict[str, Any]]:
     """小说家（user 维度管家）的 messages
 
@@ -407,10 +408,10 @@ def build_messages_for_steward(
 
 
 def build_messages_for_worldtree_keeper(
-    project_id: str,
-    current_user_message: str,
-    system_prompt: str,
-    max_history: int = 5,
+        project_id: str,
+        current_user_message: str,
+        system_prompt: str,
+        max_history: int = 5,
 ) -> List[Dict[str, Any]]:
     """架构师（per-project 世界树管理）的 messages
 
@@ -449,10 +450,10 @@ def build_messages_for_worldtree_keeper(
 
 
 def build_messages_for_chapter_generator(
-    project_id: str,
-    current_user_message: str,
-    system_prompt: str,
-    max_history: int = 5,
+        project_id: str,
+        current_user_message: str,
+        system_prompt: str,
+        max_history: int = 5,
 ) -> List[Dict[str, Any]]:
     """文笔家（per-project 章节生成）的 messages
 
@@ -532,7 +533,98 @@ def build_messages_for_chapter_generator(
     return messages
 
 
-def _load_project_history(project_id: str, max_history: int = 5) -> List[Dict[str, Any]]:
+# ============ v0.8.2: Onboard 阶段 messages 拼装 ============
+
+
+def build_messages_for_onboarding_step3(
+        project_id: str,
+        current_user_message: str,
+        system_prompt: str,
+) -> List[Dict[str, Any]]:
+    """v0.8.2 故事引擎 Agent (Step 3) 的 messages
+
+    与 reading 阶段不同: 不需要 7 件全件 (Step 3 还没完成),
+    只拼: world_tree + style_charter + genre_resonance (Step 1 已有)
+         + Step 1-2 已有数据 (genres/styles/tone/palette)
+
+    结构:
+    1. system: ONBOARDING_STEP3_PROMPT (v0.7 prompt 模板)
+    2. data:   Step 1-2 已有 payload
+    3. history: 用户与管家之前的对话
+    4. current: user message
+    """
+    from realtime_novel.persistence.project_repository import ProjectRepository
+    from realtime_novel.persistence.sqlite_store import get_store
+
+    messages = []
+    # 1. system
+    messages.append({"role": "system", "content": system_prompt})
+
+    # 2. data: 读 onboarding_state + 7 件 (Step 1 写过的 world_tree/style_charter/genre_resonance)
+    try:
+        with get_store().connection() as conn:
+            row = conn.execute(
+                "SELECT state_json FROM onboarding_state WHERE project_id = ?",
+                (project_id,),
+            ).fetchone()
+        if row:
+            state = json.loads(row["state_json"]) if hasattr(json, 'loads') else {}
+            payload = state.get("payload", {})
+            # 读 7 件 (Step 1 已写)
+            data = _load_project_data(project_id)
+            wt = data.get("01-world-tree.yaml", {}) or {}
+            sc = data.get("02-style-charter.yaml", {}) or {}
+            gr = data.get("03-genre-resonance.yaml", {}) or {}
+            data_block = f"""## Step 1-2 已有数据
+- 题材: {payload.get("genres", [])}
+- 风格: {payload.get("styles", [])}
+- 基调: {payload.get("tone", [])}
+- 调色板: {payload.get("palette", "")}
+
+## 世界树
+{_format_world_tree_compact(wt)}
+
+## 风格宪法 (v0.8.2 推断完整)
+{_format_style_charter(sc)}
+
+## 题材共鸣
+{chr(10).join([f"+ {a.get('text', a) if isinstance(a, dict) else a}" for a in gr.get("accept", [])]) or "（无）'"}
+"""
+            messages.append({"role": "system", "content": data_block})
+    except Exception:
+        pass  # 推断失败不阻断 onboarding
+
+    # 3. history (Step 3 是多轮对话, 拿最近 3 轮)
+    history = _load_project_history(project_id, max_history=3)
+    messages.extend(history)
+
+    # 4. current
+    messages.append({"role": "user", "content": current_user_message or "请提议 3 个故事引擎字段"})
+    return messages
+
+
+def build_messages_for_onboarding_step4(
+        project_id: str,
+        current_user_message: str,
+        system_prompt: str,
+) -> List[Dict[str, Any]]:
+    """故事路径 Agent (Step 4) 的 messages
+
+    与 Step 3 不同: 此时 Step 3 已确认, 需要拼:
+    - Step 1-2 已有数据
+    - Step 3 已写入的 7 件 (style_charter / main_plot / character_card)
+    - Step 4 当前 user 输入
+
+    结构同 Step 3 但 max_history 更大 (Step 4 在 Step 3 之后, 历史更长)
+    """
+    return build_messages_for_onboarding_step3(
+        project_id=project_id,
+        current_user_message=current_user_message,
+        system_prompt=system_prompt,
+    )
+
+
+def _load_project_history(project_id: str, max_history: int = 5) -> list[dict[str, Any] | None]:
     """按 project_id 取历史（per-project 维度）"""
     with get_store().connection() as conn:
         rows = conn.execute(
@@ -552,13 +644,11 @@ def json_dumps(obj: Any) -> str:
     return json.dumps(obj, ensure_ascii=False, indent=2, default=str)
 
 
-# ============ v0.4.1 兼容（保留旧 API）============
-
 def build_messages_for_node(
-    conversation_id: str,
-    current_user_message: str,
-    max_history: int = 10,
-    system_prompt: Optional[str] = None,
+        conversation_id: str,
+        current_user_message: str,
+        max_history: int = 10,
+        system_prompt: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """v0.4.1 兼容 API（不推荐用于新代码）
 

@@ -39,14 +39,19 @@ class LLMAdapter:
         temperature: float = 0.7,
         max_tokens: int = 2048,
         role: ModelRole = ModelRole.TEXT,
+        frequency_penalty: float = 0.0,
+        presence_penalty: float = 0.0,
     ) -> LLMResponse:
-        """v0.4.1 新增：多轮对话便捷调用
+        """v0.4.1 新增：多轮对话便捷调用 (v0.8.1 加 frequency/presence penalty)
 
         Args:
             messages: OpenAI 格式 messages 数组（不含 system）
                 [{"role": "user", "content": "..."}, ...]
             system_prompt: system prompt（可选）
             temperature/max_tokens/role: 其他参数
+            frequency_penalty/presence_penalty: v0.8.1 探索度旋钮用
+                - frequency_penalty: 正值减少重复用词 (OpenAI 标准参数)
+                - presence_penalty:  正值鼓励新话题 (OpenAI 标准参数)
         """
         request = LLMRequest(
             prompt="",  # messages 模式下不需要
@@ -55,6 +60,8 @@ class LLMAdapter:
             temperature=temperature,
             max_tokens=max_tokens,
             role=role,
+            frequency_penalty=frequency_penalty,
+            presence_penalty=presence_penalty,
         )
         return await self.complete(request)
 

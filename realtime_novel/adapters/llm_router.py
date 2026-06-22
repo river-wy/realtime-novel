@@ -1,41 +1,64 @@
-"""LLM Router: 按 model_role 选 provider + fallback
+"""LLM Router: 按 model_name 选 provider + fallback
 
-对应 infra.md §B.2.3
+v0.7 改造：不再写死 primary_map，从 agents.json 的 models 池查 provider
 """
 from __future__ import annotations
 
 from typing import Optional
 
 from realtime_novel.adapters.providers.base import LLMProvider
-from realtime_novel.adapters.types import ModelRole, ModelProvider
+from realtime_novel.adapters.types import ModelProvider
+from realtime_novel.config.config_loader import load_agents_config
 
 
 class LLMRouter:
-    """根据 role 选 provider，支持 fallback"""
+    """根据 model_name 选 provider，支持 fallback
+
+    v0.7 路由表构造逻辑：
+    - 读 agents.json 的 models 字典
+    - 对每个 model 字段（如 friday/deepseek-v4-pro-tencent）构造对应 Provider
+    - 记录 model_name → ModelProvider 映射
+    - 调用 get_provider(model_name) 时按映射返回
+    """
+
+    # model_name → ModelProvider enum 映射
+    # v0.7 从 agents.json 自动构建，但保留静态映射作为 fallback（保证启动期也能工作）
+    _MODEL_TO_PROVIDER = {
+        "friday/deepseek-v4-pro-tencent": ModelProvider.DEEPSEEK,
+        "friday/gemini-3.1-flash-image-preview": ModelProvider.GEMINI,
+    }
 
     def __init__(self, providers: dict[ModelProvider, LLMProvider]):
         self.providers = providers
 
-    def get_provider(self, role: ModelRole) -> LLMProvider:
-        """主选 + fallback"""
-        primary_map = {
-            ModelRole.TEXT: ModelProvider.DEEPSEEK,
-            ModelRole.IMAGE: ModelProvider.GEMINI,
-        }
-        primary = primary_map[role]
-        provider = self.providers.get(primary)
-        if provider is not None and provider.is_available():
-            return provider
-        # fallback：反向选
-        fallback_map = {
-            ModelProvider.DEEPSEEK: ModelProvider.GEMINI,
-            ModelProvider.GEMINI: ModelProvider.DEEPSEEK,
-        }
-        fallback = fallback_map[primary]
-        fallback_provider = self.providers.get(fallback)
-        if fallback_provider is not None:
-            return fallback_provider
-        raise RuntimeError(f"No available provider for role={role.value}")
+    def get_provider_by_name(self, model_name: str) -> LLMProvider:
+        """根据 model_name（如 "friday/deepseek-v4-pro-tencent"）查 provider"""
+        # 1. 静态映射查 ModelProvider enum
+        provider_enum = self._MODEL_TO_PROVIDER.get(model_name)
+        if provider_enum is None:
+            # 2. fallback: 遍历 providers 字典匹配 provider_name
+            for prov in self.providers.values():
+                if prov.provider_name == model_name:
+                    return prov
+            raise RuntimeError(
+                f"未找到 model={model_name!r} 对应的 provider\n"
+                f"  已知 models: {list(self._MODEL_TO_PROVIDER.keys())}"
+            )
+        provider = self.providers.get(provider_enum)
+        if provider is None:
+            raise RuntimeError(f"ModelProvider={provider_enum.value} 未注册到 router")
+        return provider
+
+    def get_provider(self, role):
+        """保留旧接口（向后兼容）：根据 role 选 provider"""
+        # 旧 primary_map 等价实现
+        from realtime_novel.adapters.types import ModelRole
+        if role == ModelRole.TEXT:
+            return self.get_provider_by_name("friday/deepseek-v4-pro-tencent")
+        elif role == ModelRole.IMAGE:
+            return self.get_provider_by_name("friday/gemini-3.1-flash-image-preview")
+        else:
+            raise RuntimeError(f"Unknown role: {role}")
 
     def get_provider_names(self) -> list[str]:
         """列出所有已注册的 provider 名称（供 /api/info 使用）"""
@@ -47,15 +70,25 @@ _router: Optional[LLMRouter] = None
 
 
 def get_router() -> LLMRouter:
-    """获取全局 Router（首次调用时用默认 provider 初始化）"""
+    """获取全局 Router（首次调用时用 agents.json 自动构造）"""
     global _router
     if _router is None:
         from realtime_novel.adapters.providers.deepseek import DeepSeekProvider
         from realtime_novel.adapters.providers.gemini import GeminiProvider
-        _router = LLMRouter({
-            ModelProvider.DEEPSEEK: DeepSeekProvider(),
-            ModelProvider.GEMINI: GeminiProvider(),
-        })
+
+        # v0.7: 从 agents.json 读 model 池，按需实例化 provider
+        cfg = load_agents_config()
+        models = cfg["models"]
+
+        providers: dict[ModelProvider, LLMProvider] = {}
+        for model_name in models:
+            if model_name == "friday/deepseek-v4-pro-tencent":
+                providers[ModelProvider.DEEPSEEK] = DeepSeekProvider()
+            elif model_name == "friday/gemini-3.1-flash-image-preview":
+                providers[ModelProvider.GEMINI] = GeminiProvider()
+            # 未来接 deepseek/xxx 原生 /minimax/xxx 时，在这里加 elif
+
+        _router = LLMRouter(providers)
     return _router
 
 

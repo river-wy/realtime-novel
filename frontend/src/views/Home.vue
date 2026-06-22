@@ -23,6 +23,21 @@ function goToProject(id: string) {
 function startNewProject() {
   router.push({ name: 'onboarding' })
 }
+
+/** v0.8: 探索度辅助函数 */
+function explorationIcon(level: string): string {
+  return { conservative: '🛡️', standard: '⚖️', wild: '🌌' }[level] || '⚖️'
+}
+function explorationLabel(level: string): string {
+  return { conservative: '保守', standard: '标准', wild: '狂野' }[level] || '标准'
+}
+function explorationDesc(level: string): string {
+  return {
+    conservative: '严守用户输入, AI 补充少',
+    standard: '平衡, AI 合理补充',
+    wild: '大胆发散, 探索不同方向',
+  }[level] || ''
+}
 </script>
 
 <template>
@@ -69,6 +84,15 @@ function startNewProject() {
             <h3 class="card-title">{{ p.name }}</h3>
             <p class="card-meta">
               <span class="palette">{{ p.palette }}</span>
+              <!-- v0.8: 探索度徽章 -->
+              <span
+                class="exploration-badge"
+                :class="`exploration-${p.exploration_level || 'standard'}`"
+                :title="explorationDesc(p.exploration_level || 'standard')"
+              >
+                {{ explorationIcon(p.exploration_level || 'standard') }}
+                {{ explorationLabel(p.exploration_level || 'standard') }}
+              </span>
               <span class="chapter-count">{{ p.chapter_count }} 章</span>
             </p>
           </div>
@@ -299,6 +323,32 @@ function startNewProject() {
 
 .chapter-count {
   color: var(--color-accent-2);
+}
+
+/* v0.8: 探索度徽章 */
+.exploration-badge {
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.exploration-conservative {
+  background: rgba(99, 102, 241, 0.2);   /* 蓝 */
+  color: #a5b4fc;
+  border: 1px solid rgba(99, 102, 241, 0.4);
+}
+.exploration-standard {
+  background: rgba(139, 92, 246, 0.2);    /* 紫 */
+  color: #c4b5fd;
+  border: 1px solid rgba(139, 92, 246, 0.4);
+}
+.exploration-wild {
+  background: rgba(236, 72, 153, 0.2);    /* 粉 */
+  color: #f9a8d4;
+  border: 1px solid rgba(236, 72, 153, 0.4);
 }
 
 /* Features */

@@ -19,26 +19,21 @@ venv/
 # 项目临时
 *.swp
 *.bak
-# 调试用临时文档（不入仓，详见 conventions.md §1.1）
-# 必须是工程根下隐藏目录 .tmp/
 .tmp/
-# 启动脚本生成的日志和 PID（start.sh 用）
-tmp/logs/
-tmp/pids/
+tmp/
 
 # 环境
 .env
 .env.local
 *.private.json
 
-# Spec 产物（不入仓 · M-ε 阶段临时）
-# 理由: checkpoint.json 频繁改动, 不该污染 commit history
-# M-ε.5+ 阶段会从 .gitignore 移除, 统一入仓
+# LLM API Key（运行时读，存真值不入仓）
+.llm_api_key
+
+# Spec 产物
 .spec/
 
-# v0.4 运行时数据 (项目文件 + SQLite)
-# 理由: 测试生成的数据不入仓, 生产数据由部署环境提供
-# 真正项目文件可以由 chapter_writer 重新生成
+# 运行时数据库
 data/projects/
 data/novel.db
 data/novel.db-*

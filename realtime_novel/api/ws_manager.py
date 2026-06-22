@@ -464,34 +464,38 @@ async def handle_onboarding_confirm(ws: WebSocket, user_id: str, data: dict):
             (project_id,),
         ).fetchall()
 
-        # Step 3 写入 style_charter + main_plot
+        # Step 3 写入 style_charter + main_plot + character_card (v0.7 故事引擎)
         if step == 3:
-            taboos = json.loads(sc_row['taboos_json']) if sc_row and sc_row['taboos_json'] else []
             notes = json.loads(sc_row['notes_json']) if sc_row and sc_row['notes_json'] else []
             metadata = json.loads(sc_row['metadata_json']) if sc_row and sc_row['metadata_json'] else {}
 
-            # emotional_anchor -> notes 追加
-            if fields.get('emotional_anchor'):
-                notes.append(f"情感锚点: {fields['emotional_anchor']}")
-            # taboos -> taboos 追加
-            if fields.get('taboos'):
-                taboos.append({
-                    "id": f"T{len(taboos)+1}",
-                    "text": fields['taboos'],
-                    "source": "user_onboarding_step3"
-                })
-            # ending_preference -> main_plot.metadata
-            if mp_row and fields.get('ending_preference'):
+            # story_core -> main_plot.arc_phrase (取代原来的 ending_preference 路径)
+            if mp_row and fields.get('story_core'):
                 mp_metadata = json.loads(mp_row['metadata_json']) if mp_row['metadata_json'] else {}
-                mp_metadata['ending_preference'] = fields['ending_preference']
-                mp_metadata['core_relationship'] = fields.get('core_relationship', '')
+                mp_metadata['story_core'] = fields['story_core']
+                # 同时写到 main_plot.arc_phrase (作为主线信号)
+                conn.execute(
+                    "UPDATE main_plot SET arc_phrase = ?, metadata_json = ?, updated_at = ? WHERE project_id = ?",
+                    (
+                        fields['story_core'],
+                        json.dumps(mp_metadata, ensure_ascii=False),
+                        datetime.now(),
+                        project_id,
+                    ),
+                )
+                artifacts_written.append('main_plot')
+
+            # opening_scene -> style_charter.notes + world_tree.metadata
+            if fields.get('opening_scene'):
+                notes.append(f"开篇场景: {fields['opening_scene']}")
+                # 同时存到 metadata 供后续读取
+                metadata['opening_scene'] = fields['opening_scene']
 
             # 写 style_charter
             if sc_row:
                 conn.execute(
-                    "UPDATE style_charter SET taboos_json = ?, notes_json = ?, metadata_json = ?, updated_at = ? WHERE project_id = ?",
+                    "UPDATE style_charter SET notes_json = ?, metadata_json = ?, updated_at = ? WHERE project_id = ?",
                     (
-                        json.dumps(taboos, ensure_ascii=False),
                         json.dumps(notes, ensure_ascii=False),
                         json.dumps(metadata, ensure_ascii=False),
                         datetime.now(),
@@ -503,7 +507,7 @@ async def handle_onboarding_confirm(ws: WebSocket, user_id: str, data: dict):
                     "INSERT INTO style_charter (project_id, prose_style_json, tone_json, density_json, taboos_json, notes_json, limits_json, metadata_json, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         project_id, '{}', '{}', '{}',
-                        json.dumps(taboos, ensure_ascii=False),
+                        '[]',
                         json.dumps(notes, ensure_ascii=False),
                         '{}', json.dumps(metadata, ensure_ascii=False),
                         datetime.now(),
@@ -511,37 +515,56 @@ async def handle_onboarding_confirm(ws: WebSocket, user_id: str, data: dict):
                 )
             artifacts_written.append('style_charter')
 
-            # 写 main_plot.metadata
-            if mp_row and fields.get('ending_preference'):
-                conn.execute(
-                    "UPDATE main_plot SET metadata_json = ?, updated_at = ? WHERE project_id = ?",
-                    (
-                        json.dumps(mp_metadata, ensure_ascii=False),
-                        datetime.now(),
-                        project_id,
-                    ),
-                )
-                artifacts_written.append('main_plot')
+            # characters -> character_card (按行拆 '名字-要什么-怕什么')
+            if fields.get('characters'):
+                for line in fields['characters'].split('\n'):
+                    line = line.strip()
+                    if not line:
+                        continue
+                    parts = line.split('-')
+                    name = parts[0].strip() if parts else f"角色"
+                    want = parts[1].strip() if len(parts) > 1 else ""
+                    fear = parts[2].strip() if len(parts) > 2 else ""
+                    # Step 3 中第一个角色通常是主角
+                    is_first = 'characters' not in [r[0] for r in conn.execute("SELECT id FROM characters WHERE project_id = ?", (project_id,)).fetchall()]
+                    role = "protagonist" if is_first else "supporting"
+                    char_id = f"char-{uuid.uuid4().hex[:8]}"
+                    # background 合并 want + fear (供后续读取)
+                    background = f"想要: {want} | 害怕: {fear}" if want or fear else line
+                    conn.execute(
+                        "INSERT INTO characters (id, project_id, name, role, traits_json, speech_style, background, arc, internal_state, metadata_json, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                        (
+                            char_id, project_id, name, role, '[]', None, background, None, None, '{}', datetime.now(),
+                        ),
+                    )
+                artifacts_written.append('character_card')
 
-        # Step 4 写入 main_plot + sub_plot + character_card + seed_table
+        # Step 4 写入 main_plot + sub_plot + seed_table + style_charter (v0.7 故事路径)
         elif step == 4:
-            # main_conflict -> main_plot.arc_phrase + beats
-            if mp_row and fields.get('main_conflict'):
+            # main_arc -> main_plot.beats (每行 1 个 beat)
+            if mp_row and fields.get('main_arc'):
                 beats = json.loads(mp_row['beats_json']) if mp_row['beats_json'] else []
-                # 加 1 个 beat
-                beats.append({
-                    "id": f"beat-{len(beats)+1}",
-                    "sequence": len(beats) + 1,
-                    "title": f"主线弧光",
-                    "description": fields['main_conflict'][:80],
-                    "status": "active",
-                    "chapter_range": {"start": 1, "end": 5},
-                })
+                for i, line in enumerate(fields['main_arc'].split('\n')):
+                    line = line.strip()
+                    if not line:
+                        continue
+                    beats.append({
+                        "id": f"beat-{len(beats)+1}",
+                        "sequence": len(beats) + 1,
+                        "title": f"主线节点 {len(beats)+1}",
+                        "description": line[:80],
+                        "status": "active",
+                        "chapter_range": {"start": 1, "end": 5 + len(beats) * 5},
+                    })
+                # reader_feeling 也存到 metadata
+                mp_metadata = json.loads(mp_row['metadata_json']) if mp_row['metadata_json'] else {}
+                if fields.get('reader_feeling'):
+                    mp_metadata['reader_feeling'] = fields['reader_feeling']
                 conn.execute(
-                    "UPDATE main_plot SET arc_phrase = ?, beats_json = ?, updated_at = ? WHERE project_id = ?",
+                    "UPDATE main_plot SET beats_json = ?, metadata_json = ?, updated_at = ? WHERE project_id = ?",
                     (
-                        fields['main_conflict'],
                         json.dumps(beats, ensure_ascii=False),
+                        json.dumps(mp_metadata, ensure_ascii=False),
                         datetime.now(),
                         project_id,
                     ),
@@ -566,31 +589,6 @@ async def handle_onboarding_confirm(ws: WebSocket, user_id: str, data: dict):
                     )
                 artifacts_written.append('sub_plot')
 
-            # characters -> characters (按行拆 '名字-身份-背景')
-            if fields.get('characters'):
-                # 不删旧 (Step 3 可能已写), 增量
-                for line in fields['characters'].split('\n'):
-                    line = line.strip()
-                    if not line:
-                        continue
-                    parts = line.split('-')
-                    name = parts[0].strip() if parts else f"角色"
-                    role = parts[1].strip() if len(parts) > 1 else "supporting"
-                    background = parts[2].strip() if len(parts) > 2 else line
-                    role_map = {
-                        "主角": "protagonist", "妹妹": "supporting", "反派": "antagonist",
-                        "次主角": "deuteragonist", "配角": "supporting", "路人": "minor",
-                    }
-                    mapped_role = role_map.get(role, "supporting")
-                    char_id = f"char-{uuid.uuid4().hex[:8]}"
-                    conn.execute(
-                        "INSERT INTO characters (id, project_id, name, role, traits_json, speech_style, background, arc, internal_state, metadata_json, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                        (
-                            char_id, project_id, name, mapped_role, '[]', None, background, None, None, '{}', datetime.now(),
-                        ),
-                    )
-                artifacts_written.append('character_card')
-
             # seeds -> seeds (按行拆)
             if fields.get('seeds'):
                 for i, line in enumerate(fields['seeds'].split('\n')):
@@ -610,5 +608,19 @@ async def handle_onboarding_confirm(ws: WebSocket, user_id: str, data: dict):
                         ),
                     )
                 artifacts_written.append('seed_table')
+
+            # reader_feeling -> style_charter.notes (供后续 prompt 读到)
+            if fields.get('reader_feeling') and sc_row:
+                notes = json.loads(sc_row['notes_json']) if sc_row['notes_json'] else []
+                notes.append(f"读者情绪: {fields['reader_feeling']}")
+                conn.execute(
+                    "UPDATE style_charter SET notes_json = ?, updated_at = ? WHERE project_id = ?",
+                    (
+                        json.dumps(notes, ensure_ascii=False),
+                        datetime.now(),
+                        project_id,
+                    ),
+                )
+                artifacts_written.append('style_charter')
 
     return artifacts_written

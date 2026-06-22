@@ -35,24 +35,44 @@ class OnboardingPayloadStep1(BaseModel):
 
 
 class OnboardingPayloadStep2(BaseModel):
-    """Step 2 UI 主题色 (调色板, 渲染阅读页用, **不**影响世界树)"""
-    palette: List[str] = Field(default_factory=list, description="主题色列表, 可空")
+    """Step 2 UI 主题色 (调色板, 渲染阅读页用, **不**影响世界树)
+
+    v0.7: 改为单选 str（一个项目对应一个主题色）
+    - 前端 selectPalette() 发 string | null
+    - 后端落库到 projects.palette (str, max_length=500)
+    """
+    palette: str = Field(default="", min_length=0, max_length=500, description="主题色, 单选, 可空")
 
 
 class OnboardingPayloadStep3(BaseModel):
-    """Step 3 核心设定 (Agent 引导式填入)"""
-    core_relationship: str = Field(default="", description="核心关系")
-    emotional_anchor: str = Field(default="", description="情感锚点")
-    taboos: str = Field(default="", description="禁区")
-    ending_preference: str = Field(default="", description="结局偏好")
+    """Step 3 故事引擎 (Agent 引导式填入) — v0.7 重构
+
+    从 4 字段 (核心关系/情感锚点/禁区/结局偏好) 精简为 3 字段:
+    - story_core: 故事内核 (主角要做什么 + 什么阻止)
+    - characters: 主要角色 (主角/对手/盟友, 每行 '名字-要什么-怕什么')
+    - opening_scene: 开篇场景 (场景描述 + 主角那一刻的不可逆选择)
+    """
+    story_core: str = Field(default="", description="故事内核: 主角要做什么 + 什么阻止")
+    characters: str = Field(default="", description="主要角色: 主角/对手/盟友, 每行 '名字-要什么-怕什么'")
+    opening_scene: str = Field(default="", description="开篇场景: 场景 + 主角不可逆选择")
 
 
 class OnboardingPayloadStep4(BaseModel):
-    """Step 4 大纲初稿 (Agent 引导式填入)"""
-    main_conflict: str = Field(default="", description="主线核心矛盾")
+    """Step 4 故事路径 (Agent 引导式填入) — v0.7 重构
+
+    从 4 字段 (主线/支线/人物/种子) 改为 4 字段:
+    - main_arc: 主线节点 (3-5 个剧情转折, 每行 1 个)
+    - sub_plots: 支线 (每行 1 个)
+    - seeds: 种子/钩子 (第 1 章埋什么, N 章后亮出来)
+    - reader_feeling: 读者情绪 (希望读者合上书那一刻心里留下什么)
+
+    去掉「人物」字段 (Step 3 已填)
+    砍掉 v0.5 的「禁区」「结局偏好」
+    """
+    main_arc: str = Field(default="", description="主线节点, 3-5 个剧情转折, 每行 1 个")
     sub_plots: str = Field(default="", description="支线, 每行 1 个")
-    characters: str = Field(default="", description="人物, 每行 '名字-身份-背景'")
-    seeds: str = Field(default="", description="种子, 每行 1 个")
+    seeds: str = Field(default="", description="种子/钩子, 每行 1 个")
+    reader_feeling: str = Field(default="", description="读者情绪, 希望读者读完后心里留下什么")
 
 
 class OnboardingPayloadStep5(BaseModel):

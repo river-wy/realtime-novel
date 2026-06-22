@@ -26,6 +26,103 @@ from realtime_novel.agent.prompts import (
     CHAPTER_DETAILED_SUMMARY_PROMPT,
     CONVERSATION_SUMMARY_PROMPT,
 )
+
+
+def get_llm_params_for_project(project_id: str, role: str = "chapter") -> dict:
+    """v0.8: 按项目的 exploration_level 返回 LLM 调用参数
+
+    Args:
+        project_id: 项目 ID
+        role: "chapter" (章节生成) | "worldtree" (世界树管理) | "memory" (记忆检索)
+              不同 role 可有不同默认值 (暂统一用 exploration_level)
+
+    Returns:
+        {"temperature": float, "max_tokens": int} (暂不返 frequency_penalty,
+        等 llm_adapter.complete_with_messages 扩展后再加 — TODO v0.8.1)
+    """
+    # 导入在函数内避免循环
+    from realtime_novel.persistence.project_repository import ProjectRepository
+    from realtime_novel.config import get_exploration_level_config
+
+    repo = ProjectRepository()
+    project = repo.get(project_id)
+    level = project.exploration_level if project else "standard"
+    cfg = get_exploration_level_config(level)
+    return {
+        "temperature": cfg["temperature"],
+        "max_tokens": cfg["max_tokens"],
+        # v0.8.1: 透传 frequency_penalty (探索度 wild 档减少重复用词)
+        "frequency_penalty": cfg.get("frequency_penalty", 0.0),
+    }
+
+
+def get_style_directive(level: str) -> str:
+    """v0.8: 按 exploration_level 返回 prompt 创作风格指导段
+
+    - conservative: 严守用户输入, 不自由发挥
+    - standard:     合理补充
+    - wild:         鼓励扩展篇幅, 添细节, 探索不同方向
+    """
+    directives = {
+        "conservative": (
+            "- 严守世界树基座, 不偏离用户设定\n"
+            "- 字数严格控制, 不超不欠\n"
+            "- AI 补充范围 限, 只在用户设定上微调"
+        ),
+        "standard": (
+            "- 遵守世界树基座\n"
+            "- 字数控制 + AI 可合理补充 1-2 处细节 (人物动作/环境描写)\n"
+            "- 保持故事连贯性优先"
+        ),
+        "wild": (
+            "- 大胆探索: 在世界树框架内鼓励不同表述/节奏/视角\n"
+            "- 鼓励篇幅扩展: 字数可超上限 20%, 通过细腻描写/多场景/多角色心理展开\n"
+            "- 添加 1-2 个用户没明说的细节 (如某个角色的小习惯/某个物件的来历/一段不重要的往事)\n"
+            "- 探索性 > 准确性: 尝试不同的开篇/收尾/节奏, 给用户横向比较"
+        ),
+    }
+    return directives.get(level, directives["standard"])
+
+
+def fill_chapter_prompt_placeholders(template: str, project_id: str) -> str:
+    """v0.8: 填充 CHAPTER_GENERATOR_PROMPT 的探索度占位符 (按项目动态注入)
+
+    v0.8.1: 用 string.Template ($-placeholder) 避免和 {world_tree}/{chapter_summaries}
+    等其他 {}-placeholder 冲突。
+
+    占位符 (用 $ 前缀避免冲突):
+    - $word_count_range: 字数范围 (conservative=2000-2500, standard=2000-3000, wild=2500-3500)
+    - $style_directive:   创作风格指导 (按 level)
+
+    如果 template 不含占位符 (用户自定义 system_prompt), 原样返回。
+    """
+    from string import Template
+    from realtime_novel.persistence.project_repository import ProjectRepository
+
+    if "{word_count_range}" not in template and "{style_directive}" not in template:
+        return template
+
+    repo = ProjectRepository()
+    project = repo.get(project_id)
+    level = project.exploration_level if project else "standard"
+
+    word_count_map = {
+        "conservative": "2000-2500",
+        "standard": "2000-3000",
+        "wild": "2500-3500",
+    }
+    word_count_range = word_count_map.get(level, "2000-3000")
+    style_directive = get_style_directive(level)
+
+    # string.Template 要求 $-placeholder, 先把 $word_count_range / $style_directive
+    # 在原模板里出现的位置识别出来, 然后做 safe_substitute
+    # 因为原模板里现在写的是 {word_count_range} 不是 $word_count_range, 临时改一下
+    template_for_subst = template.replace("{word_count_range}", "$word_count_range") \
+                                    .replace("{style_directive}", "$style_directive")
+    return Template(template_for_subst).safe_substitute(
+        word_count_range=word_count_range,
+        style_directive=style_directive,
+    )
 from realtime_novel.agent.context_builder import (
     build_messages_for_worldtree_keeper,
     build_messages_for_chapter_generator,
@@ -73,7 +170,9 @@ class ChapterGeneratorSpecialist(SpecialistAgent):
             }
 
         user_message = context.get("user_message", "请生成下一章")
-        system_prompt = context.get("system_prompt") or CHAPTER_GENERATOR_PROMPT
+        base_system_prompt = context.get("system_prompt") or CHAPTER_GENERATOR_PROMPT
+        # v0.8: 按项目探索度填充 prompt 占位符
+        system_prompt = fill_chapter_prompt_placeholders(base_system_prompt, project_id)
 
         # 拼 messages（按角色裁剪）
         messages = build_messages_for_chapter_generator(
@@ -85,14 +184,15 @@ class ChapterGeneratorSpecialist(SpecialistAgent):
 
         try:
             adapter = get_llm_adapter()
+            # v0.8: 按项目 exploration_level 决定 LLM 参数 (conservative/standard/wild)
+            llm_params = get_llm_params_for_project(project_id, role="chapter")
             # 把 system + data blocks 抽出来作为 system（节省 user 消息 token）
             response = await adapter.complete_with_messages(
                 messages=[m for m in messages if m["role"] != "system"],
                 system_prompt="\n\n".join([
                     m["content"] for m in messages if m["role"] == "system"
                 ]),
-                max_tokens=4096,
-                temperature=0.8,
+                **llm_params,
                 role=ModelRole.TEXT,
             )
             llm_output = response.content
@@ -145,13 +245,14 @@ class WorldTreeKeeperSpecialist(SpecialistAgent):
 
         try:
             adapter = get_llm_adapter()
+            # v0.8: 按项目 exploration_level 决定 LLM 参数
+            llm_params = get_llm_params_for_project(project_id, role="worldtree")
             response = await adapter.complete_with_messages(
                 messages=[m for m in messages if m["role"] != "system"],
                 system_prompt="\n\n".join([
                     m["content"] for m in messages if m["role"] == "system"
                 ]),
-                max_tokens=2000,
-                temperature=0.5,
+                **llm_params,
                 role=ModelRole.TEXT,
             )
             llm_output = response.content
@@ -207,6 +308,7 @@ class MemoryKeeperSpecialist(SpecialistAgent):
 
         try:
             adapter = get_llm_adapter()
+            # v0.8: MemoryKeeper 跨项目检索, 不绑 exploration_level (保持稳定)
             response = await adapter.complete_with_messages(
                 messages=[m for m in messages if m["role"] != "system"],
                 system_prompt=sys_prompt,

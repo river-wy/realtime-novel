@@ -75,15 +75,16 @@ def assemble_7_artifacts(project_id: str, payload: Dict[str, Any]) -> List[str]:
     genres = payload.get("genres", []) or []
     styles = payload.get("styles", []) or []
     tone = payload.get("tone", "冷叙述")
-    palette = payload.get("palette", []) or []  # noqa: 暂时不写入 7 件, 仅做参考
-    main_conflict = payload.get("main_conflict", "") or ""
+    palette = payload.get("palette", "") or ""  # v0.7: 改为单选 str
+    # v0.7 Step 3 (故事引擎) 字段
+    story_core = payload.get("story_core", "") or ""
+    characters_step3 = payload.get("characters", "") or ""  # Step 3 填的 '名字-要什么-怕什么'
+    opening_scene = payload.get("opening_scene", "") or ""
+    # v0.7 Step 4 (故事路径) 字段
+    main_arc_raw = payload.get("main_arc", "") or ""  # 3-5 节点, 每行 1 个
     sub_plots_raw = payload.get("sub_plots", "") or ""
-    characters_raw = payload.get("characters", "") or ""
     seeds_raw = payload.get("seeds", "") or ""
-    core_relationship = payload.get("core_relationship", "") or ""
-    emotional_anchor = payload.get("emotional_anchor", "") or ""
-    taboos_raw = payload.get("taboos", "") or ""
-    ending_preference = payload.get("ending_preference", "") or ""
+    reader_feeling = payload.get("reader_feeling", "") or ""
 
     # 推断 era 和 theme
     era = "现代"
@@ -93,37 +94,52 @@ def assemble_7_artifacts(project_id: str, payload: Dict[str, Any]) -> List[str]:
             break
     theme = genres[0] if genres else "都市"
 
-    # 主线：拼 main_conflict + genres + theme (fallback)
-    main_arc = main_conflict or f"{theme}题材下主角的成长与命运"
+    # 主线: 用 story_core (Step 3 故事内核) 作为主线信号
+    main_arc = story_core or f"{theme}题材下主角的成长与命运"
 
-    # core_rules: 从主线 + 核心关系 + 禁区 推断
+    # core_rules: 从主线 + 开篇场景 推断 (v0.7: 砍掉禁区/结局偏好)
     core_rules = [
-        {"id": "R1", "statement": f"主线：{main_arc}", "enforcement": "hard", "applies_to": "all"},
-        {"id": "R2", "statement": f"核心关系：{core_relationship or '主角与各角色的羁绊'}", "enforcement": "soft", "applies_to": "all"},
+        {"id": "R1", "statement": f"主线: {main_arc}", "enforcement": "hard", "applies_to": "all"},
     ]
-    if taboos_raw:
-        core_rules.append({"id": "R3", "statement": f"禁区: {taboos_raw}", "enforcement": "hard", "applies_to": "all"})
+    if opening_scene:
+        core_rules.append({"id": "R2", "statement": f"开篇场景: {opening_scene}", "enforcement": "soft", "applies_to": "all"})
 
-    # style_charter.notes: 追加"情感锚点"
+    # style_charter.notes: 加 styles + 开篇场景
     notes_list = list(styles) if styles else []
-    if emotional_anchor:
-        notes_list.append(f"情感锚点: {emotional_anchor}")
+    if opening_scene:
+        notes_list.append(f"开篇场景: {opening_scene}")
 
-    # style_charter.taboos: list of {id, text}
-    taboos_list = []
-    if taboos_raw:
-        taboos_list.append({"id": "T1", "text": taboos_raw, "source": "user_onboarding_step3"})
+    # style_charter: v0.8.2 由 Agent 推断完整笔法 (散文/句式/段落/心理活动 密度)
+    # 不暴露给用户, 用户只填 genres/styles/tone
+    from realtime_novel.agent.style_inference import infer_style_charter
+    inferred_style_charter = infer_style_charter(
+        genres=genres,
+        styles=styles,
+        tone=tone if isinstance(tone, list) else ([tone] if tone else []),
+    )
 
-    # style_charter.prose_style: 根据 styles 推断
-    is_literary = any(s in ["治愈", "唯美", "甜文"] for s in styles)
-    prose_style = "散文式" if is_literary else "紧凑"
-
-    # main_plot: beats 构造 (默认 3 beat: 开场/冲突/高潮)
-    beats = [
-        {"id": "beat-1", "sequence": 1, "title": "开场", "description": main_arc[:50], "status": "active", "chapter_range": {"start": 1, "end": 5}},
-        {"id": "beat-2", "sequence": 2, "title": "冲突", "description": "主角面对挑战", "status": "pending", "chapter_range": {"start": 6, "end": 15}},
-        {"id": "beat-3", "sequence": 3, "title": "高潮", "description": "高潮与转折", "status": "pending", "chapter_range": {"start": 16, "end": 25}},
-    ]
+    # main_plot: beats 构造 (v0.7: 用 main_arc_raw 按行拆, 取代原来固定 3 beat)
+    beats = []
+    if main_arc_raw:
+        for i, line in enumerate(main_arc_raw.split("\n")):
+            line = line.strip()
+            if not line:
+                continue
+            beats.append({
+                "id": f"beat-{i+1}",
+                "sequence": i + 1,
+                "title": f"主线节点 {i+1}",
+                "description": line[:80],
+                "status": "active" if i == 0 else "pending",
+                "chapter_range": {"start": i * 5 + 1, "end": (i + 1) * 5},
+            })
+    else:
+        # fallback: 固定 3 beat
+        beats = [
+            {"id": "beat-1", "sequence": 1, "title": "开场", "description": main_arc[:50], "status": "active", "chapter_range": {"start": 1, "end": 5}},
+            {"id": "beat-2", "sequence": 2, "title": "冲突", "description": "主角面对挑战", "status": "pending", "chapter_range": {"start": 6, "end": 15}},
+            {"id": "beat-3", "sequence": 3, "title": "高潮", "description": "高潮与转折", "status": "pending", "chapter_range": {"start": 16, "end": 25}},
+        ]
 
     # 支线: 按行拆
     sub_plot_threads = []
@@ -138,31 +154,35 @@ def assemble_7_artifacts(project_id: str, payload: Dict[str, Any]) -> List[str]:
                 "priority": "side",
             })
 
-    # 人物: 按行拆 "名字-身份-背景"
+    # 人物: Step 3 填的 '名字-要什么-怕什么' (取代原 Step 4 '名字-身份-背景')
     characters = []
-    for line in characters_raw.split("\n"):
+    for line in characters_step3.split("\n"):
         line = line.strip()
         if not line:
             continue
         parts = line.split("-")
-        raw_role = parts[1].strip() if len(parts) > 1 else "supporting"
-        mapped_role = ROLE_MAP.get(raw_role, "supporting")
+        name = parts[0].strip() if parts else f"角色{len(characters)+1}"
+        want = parts[1].strip() if len(parts) > 1 else ""
+        fear = parts[2].strip() if len(parts) > 2 else ""
+        # 第一个角色通常是主角
+        role = "protagonist" if not characters else "supporting"
+        # background 合并 want + fear
+        background = f"想要: {want} | 害怕: {fear}" if want or fear else line
         characters.append({
             "id": f"char-{len(characters)+1:03d}",
-            "name": parts[0].strip() if parts else f"角色{len(characters)+1}",
-            "role": mapped_role,
-            "background": parts[2].strip() if len(parts) > 2 else line,
+            "name": name,
+            "role": role,
+            "background": background,
             "traits": [],
         })
 
-    # 核心关系单独建一个人物 (Step 3, v0.7 拍板补: 核心关系也要入 character_card)
-    if core_relationship and not characters:
-        # 没有 Step 4 人物时, 用核心关系建一个 protagonist
+    # story_core 兜底: 如果没有 Step 3 角色但有 story_core, 建一个主角
+    if not characters and story_core:
         characters.append({
             "id": "char-000",
             "name": "主角",
             "role": "protagonist",
-            "background": core_relationship,
+            "background": story_core,
             "traits": [],
         })
 
@@ -192,18 +212,24 @@ def assemble_7_artifacts(project_id: str, payload: Dict[str, Any]) -> List[str]:
                 "core_rules": core_rules,
             },
             "branches": [],
-            "metadata": {},
+            "metadata": {
+                # v0.7: 开篇场景存到世界树 metadata
+                "opening_scene": opening_scene,
+            },
         },
         style_charter={
-            "prose_style": {"primary": prose_style},
-            "tone": {"primary": tone or "冷叙述"},
-            "density": {"specificity": 0.7, "subjectivity": 0.6},
-            "taboos": taboos_list,
+            **inferred_style_charter,  # v0.8.2: 完整笔法 (散文/句式/段落/密度/limits)
+            "taboos": [],  # v0.7: 砍掉禁区
             "notes": notes_list,
-            "limits": {"max_chapter_words": 3000},
             # v0.5 拍板: palette **不**写 7 件基座 (只存 projects.palette)
-            # 世界树基座只反映内容创作意图, 不反映 UI 偏好
-            "metadata": {"genres": genres, "styles": styles},
+            "metadata": {
+                **inferred_style_charter.get("metadata", {}),  # 推断来源记录
+                "genres": genres,
+                "styles": styles,
+                "tone": tone if isinstance(tone, list) else [tone] if tone else [],
+                # v0.7: reader_feeling 存到 style_charter.metadata
+                "reader_feeling": reader_feeling,
+            },
         },
         genre_resonance={
             "accept": [{"text": g, "weight": 0.8} for g in genres],
@@ -216,9 +242,9 @@ def assemble_7_artifacts(project_id: str, payload: Dict[str, Any]) -> List[str]:
             "arc_phrase": main_arc,
             "beats": beats,
             "metadata": {
-                "ending_preference": ending_preference,
-                "core_relationship": core_relationship,
-                "emotional_anchor": emotional_anchor,
+                # v0.7: 砍掉 ending_preference, 加 story_core 和 reader_feeling
+                "story_core": story_core,
+                "reader_feeling": reader_feeling,
             },
         },
         sub_plot={"threads": sub_plot_threads, "metadata": {}},

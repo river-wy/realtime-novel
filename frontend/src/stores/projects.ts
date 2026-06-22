@@ -50,7 +50,19 @@ export const useProjectsStore = defineStore('projects', () => {
     return r
   }
 
+  /** v0.8: 切换项目探索度 */
+  async function updateExplorationLevel(id: string, level: 'conservative' | 'standard' | 'wild') {
+    const r = await api.updateExplorationLevel(id, level)
+    // 更新本地缓存
+    await loadOne(id)
+    await loadList()
+    return r
+  }
+
   const hasCurrent = computed(() => current.value !== null)
 
-  return { projects, total, current, loading, error, hasCurrent, loadList, loadOne, create, remove }
+  return {
+    projects, total, current, loading, error, hasCurrent,
+    loadList, loadOne, create, remove, updateExplorationLevel,
+  }
 })

@@ -41,10 +41,17 @@ class AsyncProjectManager:
 
     # ============ CRUD ============
 
-    async def create(self, name: str, palette: str, initial_prompt: Optional[str] = None) -> dict:
-        """创建项目（projects 表 + 项目目录）"""
-        # 1. DB 落项目
-        project = self._proj_repo.create(project_id=name, name=name, palette=palette)
+    async def create(self, name: str, palette: str, initial_prompt: Optional[str] = None,
+                    exploration_level: str = "standard") -> dict:
+        """创建项目（projects 表 + 项目目录）
+
+        v0.8: 接受 exploration_level (conservative/standard/wild)
+        """
+        # 1. DB 落项目 (v0.8: 传 exploration_level)
+        project = self._proj_repo.create(
+            project_id=name, name=name, palette=palette,
+            exploration_level=exploration_level,
+        )
         # 2. 创建项目目录（章节文件根）
         project_path = self.projects_root / name
         project_path.mkdir(parents=True, exist_ok=True)
@@ -53,6 +60,7 @@ class AsyncProjectManager:
             "id": project.id,
             "name": project.name,
             "palette": project.palette,
+            "exploration_level": project.exploration_level,
         }
 
     async def load(self, project_id: str) -> Optional[dict]:
@@ -77,6 +85,7 @@ class AsyncProjectManager:
             "id": project.id,
             "name": project.name,
             "palette": project.palette,
+            "exploration_level": project.exploration_level,  # v0.8
             "current_pov": project.current_pov,
             "seven_artifacts": all_artifacts,  # 兼容旧字段名
             "world_tree": all_artifacts.get("01-world-tree.yaml", {}),
@@ -94,7 +103,9 @@ class AsyncProjectManager:
                 "id": p.id,
                 "name": p.name,
                 "palette": p.palette,
+                "exploration_level": p.exploration_level,  # v0.8
                 "chapter_count": chapter_count,
+                "last_updated": p.updated_at.isoformat() if p.updated_at else None,
             })
         return result
 

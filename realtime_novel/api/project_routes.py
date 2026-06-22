@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
-from typing import Optional, Any
+from typing import Optional, Any, Literal
 
 from realtime_novel.services.async_wrappers import AsyncProjectManager
 from realtime_novel.persistence import ProjectDeletedRepository  # noqa: F401
@@ -20,6 +20,8 @@ class ProjectInfo(BaseModel):
     id: str
     name: str
     palette: str
+    # v0.8: 探索度
+    exploration_level: str = "standard"
     chapter_count: int = 0
     last_updated: Optional[str] = None
 
@@ -33,6 +35,11 @@ class CreateProjectRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=100)
     # v0.7: palette 允许空字符串（Onboarding Step 2 才会选, Step 1 创建时为空）
     palette: str = Field(default="", min_length=0, max_length=500)
+    # v0.8: 创建时可指定探索度，默认 standard
+    exploration_level: Literal["conservative", "standard", "wild"] = Field(
+        default="standard",
+        description="探索度: conservative(严守) / standard(平衡) / wild(大胆)"
+    )
     initial_prompt: Optional[str] = None
 
 
@@ -47,9 +54,22 @@ class ProjectDetailResponse(BaseModel):
     id: str
     name: str
     palette: str
+    # v0.8: 探索度
+    exploration_level: str = "standard"
     seven_artifacts: Optional[dict[str, Any]] = None
     world_tree: Optional[dict[str, Any]] = None
     chapters: Optional[list[dict]] = None
+
+
+class UpdateExplorationLevelRequest(BaseModel):
+    """v0.8: 切换项目探索度"""
+    exploration_level: Literal["conservative", "standard", "wild"]
+
+
+class UpdateExplorationLevelResponse(BaseModel):
+    project_id: str
+    exploration_level: str
+    message: str
 
 
 class DeleteProjectResponse(BaseModel):
@@ -75,9 +95,10 @@ async def list_projects(
 
 @router.post("", response_model=CreateProjectResponse, status_code=201)
 async def create_project(req: CreateProjectRequest):
-    """创建项目（v0.4.1 落库到 messages 表）"""
+    """创建项目（v0.4.1 落库到 messages 表，v0.8 支持 exploration_level）"""
     try:
-        result = await _pm.create(req.name, req.palette, req.initial_prompt)
+        # v0.8: 传 exploration_level 给 _pm
+        result = await _pm.create(req.name, req.palette, req.initial_prompt, exploration_level=req.exploration_level)
     except FileExistsError as e:
         raise HTTPException(409, f"Project already exists: {req.name}")
     # v0.4.1 落库（业务接口调用走 record_tool_call）
@@ -85,7 +106,7 @@ async def create_project(req: CreateProjectRequest):
     record_tool_call(
         conversation_id=conv_id,
         tool_name="create_project",
-        args={"name": req.name, "palette": req.palette, "initial_prompt": req.initial_prompt},
+        args={"name": req.name, "palette": req.palette, "initial_prompt": req.initial_prompt, "exploration_level": req.exploration_level},
         result=result,
         project_id=result.get("id"),
     )
@@ -99,7 +120,7 @@ async def create_project(req: CreateProjectRequest):
 
 @router.get("/{project_id}", response_model=ProjectDetailResponse)
 async def get_project(project_id: str):
-    """加载项目详情"""
+    """加载项目详情（v0.8: 含 exploration_level）"""
     project = await _pm.load(project_id)
     if project is None:
         raise HTTPException(404, f"Project not found: {project_id}")
@@ -107,9 +128,39 @@ async def get_project(project_id: str):
         id=project.get("id", project_id),
         name=project.get("name", ""),
         palette=project.get("palette", ""),
+        exploration_level=project.get("exploration_level", "standard"),
         seven_artifacts=project.get("seven_artifacts"),
         world_tree=project.get("world_tree"),
         chapters=project.get("chapters"),
+    )
+
+
+@router.patch("/{project_id}/exploration-level", response_model=UpdateExplorationLevelResponse)
+async def update_exploration_level(
+    project_id: str,
+    req: UpdateExplorationLevelRequest,
+):
+    """v0.8: 切换项目探索度 (conservative/standard/wild)
+
+    探索度影响后续章节生成 + 世界树管理的 LLM 参数 (Temperature/max_tokens)
+    - conservative: 严守用户输入
+    - standard:     平衡
+    - wild:         大胆发散
+    """
+    from realtime_novel.persistence.project_repository import ProjectRepository
+
+    repo = ProjectRepository()
+    project = repo.get(project_id)
+    if project is None:
+        raise HTTPException(404, f"Project not found: {project_id}")
+    try:
+        repo.update_exploration_level(project_id, req.exploration_level)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return UpdateExplorationLevelResponse(
+        project_id=project_id,
+        exploration_level=req.exploration_level,
+        message=f"探索度已切换为 {req.exploration_level}, 后续章节生成将使用新参数",
     )
 
 

@@ -18,6 +18,11 @@ class CreateProjectInput(BaseModel):
     name: str = Field(..., min_length=1, max_length=100)
     # v0.7: palette 允许空（Onboarding Step 2 才会选）
     palette: str = Field(default="", min_length=0, max_length=500)
+    # v0.8: 探索度旋钮 (conservative/standard/wild)
+    exploration_level: Literal["conservative", "standard", "wild"] = Field(
+        default="standard",
+        description="探索度: conservative (严守) / standard (平衡) / wild (大胆)"
+    )
     initial_prompt: Optional[str] = None
 
 
@@ -30,6 +35,8 @@ class ProjectDetail(BaseModel):
     id: str
     name: str
     palette: str
+    # v0.8: 探索度
+    exploration_level: str = "standard"
     seven_artifacts: Optional[dict[str, Any]] = None
     world_tree: Optional[dict[str, Any]] = None
     chapters: Optional[list[dict]] = None

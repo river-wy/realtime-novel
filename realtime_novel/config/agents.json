@@ -1,0 +1,70 @@
+{
+  "_comment": "v0.8 模型路由 + 探索度配置。所有可用模型 + 每个 agent 调用的 model + 探索度档位。api_key 走 .llm_api_key 文件（gitignored）。",
+  "exploration_levels": {
+    "_comment": "v0.8 探索度档位 (conservative 严守 / standard 平衡 / wild 大胆). 项目级开关, specialist 调用 LLM 时按项目 exploration_level 查表",
+    "conservative": {
+      "temperature": 0.6,
+      "max_tokens": 2500,
+      "frequency_penalty": 0.1,
+      "supplement_aggressiveness": "low",
+      "description": "严守用户输入, AI 补充少, 适合'我已经有完整想法'"
+    },
+    "standard": {
+      "temperature": 0.85,
+      "max_tokens": 4500,
+      "frequency_penalty": 0.3,
+      "supplement_aggressiveness": "medium",
+      "description": "平衡, AI 基于用户输入合理补充, 适合日常创作"
+    },
+    "wild": {
+      "temperature": 1.05,
+      "max_tokens": 6000,
+      "frequency_penalty": 0.5,
+      "supplement_aggressiveness": "high",
+      "description": "大胆探索, AI 补充发散, 适合'我想试不同方向'"
+    }
+  },
+  "models": {
+    "friday/deepseek-v4-pro-tencent": {
+      "protocol": "openai_compat",
+      "base_url": "https://aigc.sankuai.com/v1/openai/native",
+      "model_id": "deepseek-v4-pro-tencent",
+      "default_params": {
+        "temperature": 0.7,
+        "max_tokens": 2048
+      },
+      "supports_thinking": true
+    },
+    "friday/gemini-3.1-flash-image-preview": {
+      "protocol": "google_native",
+      "submit_url": "https://aigc.sankuai.com/v1/google/models/gemini-3.1-flash-image-preview:imageGenerate",
+      "query_url_template": "https://aigc.sankuai.com/v1/google/models/{operation_id}:imageGenerateQuery",
+      "model_id": "gemini-3.1-flash-image-preview",
+      "default_params": {
+        "poll_interval": 3,
+        "poll_timeout": 120
+      },
+      "supports_thinking": false
+    }
+  },
+  "agents": {
+    "OnboardingAgent": {
+      "model": "friday/deepseek-v4-pro-tencent"
+    },
+    "StewardChatAgent": {
+      "model": "friday/deepseek-v4-pro-tencent"
+    },
+    "ChapterGeneratorSpecialist": {
+      "model": "friday/deepseek-v4-pro-tencent"
+    },
+    "WorldTreeKeeperSpecialist": {
+      "model": "friday/deepseek-v4-pro-tencent"
+    },
+    "MemoryKeeperSpecialist": {
+      "model": "friday/deepseek-v4-pro-tencent"
+    },
+    "ImageGeneratorAgent": {
+      "model": "friday/gemini-3.1-flash-image-preview"
+    }
+  }
+}

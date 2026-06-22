@@ -1,12 +1,11 @@
 """Gemini Provider（friday 代理 Google 原生异步 submit + poll）
 
 对应 infra.md §B.2.6
-对接参考: /Users/wuyu/AiTest/llm-test/friday/test_gemini.py
+v0.7 改造：provider_name 加 friday/ 前缀表示提供方，api_key 走 config_loader (.llm_api_key)
 """
 from __future__ import annotations
 
 import asyncio
-import os
 import time
 from typing import AsyncIterator
 
@@ -16,26 +15,25 @@ from realtime_novel.adapters.providers.base import LLMProvider
 from realtime_novel.adapters.types import (
     LLMRequest, LLMResponse, LLMStreamChunk, ModelProvider,
 )
+from realtime_novel.config.config_loader import load_llm_api_key, get_model_config
 
 
 class GeminiProvider(LLMProvider):
-    """gemini-3.1-flash-image-preview（经 friday 代理 Google 原生异步协议）"""
+    """friday/gemini-3.1-flash-image-preview（经 friday 代理 Google 原生异步协议）"""
 
-    provider_name = "gemini-3.1-flash-image-preview"
+    provider_name = "friday/gemini-3.1-flash-image-preview"
     supported_roles = ["image"]
 
-    SUBMIT_URL = "https://aigc.sankuai.com/v1/google/models/gemini-3.1-flash-image-preview:imageGenerate"
-    QUERY_URL_TEMPLATE = "https://aigc.sankuai.com/v1/google/models/{operation_id}:imageGenerateQuery"
-
-    POLL_INTERVAL = 3       # 轮询间隔（秒）
-    POLL_TIMEOUT = 120      # 轮询超时（秒）
-
     def __init__(self, api_key: str | None = None):
-        # friday 平台只用一个 Bearer token (app_id 即 api_key)
-        # 环境变量统一命名 FRIDAY_API_KEY (与 config.yaml app_id 字段语义对齐)
-        self.api_key = api_key or os.environ.get("FRIDAY_API_KEY", "")
-        if not self.api_key:
-            raise ValueError("FRIDAY_API_KEY environment variable not set")
+        # v0.7: api_key 走 .llm_api_key 文件，submit_url/query_url_template 从 agents.json 读
+        self.api_key = api_key or load_llm_api_key()
+        model_cfg = get_model_config("friday/gemini-3.1-flash-image-preview")
+        self.SUBMIT_URL = model_cfg["submit_url"]
+        self.QUERY_URL_TEMPLATE = model_cfg["query_url_template"]
+        # default_params 含轮询配置
+        default_params = model_cfg.get("default_params", {})
+        self.POLL_INTERVAL = default_params.get("poll_interval", 3)
+        self.POLL_TIMEOUT = default_params.get("poll_timeout", 120)
         self.headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",

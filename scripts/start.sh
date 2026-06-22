@@ -16,11 +16,9 @@ FRONTEND_PORT=7777
 BACKEND_PORT=7778
 HOST=127.0.0.1
 
-# FRIDAY 代理凭证（必需：v0.5+ 真实 LLM 链路需要）
-# friday 平台只用一个 Bearer token (config.yaml 的 app_id 字段即 api_key)
-# 启动前必须设环境变量：
-#   export FRIDAY_API_KEY=21899390080843030554
-# 脚本会检查，没设会报错退出
+# FRIDAY 代理凭证
+# v0.7: api_key 从 .llm_api_key 文件读 (gitignored)，不再走环境变量
+# 脚本只校验文件存在性 + ASCII 纯字符，实际读取在 Python 层 (config_loader.py)
 
 PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PYTHON="$PROJECT_ROOT/.venv/bin/python"
@@ -31,14 +29,32 @@ PID_DIR="$PROJECT_ROOT/tmp/pids"
 mkdir -p "$LOG_DIR" "$PID_DIR"
 
 # ============ 前置检查 ============
-check_env() {
-    if [ -z "$FRIDAY_API_KEY" ]; then
-        echo "❌ FRIDAY_API_KEY 环境变量未设置"
-        echo "   启动 v0.5+ 真实 LLM 链路需要 friday 代理凭证"
-        echo "   设置："
-        echo "     export FRIDAY_API_KEY=21899390080843030554"
+check_llm_api_key() {
+    # v0.7: 从 .llm_api_key 文件读 (gitignored)，标准 JSON 格式
+    local keyfile="$PROJECT_ROOT/.llm_api_key"
+    if [ ! -f "$keyfile" ]; then
+        echo "❌ .llm_api_key 文件不存在: $keyfile"
+        echo ""
+        echo "   创建示例（标准 JSON 格式）:"
+        echo "     echo '{\"FRIDAY_API_KEY\": \"your_friday_api_key\"}' > $keyfile"
+        echo "     chmod 600 $keyfile"
+        echo ""
+        echo "   然后重新运行 $0"
         exit 1
     fi
+    if [ ! -s "$keyfile" ]; then
+        echo "❌ .llm_api_key 文件为空: $keyfile"
+        echo "   请写入你的 friday API key 后重新运行"
+        exit 1
+    fi
+    # 校验 JSON 格式 (用 python 解析)
+    if ! "$PYTHON" -c "import json,sys; d=json.load(open('$keyfile')); assert isinstance(d, dict); assert any(k in d for k in ('FRIDAY_API_KEY','friday_api_key','api_key','key'))" 2>/dev/null; then
+        echo "❌ .llm_api_key JSON 格式错误"
+        echo "   正确格式: {\"FRIDAY_API_KEY\": \"your_key\"}"
+        echo "   当前内容: $(head -c 200 "$keyfile")"
+        exit 1
+    fi
+    echo "   ✓ .llm_api_key JSON 校验通过"
 }
 
 check_dependencies() {
@@ -151,7 +167,7 @@ main() {
     echo "============================================================"
     echo ""
 
-    check_env
+    check_llm_api_key
     check_dependencies
     kill_port_if_used $BACKEND_PORT "后端" || exit 1
     kill_port_if_used $FRONTEND_PORT "前端" || exit 1

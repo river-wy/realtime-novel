@@ -53,19 +53,24 @@ class ProjectRepository:
 
     # ----- Project 元数据 -----
 
-    def create(self, project_id: str, name: str, palette: str = "") -> Project:
-        """创建项目（projects 表）"""
+    def create(self, project_id: str, name: str, palette: str = "",
+               exploration_level: str = "standard") -> Project:
+        """创建项目（projects 表）
+
+        v0.8: exploration_level 默认 standard
+        """
         now = _now()
         with get_store().connection() as conn:
             conn.execute(
                 """
-                INSERT INTO projects (id, name, palette, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO projects (id, name, palette, exploration_level, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
                 """,
-                (project_id, name, palette, now, now),
+                (project_id, name, palette, exploration_level, now, now),
             )
         return Project(
             id=project_id, name=name, palette=palette,
+            exploration_level=exploration_level,
             current_pov=None, created_at=now, updated_at=now,
         )
 
@@ -100,6 +105,16 @@ class ProjectRepository:
             conn.execute(
                 "UPDATE projects SET palette = ?, updated_at = ? WHERE id = ?",
                 (new_palette, _now(), project_id),
+            )
+
+    def update_exploration_level(self, project_id: str, new_level: str) -> None:
+        """v0.8: 切换项目的探索度 (conservative/standard/wild)"""
+        if new_level not in ("conservative", "standard", "wild"):
+            raise ValueError(f"exploration_level 必须是 conservative/standard/wild, 收到: {new_level!r}")
+        with get_store().connection() as conn:
+            conn.execute(
+                "UPDATE projects SET exploration_level = ?, updated_at = ? WHERE id = ?",
+                (new_level, _now(), project_id),
             )
 
     def update_current_pov(self, project_id: str, new_pov: Optional[str]) -> None:

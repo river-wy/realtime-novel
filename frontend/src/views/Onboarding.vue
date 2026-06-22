@@ -35,27 +35,32 @@ const styles = ref<string[]>([])
 const tone = ref<string[]>([])
 
 // ============ Step 2 数据 ============
-const palette = ref<string[]>([])
+// v0.7: 视觉色调改为单选（一个项目对应一个主题色）
+const palette = ref<string | null>(null)
+
+/** 单选: 点击同一项则取消选中，点击其他项则切换 */
+function selectPalette(p: string) {
+  palette.value = palette.value === p ? null : p
+}
 
 // ============ Step 3/4 WS 聊天 ============
 const chat = useOnboardingChat(() => projectId.value)
 const userInput = ref('')
 const chatContainer = ref<HTMLElement | null>(null)
 
-/** Step 3 字段展示顺序 */
+/** Step 3 字段展示顺序 (v0.7: 3 字段 故事引擎) */
 const STEP3_FIELDS = [
-  { key: 'core_relationship', label: '核心关系', placeholder: '主角与失联 10 年的妹妹在数据黑市重逢' },
-  { key: 'emotional_anchor', label: '情感锚点', placeholder: '孤独、寻找、不信任 AI' },
-  { key: 'taboos', label: '禁区 / 不写什么', placeholder: '不写 NPC 死亡，不写硬科幻设定' },
-  { key: 'ending_preference', label: '结局偏好', placeholder: '开放式 / HE / BE / 留白' },
+  { key: 'story_core', label: '故事内核', placeholder: '主角想查父亲 20 年前失踪的真相, 但发现父亲被 AI 觉醒组织所杀' },
+  { key: 'characters', label: '主要角色 (每行 名字-要什么-怕什么)', placeholder: '林远-查清父亲真相-变成 AI\n幽灵-释放 AI 觉醒军-再次失去同伴\n张敏-重新开始-林远再次失踪' },
+  { key: 'opening_scene', label: '开篇场景 (场景 + 主角不可逆选择)', placeholder: '2087 新东京酸雨, 林远破解加密后没删痕迹就退出 (此刻他已被追踪)' },
 ] as const
 
-/** Step 4 字段展示顺序 */
+/** Step 4 字段展示顺序 (v0.7: 4 字段 故事路径) */
 const STEP4_FIELDS = [
-  { key: 'main_conflict', label: '主线核心矛盾', placeholder: '主角发现父亲失踪与 AI 觉醒战争有关...' },
-  { key: 'sub_plots', label: '支线（每行 1 个）', placeholder: '妹妹的神经记录被盗\n主角与老婆的感情修复' },
-  { key: 'characters', label: '人物（每行 名字-身份-背景）', placeholder: '林远-主角-28 岁杭州程序员\n林雪-妹妹-高中语文老师' },
-  { key: 'seeds', label: '种子（每行 1 个）', placeholder: '1987 年的收音机\n永远没响的家里的电话' },
+  { key: 'main_arc', label: '主线节点 (3-5 个, 每行 1 个)', placeholder: '开篇: 接到委托\n中段: 发现 AI 觉醒组织\n高潮: 直面幽灵, 真相揭晓\n结尾: 做出选择, 新世界开启' },
+  { key: 'sub_plots', label: '支线 (每行 1 个)', placeholder: '妹妹在数据黑市重逢后\n林远与张敏离婚后的感情修复' },
+  { key: 'seeds', label: '种子/钩子 (每行 1 个)', placeholder: '1987 年的录音带\n永远不响的红色电话\n林远手背的 6 位数密码' },
+  { key: 'reader_feeling', label: '读者情绪 (希望读者读完后心里留下什么)', placeholder: '如果 AI 已经觉醒, 我会不会也不舍得关掉它' },
 ] as const
 
 const currentFields = computed(() =>
@@ -129,7 +134,7 @@ async function nextFromHttpStep() {
       currentStep.value = 2
     } else if (currentStep.value === 2) {
       await onboardingStep(projectId.value, '2', {
-        palette: palette.value,
+        palette: palette.value || '',
       })
       currentStep.value = 3
       // 进入 Step 3: 打开 WS 连接
@@ -215,7 +220,7 @@ function getStepHint(step: number): string {
   return [
     '',
     '题材 / 风格 / 基调（每类至少 1 个）',
-    '选几个喜欢的色调（影响 UI 主题，不影响世界树）',
+    '选一个喜欢的色调（影响 UI 主题，不影响世界树）',
     '让 Agent 引导你填写 4 个核心设定',
     '让 Agent 引导你填写 4 个大纲字段',
     'AI 会读取前 4 步的所有信息生成第 1 章',
@@ -288,8 +293,8 @@ function getStepHint(step: number): string {
           v-for="p in PALETTE_OPTIONS"
           :key="p"
           class="tag tag-palette"
-          :class="{ selected: palette.includes(p) }"
-          @click="toggle(palette, p)"
+          :class="{ selected: palette === p }"
+          @click="selectPalette(p)"
         >{{ p }}</button>
       </div>
       <p class="palette-note">
@@ -413,7 +418,7 @@ function getStepHint(step: number): string {
       <button
         class="btn btn-primary"
         @click="nextFromHttpStep"
-        :disabled="loading"
+        :disabled="loading || (currentStep === 2 && !palette)"
       >
         {{ loading ? '处理中...' : '下一步 →' }}
       </button>

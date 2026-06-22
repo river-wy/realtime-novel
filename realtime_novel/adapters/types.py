@@ -12,13 +12,14 @@ from pydantic import BaseModel, Field
 
 class ModelRole(str, Enum):
     """调用角色"""
-    TEXT = "text"      # 推理/对话 → deepseek-v4-pro-tencent
-    IMAGE = "image"    # 图片生成 → gemini-3.1-flash-image-preview
+    TEXT = "text"      # 推理/对话 → friday/deepseek-v4-pro-tencent
+    IMAGE = "image"    # 图片生成 → friday/gemini-3.1-flash-image-preview
 
 
 class ModelProvider(str, Enum):
-    DEEPSEEK = "deepseek-v4-pro-tencent"  # 带 -tencent 后缀
-    GEMINI = "gemini-3.1-flash-image-preview"
+    # v0.7: 加 friday/ 前缀表示「提供方」，未来会有 deepseek/xxx,minimax/xxx 原生
+    DEEPSEEK = "friday/deepseek-v4-pro-tencent"
+    GEMINI = "friday/gemini-3.1-flash-image-preview"
 
 
 class LLMRequest(BaseModel):
@@ -38,6 +39,9 @@ class LLMRequest(BaseModel):
     system_prompt: Optional[str] = None
     stream: bool = False
     response_format: Optional[Dict[str, Any]] = None  # v0.6 新增：{type: "json_object"}
+    # v0.8.1: 探索度参数（透传到 OpenAI 兼容 provider）
+    frequency_penalty: float = Field(default=0.0, ge=-2, le=2)
+    presence_penalty: float = Field(default=0.0, ge=-2, le=2)
 
 
 class LLMResponse(BaseModel):

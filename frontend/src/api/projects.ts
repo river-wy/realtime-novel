@@ -7,6 +7,8 @@ export interface ProjectInfo {
   id: string
   name: string
   palette: string
+  // v0.8: 探索度
+  exploration_level: 'conservative' | 'standard' | 'wild'
   chapter_count: number
   last_updated: string | null
 }
@@ -15,6 +17,8 @@ export interface ProjectDetail {
   id: string
   name: string
   palette: string
+  // v0.8: 探索度
+  exploration_level: 'conservative' | 'standard' | 'wild'
   seven_artifacts: Record<string, any> | null
   world_tree: Record<string, any> | null
   chapters: ChapterSummary[] | null
@@ -56,4 +60,17 @@ export async function updateBase(
 ) {
   const { data } = await api.patch(`/projects/${projectId}/base`, { key, new_value: newValue })
   return data
+}
+
+/**
+ * v0.8: 切换项目探索度 (conservative/standard/wild)
+ */
+export async function updateExplorationLevel(
+  projectId: string,
+  level: 'conservative' | 'standard' | 'wild'
+) {
+  const { data } = await api.patch(`/projects/${projectId}/exploration-level`, {
+    exploration_level: level,
+  })
+  return data as { project_id: string; exploration_level: string; message: string }
 }

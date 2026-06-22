@@ -60,21 +60,19 @@ class OnboardingState:
     tone: str = ""
 
     # Step 1b 可选
-    palette: List[str] = field(default_factory=list)
+    palette: str = ""  # v0.7: 改为单选 str (取代原 list)
 
-    # Step 2 引导文本（6 类元素）
-    core_relationship: str = ""          # 硬必填
-    emotional_anchor: str = ""           # 软必填
-    taboos: str = ""                     # 软必填
-    ending_preference: str = ""          # 可选
-    extra_notes: str = ""                # 自由补充
+    # Step 2 故事引擎（v0.7: 砍掉核心关系/情感锚点/禁区/结局偏好, 改为 3 字段）
+    story_core: str = ""             # 故事内核 (硬必填, 主角要做什么 + 什么阻止)
+    characters: str = ""             # 主要角色 (硬必填, 主角/对手/盟友, '名字-要什么-怕什么')
+    opening_scene: str = ""          # 开篇场景 (硬必填, 场景 + 不可逆选择)
+    extra_notes: str = ""            # 自由补充
 
-    # Step 3 大纲
-    main_conflict: str = ""              # 硬必填（"故事核心矛盾 1 句话"）
-    main_beats: List[Dict[str, str]] = field(default_factory=list)  # 5-7 个关键节点
-    sub_plots: List[str] = field(default_factory=list)             # 1-2 条
-    characters: List[Dict[str, str]] = field(default_factory=list) # 3-5 个
-    seeds: List[Dict[str, str]] = field(default_factory=list)      # 2-3 颗种子
+    # Step 3 故事路径（v0.7: 4 字段, 砍掉 main_conflict 和原 characters 字段名重合）
+    main_arc: str = ""               # 主线节点 (硬必填, 3-5 个节点, 每行 1 个)
+    sub_plots: str = ""              # 支线 (软必填, 每行 1 个)
+    seeds: str = ""                  # 种子 (软必填, 每行 1 个)
+    reader_feeling: str = ""         # 读者情绪 (可选, 读者合上书那一刻心里留下什么)
 
     # Step 4 产物（生成后填）
     artifacts_generated: bool = False
@@ -257,168 +255,109 @@ class OnboardingFlow:
     # === Step 2: 引导式自由文本 ===
 
     def _step2_guided_text(self) -> bool:
+        # v0.7: Step 2 改为「故事引擎」3 字段 (CLI 流程同步, 配合 WS/前端)
         print()
         print("─" * 60)
-        print("📌 Step 2 · 引导式自由文本（采集 6 类元素）")
+        print("📌 Step 2 · 故事引擎（v0.7: 3 字段）")
         print("─" * 60)
 
-        # 核心关系（硬必填）
-        if not self.state.core_relationship:
+        # story_core（硬必填）
+        if not self.state.story_core:
             print()
-            print("💬 第 1 轮：核心关系（必填）")
-            print("   问：你希望主角与谁有怎样的核心关系?")
-            print("   例：师徒 / 敌对 / 暧昧 / 兄妹 / 夫妻 / 同事 / 敌友")
-            self.state.core_relationship = prompt("→ ")
-            if not self.state.core_relationship:
+            print("💬 第 1 轮：故事内核（必填）")
+            print("   问：主角要做什么 + 什么阻止他得到?")
+            print("   例：主角想查父亲 20 年前失踪的真相, 但发现父亲被 AI 觉醒组织所杀")
+            self.state.story_core = prompt("→ ")
+            if not self.state.story_core:
                 print("⚠️  这项是硬必填，请描述一下")
                 return self._step2_guided_text()
         else:
-            print(f"  ✓ 核心关系: {self.state.core_relationship}")
+            print(f"  ✓ 故事内核: {self.state.story_core}")
 
-        # 情感锚点（软必填 ≥1）
-        if not self.state.emotional_anchor:
+        # characters（硬必填）
+        if not self.state.characters:
             print()
-            print("💬 第 2 轮：情感锚点（建议填）")
-            print("   问：你想看到什么情感表达? 一句话即可。")
-            print("   例：「想看被压抑很久的情感爆发」「想看克制下的温柔」")
-            self.state.emotional_anchor = prompt("→ ", default="")
+            print("💬 第 2 轮：主要角色（必填）")
+            print("   问：主角/对手/盟友, 每行格式: 名字-要什么-怕什么")
+            print("   例：林远-查清父亲真相-变成 AI")
+            self.state.characters = prompt("→ ")
+            if not self.state.characters:
+                print("⚠️  这项是硬必填，请描述一下")
+                return self._step2_guided_text()
         else:
-            print(f"  ✓ 情感锚点: {self.state.emotional_anchor}")
+            print(f"  ✓ 主要角色: {self.state.characters}")
 
-        # 禁区（软必填 ≥1）
-        if not self.state.taboos:
+        # opening_scene（硬必填）
+        if not self.state.opening_scene:
             print()
-            print("💬 第 3 轮：禁区（建议填）")
-            print("   问：你不想看到什么? 一句话即可。")
-            print("   例：「不要后宫 / 不要种马 / 不要系统流」")
-            self.state.taboos = prompt("→ ", default="")
+            print("💬 第 3 轮：开篇场景（必填）")
+            print("   问：第一章发生的场景 + 主角那一刻的不可逆选择")
+            print("   例：2087 新东京酸雨, 林远破解加密后没删痕迹就退出")
+            self.state.opening_scene = prompt("→ ")
+            if not self.state.opening_scene:
+                print("⚠️  这项是硬必填，请描述一下")
+                return self._step2_guided_text()
         else:
-            print(f"  ✓ 禁区: {self.state.taboos}")
-
-        # 结局倾向（可选）
-        if not self.state.ending_preference:
-            print()
-            print("💬 第 4 轮：结局倾向（可选）")
-            print("   问：你希望故事走向什么结局?")
-            print("   例：必好 / 必悲 / 开放 / 由系统决定")
-            self.state.ending_preference = prompt("→ ", default="由系统决定")
-        else:
-            print(f"  ✓ 结局倾向: {self.state.ending_preference}")
-
-        # 自由补充（可选）
-        if not self.state.extra_notes:
-            print()
-            print("💬 第 5 轮：自由补充（可选）")
-            print("   问：还有什么想强调的吗? 一句话即可。")
-            self.state.extra_notes = prompt("→ ", default="")
-        else:
-            print(f"  ✓ 自由补充: {self.state.extra_notes}")
+            print(f"  ✓ 开篇场景: {self.state.opening_scene}")
 
         self._save_state()
         return True
 
-    # === Step 3: 大纲确认 ===
+    # === Step 3: 故事路径确认 (v0.7: 简化版, 4 字段用 str) ===
 
     def _step3_outline(self) -> bool:
         print()
         print("─" * 60)
-        print("📌 Step 3 · 大纲确认（主线 / 支线 / 人物 / 种子）")
+        print("📌 Step 3 · 故事路径确认（v0.7: 4 字段）")
         print("─" * 60)
 
-        # 主线核心矛盾
-        if not self.state.main_conflict:
+        # main_arc（硬必填）
+        if not self.state.main_arc:
             print()
-            print("📖 3a. 主线核心矛盾（1 句话）")
-            print("   例：「主角发现父亲遗物，决定追寻父亲失踪的真相」")
-            self.state.main_conflict = prompt("→ ")
-            if not self.state.main_conflict:
+            print("📖 3a. 主线节点（3-5 个, 每行 1 个）")
+            print("   例：")
+            print("     开篇: 林远接到神秘委托")
+            print("     中段: 发现父亲与 AI 觉醒组织有关")
+            print("     高潮: 直面幽灵, 父亲真相揭晓")
+            print("     结尾: 林远做出选择, 新世界开启")
+            self.state.main_arc = prompt("→ (按 enter + 新行输入多节点) ")
+            if not self.state.main_arc:
                 print("⚠️  必填")
                 return self._step3_outline()
         else:
-            print(f"  ✓ 主线核心矛盾: {self.state.main_conflict}")
+            print(f"  ✓ 主线节点: {self.state.main_arc[:80]}")
 
-        # 主线 5-7 个关键节点
-        if not self.state.main_beats:
-            print()
-            print("📖 3b. 主线关键节点（5-7 个，每个一句话）")
-            print("   每行一个，例如：「第 3 章：发现遗物 / 第 8 章：初遇关键人物」")
-            print("   (空行结束)")
-            while True:
-                line = prompt(f"  节点 {len(self.state.main_beats) + 1} → ", default="")
-                if not line:
-                    if len(self.state.main_beats) >= 5:
-                        break
-                    else:
-                        print(f"  ⚠️  至少 5 个节点（当前 {len(self.state.main_beats)}）")
-                        continue
-                self.state.main_beats.append({
-                    "title": line,
-                    "description": line,
-                })
-        else:
-            print(f"  ✓ 主线节点: {len(self.state.main_beats)} 个")
-
-        # 支线 1-2 条
-        print()
-        print("📖 3c. 支线（0-2 条，可跳过）")
+        # sub_plots（软必填）
         if not self.state.sub_plots:
-            if confirm("需要定义支线吗?", default=False):
-                while len(self.state.sub_plots) < 2:
-                    line = prompt(f"  支线 {len(self.state.sub_plots) + 1}（一句话） → ")
-                    if not line:
-                        break
-                    self.state.sub_plots.append(line)
-        else:
-            print(f"  ✓ 支线: {self.state.sub_plots}")
-
-        # 人物 3-5 个
-        if not self.state.characters:
             print()
-            print("📖 3d. 主要人物（3-5 个，含主角）")
-            print("   格式：名字 / 角色 / 一句话背景")
-            print("   例：林远 / 主角 / 28 岁杭州程序员，妻子是高中语文老师")
-            print("   (空行结束)")
-            while True:
-                line = prompt(f"  人物 {len(self.state.characters) + 1} → ", default="")
-                if not line:
-                    if len(self.state.characters) >= 3:
-                        break
-                    else:
-                        print(f"  ⚠️  至少 3 个人物（当前 {len(self.state.characters)}）")
-                        continue
-                # 简单切分: "名字 / 角色 / 背景"
-                parts = [p.strip() for p in line.split("/", 2)]
-                if len(parts) < 3:
-                    parts = parts + [""] * (3 - len(parts))
-                self.state.characters.append({
-                    "id": f"char-{len(self.state.characters) + 1:03d}",
-                    "name": parts[0],
-                    "role": parts[1] or "supporting",
-                    "background": parts[2],
-                })
+            print("📖 3b. 支线（可多行, 建议填）")
+            print("   例：")
+            print("     妹妹在数据黑市重逢后")
+            print("     林远与张敏离婚后的感情修复")
+            self.state.sub_plots = prompt("→ ", default="")
         else:
-            print(f"  ✓ 人物: {len(self.state.characters)} 个")
+            print(f"  ✓ 支线: {self.state.sub_plots[:80]}")
 
-        # 种子 2-3 颗
+        # seeds（软必填）
         if not self.state.seeds:
             print()
-            print("📖 3e. 种子（2-3 颗）")
-            print("   种子=计划在后面复现的具体细节。例：'1987 年的收音机'")
-            print("   (空行结束)")
-            while True:
-                line = prompt(f"  种子 {len(self.state.seeds) + 1} → ", default="")
-                if not line:
-                    if len(self.state.seeds) >= 2:
-                        break
-                    else:
-                        print(f"  ⚠️  至少 2 颗种子（当前 {len(self.state.seeds)}）")
-                        continue
-                self.state.seeds.append({
-                    "id": len(self.state.seeds) + 1,
-                    "content": line,
-                })
+            print("📖 3c. 种子/钩子（可多行, 建议填）")
+            print("   例：")
+            print("     1987 年的录音带")
+            print("     永远不响的红色电话")
+            self.state.seeds = prompt("→ ", default="")
         else:
-            print(f"  ✓ 种子: {len(self.state.seeds)} 颗")
+            print(f"  ✓ 种子: {self.state.seeds[:80]}")
+
+        # reader_feeling（可选）
+        if not self.state.reader_feeling:
+            print()
+            print("📖 3d. 读者情绪（可选, 一句话）")
+            print("   问: 希望读者合上书那一刻心里留下什么?")
+            print("   例: 如果 AI 已经觉醒, 我会不会也不舍得关掉它")
+            self.state.reader_feeling = prompt("→ ", default="")
+        else:
+            print(f"  ✓ 读者情绪: {self.state.reader_feeling}")
 
         self._save_state()
         return True
@@ -491,22 +430,20 @@ class OnboardingFlow:
         3. Pydantic 校验 7 件
         4. 走 ProjectRepository.save_7_artifacts 落 DB
         """
-        # 构造 prompt
+        # 构造 prompt (v0.7: 改用新字段名)
         user_input = f"""题材: {self.state.genres}
 风格: {self.state.styles}
 基调: {self.state.tone}
 调色板: {self.state.palette or '(无)'}
-核心关系: {self.state.core_relationship}
-情感锚点: {self.state.emotional_anchor or '(无)'}
-禁区: {self.state.taboos or '(无)'}
-结局倾向: {self.state.ending_preference}
+故事内核: {self.state.story_core}
+主要角色: {self.state.characters}
+开篇场景: {self.state.opening_scene}
 自由补充: {self.state.extra_notes or '(无)'}
 
-主线核心矛盾: {self.state.main_conflict}
-主线节点: {[b['title'] for b in self.state.main_beats]}
+主线节点: {self.state.main_arc}
 支线: {self.state.sub_plots or '(无)'}
-人物: {self.state.characters}
-种子: {self.state.seeds}"""
+种子: {self.state.seeds or '(无)'}
+读者情绪: {self.state.reader_feeling or '(无)'}"""
 
         # === 7 次 LLM 生成（v0.4.1 暂保留，将来可改 1 次大调用）===
         print("    · 生成 world_tree ...")
@@ -839,7 +776,7 @@ class OnboardingFlow:
         async def _gen():
             return await generate_chapter_via_state_graph(
                 project_id=self.project.project_id,
-                intervention=f"第 1 章\n主线核心矛盾: {self.state.main_conflict}",
+                intervention=f"第 1 章\n故事内核: {self.state.story_core}",
             )
 
         # 同步包装
