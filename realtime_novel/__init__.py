@@ -1,15 +1,16 @@
 """realtime_novel · 产品代码包
 
-v0.6 重大变更：v0.3 路径全删
-- services/chapter_generator.py 删除（v0.3 S4）→ 走 v0.4+ state_graph_stub
-- adapters/llm.py 删除（v0.3 LLMClient）→ 走 v0.4+ LLMAdapter
+v0.8.2 重大变更：清理 v0.3 死代码
+- services/onboarding.py 删除（v0.3 S3 5 步 CLI 流程）→ 走 v0.5 AsyncOnboardingFlow
+- services/intervention.py 删除（v0.3 S5 导演/演员模式）→ 走 v0.6 AsyncInterventionParser
+- services/rollback.py 删除（v0.3 S5 落盘式硬 reset）→ v0.4.1 入库后已不适用
 
 v0.4+ 架构：
 - S1 ProjectManager: 项目目录管理 (core/project.py)
 - S2 WorldTree: 7 件产物内存模型 + 序列化 (core/world_tree.py)
-- S3 OnboardingFlow: 5 步启动链路（v0.6 切 LLMAdapter）
+- S3 OnboardingFlow (v0.5+ AsyncOnboardingFlow, 走 DB)
 - S4 state_graph_stub: 章节生成（v0.5 真实 LLM）
-- S5 InterventionParser + RollbackManager
+- S5 InterventionParser + RollbackManager (v0.6+ Async*, 走 DB)
 
 schemas/: 7 件 Pydantic Schema（v0.5 全部走 DB）
 
@@ -30,9 +31,6 @@ from .core.schemas import (
     ChapterSummarySchema,
     SCHEMA_REGISTRY,
 )
-from .services.onboarding import OnboardingFlow, OnboardingState
-from .services.intervention import InterventionParser, Intervention, InterventionMode
-from .services.rollback import RollbackManager, RollbackResult
 from .utils.version import __version__
 
 __all__ = [
@@ -42,15 +40,6 @@ __all__ = [
     "LoadedProject",
     # S2 (core)
     "WorldTree",
-    # S3 (services)
-    "OnboardingFlow",
-    "OnboardingState",
-    # S5 (services)
-    "InterventionParser",
-    "Intervention",
-    "InterventionMode",
-    "RollbackManager",
-    "RollbackResult",
     # 7 件 Schema + 摘要 Schema (core)
     "WorldTreeSchema",
     "StyleCharterSchema",

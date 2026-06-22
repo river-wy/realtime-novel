@@ -44,48 +44,6 @@ class Step4Fields(BaseModel):
     reader_feeling: str = Field(default="", description="读者情绪: 读者合上书那一刻心里留下什么")
 
 
-# ============ 提示词模板 ============
-_STEP3_SYSTEM_FALLBACK = """你是「小说创作引导师」。
-
-【任务】
-基于用户已有的世界树基调, 为 Step 3 提议 3 个「故事引擎」字段:
-- story_core: 故事内核 (必填, 主角要做什么 + 什么阻止 + 如何发展)
-- characters: 主要角色 (必填, 每行 '名字-身份-和主角关系', 含主角/对手/盟友)
-- opening_scene: 开篇场景 (必填, 第一章场景 + 主角不可逆选择)
-
-【补充原则 - 重要】
-你可以基于用户已有信息合理补充细节 (例如: 补充「为什么」「性格」「氛围」), 但不要改变用户已给的核心冲突方向。
-
-【输出格式】(严格 JSON)
-{
-  "story_core": "主角想查父亲真相, 但发现父亲被 AI 觉醒组织所杀",
-  "characters": "林远-查清真相-变成 AI\\n幽灵-释放 AI 觉醒军-再次失去同伴\\n张敏-重新开始-林远再次失踪",
-  "opening_scene": "2087 新东京酸雨, 林远破解加密后没删痕迹就退出 (此刻他已被追踪)"
-}
-"""
-
-_STEP4_SYSTEM_FALLBACK = """你是「小说创作引导师」。
-
-【任务】
-基于 Step 3 故事引擎, 为 Step 4 提议 4 个「故事路径」字段:
-- main_arc: 主线节点 (3-5 个剧情转折, 每行 1 个)
-- sub_plots: 支线 (每行 1 个)
-- seeds: 种子/钩子 (每行 1 个)
-- reader_feeling: 读者情绪 (一句话, 读者合上书那一刻心里留下什么)
-
-【补充原则 - 重要】
-你可以基于 Step 3 信息合理补充 (如: 把 main_arc 补到 3-5 个, 推断 reader_feeling), 但不要改变主线方向, 也不要让读者情绪与基调矛盾。
-
-【输出格式】(严格 JSON)
-{
-  "main_arc": "开篇: 接到委托\\n中段: 发现 AI 觉醒组织\\n高潮: 直面幽灵\\n结尾: 做出选择",
-  "sub_plots": "妹妹重逢后\\n与张敏感情修复",
-  "seeds": "1987 录音带\\n红色电话",
-  "reader_feeling": "如果 AI 已经觉醒, 我会不会也不舍得关掉它"
-}
-"""
-
-
 # ============ OnboardingAgent 主类 ============
 
 class OnboardingAgent:
@@ -127,7 +85,7 @@ class OnboardingAgent:
         full_state = json.loads(row["state_json"])
         p = full_state.get("payload", {})
 
-        # 2. 拼 messages — v0.8.2 改用 context_builder (与 reading 阶段统一架构)
+        # 2. 拼 messages
         from realtime_novel.agent.context_builder import (
             build_messages_for_onboarding_step3,
             build_messages_for_onboarding_step4,
@@ -140,16 +98,17 @@ class OnboardingAgent:
                 project_id=project_id,
                 current_user_message=user_message,
                 system_prompt=sys_prompt,
+                current_fields=current_fields,
             )
         else:
             messages = build_messages_for_onboarding_step4(
                 project_id=project_id,
                 current_user_message=user_message,
                 system_prompt=sys_prompt,
+                current_fields=current_fields,
             )
 
-        # 3. 调 LLM (v0.8.2: 按项目 exploration_level 取参数)
-        # v0.7: B+C 探索性 - Temperature 0.9 + max_tokens 2500 (允许 AI 充分补细节)
+        # 3. 调 LLM
         adapter = get_llm_adapter()
         from realtime_novel.adapters.types import LLMRequest
         llm_params = get_llm_params_for_project(project_id, role="onboarding")
@@ -184,12 +143,14 @@ class OnboardingAgent:
         }
 
     def _get_system_prompt(self, step: int, p: dict, current_fields: Dict[str, str]) -> str:
-        """拼 system prompt: 用户已有输入 + 当前字段 + LLM 提议"""
-        # 用 prompts.py 里的模板 (如果定义了), 否则 fallback
+        """拼 system prompt: 用户已有输入 + 当前字段 + LLM 提议
+
+        v0.8.2: 统一从 prompts.py 读取模板, 不再用 inline fallback
+        """
         if step == 3:
-            template = ONBOARDING_STEP3_PROMPT if "ONBOARDING_STEP3_PROMPT" in globals() else _STEP3_SYSTEM_FALLBACK
+            template = ONBOARDING_STEP3_PROMPT
         else:
-            template = ONBOARDING_STEP4_PROMPT if "ONBOARDING_STEP4_PROMPT" in globals() else _STEP4_SYSTEM_FALLBACK
+            template = ONBOARDING_STEP4_PROMPT
 
         # 拼上下文
         context = {
@@ -200,20 +161,18 @@ class OnboardingAgent:
             "current_fields": current_fields,
         }
 
-        # 模板占位符填充 (如果有)
-        if "{context}" in template or "{current_fields}" in template:
-            try:
-                return template.format(
-                    genres=", ".join(context["genres"]) or "(未选)",
-                    styles=", ".join(context["styles"]) or "(未选)",
-                    tone=", ".join(context["tone"]) or "(未选)",
-                    palette=", ".join(context["palette"]) or "(未选)",
-                    current_fields="\n".join([f"- {k}: {v}" for k, v in current_fields.items() if v]),
-                )
-            except KeyError:
-                pass
-
-        return template.format(**context) if "{context}" in template else template
+        # 模板占位符填充
+        try:
+            return template.format(
+                genres=", ".join(context["genres"]) or "(未选)",
+                styles=", ".join(context["styles"]) or "(未选)",
+                tone=", ".join(context["tone"]) or "(未选)",
+                palette=", ".join(context["palette"]) or "(未选)",
+                current_fields="\n".join([f"- {k}: {v}" for k, v in current_fields.items() if v]),
+            )
+        except KeyError:
+            # 模板缺占位符时退回 raw 模板 (不阻断)
+            return template
 
 
 # ============ Helper ============

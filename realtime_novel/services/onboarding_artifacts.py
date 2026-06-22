@@ -154,7 +154,7 @@ def assemble_7_artifacts(project_id: str, payload: Dict[str, Any]) -> List[str]:
                 "priority": "side",
             })
 
-    # 人物: Step 3 填的 '名字-要什么-怕什么' (取代原 Step 4 '名字-身份-背景')
+    # 人物: Step 3 填的 '名字-要什么-怕什么' 
     characters = []
     for line in characters_step3.split("\n"):
         line = line.strip()

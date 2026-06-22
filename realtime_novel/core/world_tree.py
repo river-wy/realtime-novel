@@ -24,9 +24,7 @@ from .schemas import (
     SubPlotSchema,
     CharacterCardSchema,
     SeedTableSchema,
-    SCHEMA_REGISTRY,
 )
-from ..adapters.io import read, write
 
 
 @dataclass
@@ -49,45 +47,31 @@ class WorldTree:
         """序列化为 dict（dict-of-dicts，文件名 → dict 内容）"""
         # mode='json' 让 enum 序列化为字符串 (YAML/JSON 兼容)
         return {
-            "01-world-tree.yaml": self.world_tree.model_dump(mode="json", exclude_none=True),
-            "02-style-charter.yaml": self.style_charter.model_dump(mode="json", exclude_none=True),
-            "03-genre-resonance.yaml": self.genre_resonance.model_dump(mode="json", exclude_none=True),
-            "04-main-plot.yaml": self.main_plot.model_dump(mode="json", exclude_none=True),
-            "06-character-card.yaml": self.character_card.model_dump(mode="json", exclude_none=True),
-            "05-sub-plot.yaml": self.sub_plot.model_dump(mode="json", exclude_none=True),
-            "07-seed-table.yaml": self.seed_table.model_dump(mode="json", exclude_none=True),
+            "world_tree": self.world_tree.model_dump(mode="json", exclude_none=True),
+            "style_charter": self.style_charter.model_dump(mode="json", exclude_none=True),
+            "genre_resonance": self.genre_resonance.model_dump(mode="json", exclude_none=True),
+            "main_plot": self.main_plot.model_dump(mode="json", exclude_none=True),
+            "character_card": self.character_card.model_dump(mode="json", exclude_none=True),
+            "sub_plot": self.sub_plot.model_dump(mode="json", exclude_none=True),
+            "seed_table": self.seed_table.model_dump(mode="json", exclude_none=True),
         }
 
     @classmethod
     def from_dict(cls, data: dict) -> "WorldTree":
         """从 dict-of-dicts 反序列化"""
         return cls(
-            world_tree=WorldTreeSchema.model_validate(data["01-world-tree.yaml"]),
-            style_charter=StyleCharterSchema.model_validate(data["02-style-charter.yaml"]),
-            genre_resonance=GenreResonanceSchema.model_validate(data["03-genre-resonance.yaml"]),
-            main_plot=MainPlotSchema.model_validate(data["04-main-plot.yaml"]),
-            character_card=CharacterCardSchema.model_validate(data["06-character-card.yaml"]),
-            sub_plot=SubPlotSchema.model_validate(data["05-sub-plot.yaml"]),
-            seed_table=SeedTableSchema.model_validate(data["07-seed-table.yaml"]),
+            world_tree=WorldTreeSchema.model_validate(data["world_tree"]),
+            style_charter=StyleCharterSchema.model_validate(data["style_charter"]),
+            genre_resonance=GenreResonanceSchema.model_validate(data["genre_resonance"]),
+            main_plot=MainPlotSchema.model_validate(data["main_plot"]),
+            character_card=CharacterCardSchema.model_validate(data["character_card"]),
+            sub_plot=SubPlotSchema.model_validate(data["sub_plot"]),
+            seed_table=SeedTableSchema.model_validate(data["seed_table"]),
         )
 
-    @classmethod
-    def from_project_dir(cls, project_dir: Path) -> "WorldTree":
-        """从项目目录读 7 件 YAML/YAML 文件并构建 WorldTree"""
-        project_dir = Path(project_dir)
-        data = {}
-        for _, filename in SCHEMA_REGISTRY:
-            data[filename] = read(project_dir / filename)
-        return cls.from_dict(data)
-
-    def to_project_dir(self, project_dir: Path) -> None:
-        """落盘 7 件到项目目录"""
-        project_dir = Path(project_dir)
-        project_dir.mkdir(parents=True, exist_ok=True)
-        for filename, content in self.to_dict().items():
-            write(project_dir / filename, content)
-
     # === 树形操作 ===
+    # v0.8.2 删除了 from_project_dir / to_project_dir (v0.3 落盘式序列化, v0.4.1 入库后已不适用)
+    # 7 件现在走 project_repository.load_all_artifacts / save_7_artifacts
 
     def add_node(self, node) -> None:
         """添加节点到 WorldTree.branches（支持 dict 或 TreeNode）"""

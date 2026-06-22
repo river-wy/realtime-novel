@@ -403,7 +403,10 @@ class ProjectRepository:
     # ----- 7 件基座读取 -----
 
     def load_all_artifacts(self, project_id: str) -> Dict[str, Any]:
-        """7 件基座一次性读出（章节生成时 WorldTree.from_dict 用）"""
+        """7 件基座一次性读出 (v0.8.2 key 改正常命名, 不再带 .yaml 后缀)
+
+        v0.4.1 入库后本方法取代了 WorldTree.from_dict, 直接返 dict 给 context_builder 用
+        """
         with get_store().connection() as conn:
             wt = conn.execute(
                 "SELECT * FROM world_tree WHERE project_id = ?", (project_id,)
@@ -431,13 +434,14 @@ class ProjectRepository:
             ).fetchall()
 
         return {
-            "01-world-tree.yaml": _serialize_world_tree(dict(wt) if wt else {}),
-            "02-style-charter.yaml": _serialize_style_charter(dict(sc) if sc else {}),
-            "03-genre-resonance.yaml": _serialize_genre_resonance(dict(gr) if gr else {}),
-            "04-main-plot.yaml": _serialize_main_plot(dict(mp) if mp else {}),
-            "05-sub-plot.yaml": _serialize_sub_plot([dict(s) for s in sps]),
-            "06-character-card.yaml": _serialize_characters([dict(c) for c in chars], [dict(r) for r in rels]),
-            "07-seed-table.yaml": _serialize_seeds([dict(s) for s in seeds]),
+            # v0.8.2: 去掉 .yaml 后缀 (v0.4.1 入库后文件命名已废弃, 改用正常 key)
+            "world_tree": _serialize_world_tree(dict(wt) if wt else {}),
+            "style_charter": _serialize_style_charter(dict(sc) if sc else {}),
+            "genre_resonance": _serialize_genre_resonance(dict(gr) if gr else {}),
+            "main_plot": _serialize_main_plot(dict(mp) if mp else {}),
+            "sub_plot": _serialize_sub_plot([dict(s) for s in sps]),
+            "character_card": _serialize_characters([dict(c) for c in chars], [dict(r) for r in rels]),
+            "seed_table": _serialize_seeds([dict(s) for s in seeds]),
         }
 
 

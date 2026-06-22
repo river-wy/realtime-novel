@@ -91,8 +91,7 @@ def record_assistant_message(
 
 
 def get_or_create_conversation(user_id: str, project_id: Optional[str] = None) -> str:
-    """v0.5 完整版：user active conversation 一对一（同步实现）
-
+    """
     1.1 小说家 = 全局管家，不绑 project（project_id 参数保留向后兼容，不存）
     1.2 user-valid conversation 一对一（每个 user 只有 1 个 active）
 
@@ -134,7 +133,7 @@ def get_or_create_conversation(user_id: str, project_id: Optional[str] = None) -
 
 
 def invalidate_conversation(conversation_id: str, reason: str = "user_new_chat") -> None:
-    """v0.5 新增：作废 conversation（"新建对话"触发）"""
+    """作废 conversation（"新建对话"触发）"""
     with get_store().connection() as conn:
         conn.execute(
             """UPDATE conversations

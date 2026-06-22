@@ -25,8 +25,6 @@ _cs_repo = ChapterStatusRepository()
 
 # ============ /onboarding ============
 
-# ============ m-v0.5-onboarding s1.5: payload Pydantic schema 校验 ============
-
 class OnboardingPayloadStep1(BaseModel):
     """Step 1 必选标签 (题材/风格/基调)"""
     genres: List[str] = Field(min_length=1, description="题材, 至少 1 个")

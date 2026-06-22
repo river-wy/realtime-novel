@@ -317,7 +317,8 @@ class AsyncOnboardingFlow:
     async def step(self, project_id: str, step: str, payload: dict) -> dict:
         """执行 onboarding 单步（onboarding_state 表）
 
-        v0.5: Step 4 触发 7 件基座生成（调 OnboardingFlow._generate_7_artifacts）
+        v0.5+: Step 4 触发 7 件基座生成（调 onboarding_artifacts.assemble_7_artifacts）
+        v0.8.2: 删了 services/onboarding.py:OnboardingFlow, 走 assemble_7_artifacts
         """
         import json
         next_step_map = {

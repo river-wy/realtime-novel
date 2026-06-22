@@ -345,10 +345,10 @@ def _format_seeds(seeds: list) -> str:
 
 
 def build_messages_for_steward(
-        user_id: str,
-        current_user_message: str,
-        system_prompt: str,
-        max_history: int = 20,
+    user_id: str,
+    current_user_message: str,
+    system_prompt: str,
+    max_history: int = 20,
 ) -> List[Dict[str, Any]]:
     """小说家（user 维度管家）的 messages
 
@@ -408,10 +408,10 @@ def build_messages_for_steward(
 
 
 def build_messages_for_worldtree_keeper(
-        project_id: str,
-        current_user_message: str,
-        system_prompt: str,
-        max_history: int = 5,
+    project_id: str,
+    current_user_message: str,
+    system_prompt: str,
+    max_history: int = 5,
 ) -> List[Dict[str, Any]]:
     """架构师（per-project 世界树管理）的 messages
 
@@ -427,7 +427,7 @@ def build_messages_for_worldtree_keeper(
 
     # 加载项目数据
     data = _load_project_data(project_id)
-    world_tree = data.get("01-world-tree.yaml", {})
+    world_tree = data.get("world_tree", {})
     chapters = data.get("chapters", [])
 
     # 2. world_tree
@@ -450,10 +450,10 @@ def build_messages_for_worldtree_keeper(
 
 
 def build_messages_for_chapter_generator(
-        project_id: str,
-        current_user_message: str,
-        system_prompt: str,
-        max_history: int = 5,
+    project_id: str,
+    current_user_message: str,
+    system_prompt: str,
+    max_history: int = 5,
 ) -> List[Dict[str, Any]]:
     """文笔家（per-project 章节生成）的 messages
 
@@ -473,12 +473,12 @@ def build_messages_for_chapter_generator(
     messages.append({"role": "system", "content": system_prompt})
 
     data = _load_project_data(project_id)
-    world_tree = data.get("01-world-tree.yaml", {})
-    style_charter = data.get("02-style-charter.yaml", {})
-    main_plot_raw = data.get("04-main-plot.yaml", {})
-    sub_plot_raw = data.get("05-sub-plot.yaml", {})
-    character_card = data.get("06-character-card.yaml", {})
-    seed_table = data.get("07-seed-table.yaml", {})
+    world_tree = data.get("world_tree", {})
+    style_charter = data.get("style_charter", {})
+    main_plot_raw = data.get("main_plot", {})
+    sub_plot_raw = data.get("sub_plot", {})
+    character_card = data.get("character_card", {})
+    seed_table = data.get("seed_table", {})
     chapters = data.get("chapters", [])
 
     # 2. world_tree 基座
@@ -533,15 +533,15 @@ def build_messages_for_chapter_generator(
     return messages
 
 
-# ============ v0.8.2: Onboard 阶段 messages 拼装 ============
-
+# ============ Onboard 阶段 messages 拼装 ============
 
 def build_messages_for_onboarding_step3(
-        project_id: str,
-        current_user_message: str,
-        system_prompt: str,
+    project_id: str,
+    current_user_message: str,
+    system_prompt: str,
+    current_fields: Optional[Dict[str, str]] = None,
 ) -> List[Dict[str, Any]]:
-    """v0.8.2 故事引擎 Agent (Step 3) 的 messages
+    """ 故事引擎 Agent (Step 3) 的 messages
 
     与 reading 阶段不同: 不需要 7 件全件 (Step 3 还没完成),
     只拼: world_tree + style_charter + genre_resonance (Step 1 已有)
@@ -556,11 +556,14 @@ def build_messages_for_onboarding_step3(
     from realtime_novel.persistence.project_repository import ProjectRepository
     from realtime_novel.persistence.sqlite_store import get_store
 
+    current_fields = current_fields or {}
     messages = []
     # 1. system
     messages.append({"role": "system", "content": system_prompt})
 
-    # 2. data: 读 onboarding_state + 7 件 (Step 1 写过的 world_tree/style_charter/genre_resonance)
+    # 2. data: 读 onboarding_state.state_json.payload (Step 1-2 已有数据)
+    # v0.8.2 重要修正: Step 3 时 7 件还未写入 (Step 4 才调 assemble_7_artifacts),
+    # 不能读 7 件. 只能读 state_json.payload + current_fields.
     try:
         with get_store().connection() as conn:
             row = conn.execute(
@@ -570,25 +573,16 @@ def build_messages_for_onboarding_step3(
         if row:
             state = json.loads(row["state_json"]) if hasattr(json, 'loads') else {}
             payload = state.get("payload", {})
-            # 读 7 件 (Step 1 已写)
-            data = _load_project_data(project_id)
-            wt = data.get("01-world-tree.yaml", {}) or {}
-            sc = data.get("02-style-charter.yaml", {}) or {}
-            gr = data.get("03-genre-resonance.yaml", {}) or {}
             data_block = f"""## Step 1-2 已有数据
 - 题材: {payload.get("genres", [])}
 - 风格: {payload.get("styles", [])}
 - 基调: {payload.get("tone", [])}
 - 调色板: {payload.get("palette", "")}
 
-## 世界树
-{_format_world_tree_compact(wt)}
-
-## 风格宪法 (v0.8.2 推断完整)
-{_format_style_charter(sc)}
-
-## 题材共鸣
-{chr(10).join([f"+ {a.get('text', a) if isinstance(a, dict) else a}" for a in gr.get("accept", [])]) or "（无）'"}
+## Step 3 当前字段 (用户填的或 LLM 提议的)
+- story_core: {current_fields.get("story_core", "") or "（未填）"}
+- characters: {current_fields.get("characters", "") or "（未填）"}
+- opening_scene: {current_fields.get("opening_scene", "") or "（未填）"}
 """
             messages.append({"role": "system", "content": data_block})
     except Exception:
@@ -604,9 +598,10 @@ def build_messages_for_onboarding_step3(
 
 
 def build_messages_for_onboarding_step4(
-        project_id: str,
-        current_user_message: str,
-        system_prompt: str,
+    project_id: str,
+    current_user_message: str,
+    system_prompt: str,
+    current_fields: Optional[Dict[str, str]] = None,
 ) -> List[Dict[str, Any]]:
     """故事路径 Agent (Step 4) 的 messages
 
@@ -621,6 +616,7 @@ def build_messages_for_onboarding_step4(
         project_id=project_id,
         current_user_message=current_user_message,
         system_prompt=system_prompt,
+        current_fields=current_fields,
     )
 
 
@@ -645,10 +641,10 @@ def json_dumps(obj: Any) -> str:
 
 
 def build_messages_for_node(
-        conversation_id: str,
-        current_user_message: str,
-        max_history: int = 10,
-        system_prompt: Optional[str] = None,
+    conversation_id: str,
+    current_user_message: str,
+    max_history: int = 10,
+    system_prompt: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """v0.4.1 兼容 API（不推荐用于新代码）
 
