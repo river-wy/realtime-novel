@@ -11,6 +11,9 @@ export interface ProjectInfo {
   exploration_level: 'conservative' | 'standard' | 'wild'
   chapter_count: number
   last_updated: string | null
+  // v0.8.3: onboard 续接用
+  onboarding_step: number | null  // null=从未进过, 0=未开始, 1-4=进行中
+  status: 'not_started' | 'in_progress' | 'completed'  // v0.8.3
 }
 
 export interface ProjectDetail {
@@ -22,6 +25,8 @@ export interface ProjectDetail {
   seven_artifacts: Record<string, any> | null
   world_tree: Record<string, any> | null
   chapters: ChapterSummary[] | null
+  // v0.8.3: onboard 续接用
+  onboarding_step?: number | null
 }
 
 export interface ChapterSummary {

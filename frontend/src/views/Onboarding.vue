@@ -4,7 +4,7 @@
   拍板流程:
     Step 1: 必选标签 (题材/风格/基调) → HTTP POST /onboarding step=1
     Step 2: 视觉色调 (UI 主题, 不影响世界树) → HTTP POST /onboarding step=2
-    Step 3: 核心设定 (Agent 引导式 WS) → WS /api/chat onboarding_request_proposal + confirm
+    Step 3: 故事大纲 (Agent 引导式 WS) → WS /api/chat onboarding_request_proposal + confirm
     Step 4: 大纲初稿 (Agent 引导式 WS) → WS /api/chat onboarding_request_proposal + confirm
     Step 5: 生成第 1 章 (大按钮 + spinner) → HTTP POST /onboarding step=5
 
@@ -14,22 +14,24 @@
     - LLM 引导式提议 + 用户确认 + 写 7 件
 -->
 <script setup lang="ts">
-import { ref, computed, watch, nextTick } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, computed, watch, nextTick, onMounted } from 'vue'
+import { useRouter, useRoute } from 'vue-router'
 import { onboardingStep } from '@/api/actions'
 import { createProject } from '@/api/projects'
 import { useProjectsStore } from '@/stores/projects'
 import { useOnboardingChat } from '@/composables/useOnboardingChat'
 
 const router = useRouter()
+const route = useRoute()
 const projectsStore = useProjectsStore()
 
-const projectId = ref<string>('')
-const currentStep = ref<1 | 2 | 3 | 4 | 5>(1)
+const projectId = ref<string>('')  // v0.8.3: 可能从 query.projectId 续接
+const currentStep = ref<1 | 2 | 3 | 4 | 5>(1)  // v0.8.3: 可能从 query.step 续接
 const loading = ref(false)
 const error = ref<string | null>(null)
 
-// ============ Step 1 数据 ============
+// ============ Step 1 数据 (v0.8.3: 新增项目名输入) ============
+const projectName = ref<string>('')  // 用户填的项目名 (人类可读, 必填)
 const genres = ref<string[]>([])
 const styles = ref<string[]>([])
 const tone = ref<string[]>([])
@@ -50,17 +52,17 @@ const chatContainer = ref<HTMLElement | null>(null)
 
 /** Step 3 字段展示顺序 (v0.7: 3 字段 故事引擎) */
 const STEP3_FIELDS = [
-  { key: 'story_core', label: '故事内核', placeholder: '主角想查父亲 20 年前失踪的真相, 但发现父亲被 AI 觉醒组织所杀' },
-  { key: 'characters', label: '主要角色 (每行 名字-要什么-怕什么)', placeholder: '林远-查清父亲真相-变成 AI\n幽灵-释放 AI 觉醒军-再次失去同伴\n张敏-重新开始-林远再次失踪' },
-  { key: 'opening_scene', label: '开篇场景 (场景 + 主角不可逆选择)', placeholder: '2087 新东京酸雨, 林远破解加密后没删痕迹就退出 (此刻他已被追踪)' },
+  { key: 'story_core', label: '故事内核', sublabel: '主角是谁 + 场景环境 + 要做什么 + 遇到什么意外 + 留悬念 (100+ 章体量)', placeholder: 'Agent 会基于你的输入生成故事大纲' },
+  { key: 'characters', label: '主要角色', sublabel: '主角 / 对手 / 盟友，每行「名字 - 身份/角色 - 特点/目的」', placeholder: 'Agent 会基于你的输入生成故事大纲' },
+  { key: 'opening_scene', label: '开篇场景', sublabel: '第一章发生的具体场景 + 主角那一刻的不可逆选择', placeholder: 'Agent 会基于你的输入生成故事大纲' },
 ] as const
 
-/** Step 4 字段展示顺序 (v0.7: 4 字段 故事路径) */
+/** Step 4 字段展示顺序 (v0.7: 4 字段 大纲细化) */
 const STEP4_FIELDS = [
-  { key: 'main_arc', label: '主线节点 (3-5 个, 每行 1 个)', placeholder: '开篇: 接到委托\n中段: 发现 AI 觉醒组织\n高潮: 直面幽灵, 真相揭晓\n结尾: 做出选择, 新世界开启' },
-  { key: 'sub_plots', label: '支线 (每行 1 个)', placeholder: '妹妹在数据黑市重逢后\n林远与张敏离婚后的感情修复' },
-  { key: 'seeds', label: '种子/钩子 (每行 1 个)', placeholder: '1987 年的录音带\n永远不响的红色电话\n林远手背的 6 位数密码' },
-  { key: 'reader_feeling', label: '读者情绪 (希望读者读完后心里留下什么)', placeholder: '如果 AI 已经觉醒, 我会不会也不舍得关掉它' },
+  { key: 'main_arc', label: '主线节点', sublabel: '3-5 个剧情转折，每行 1 个', placeholder: 'Agent 会基于前 3 步信息进一步细化大纲' },
+  { key: 'sub_plots', label: '支线', sublabel: '与主线交织但不喧宾夺主的副线，每行 1 个', placeholder: 'Agent 会基于前 3 步信息进一步细化大纲' },
+  { key: 'seeds', label: '种子 / 钩子', sublabel: '第 1 章埋下，N 章后亮出来', placeholder: 'Agent 会基于前 3 步信息进一步细化大纲' },
+  { key: 'reader_feeling', label: '读者情绪', sublabel: '希望读者合上书那一刻心里留下什么', placeholder: 'Agent 会基于前 3 步信息进一步细化大纲' },
 ] as const
 
 const currentFields = computed(() =>
@@ -109,10 +111,39 @@ function toggle(arr: string[], value: string) {
 
 async function ensureProject() {
   if (projectId.value) return
-  const name = `world-${Date.now().toString(36)}`
-  const r = await createProject(name, '')
+  if (!projectName.value || !projectName.value.trim()) {
+    error.value = '请先填写项目名'
+    return
+  }
+  // v0.8.3: 用用户填的项目名, 后端自动生成 id
+  const r = await createProject(projectName.value.trim(), '')
   projectId.value = r.id
+  // 加载项目名 (供其他 step 显示)
+  try {
+    const detail = await import('@/api/projects').then(m => m.getProject(r.id))
+    projectName.value = detail.name
+  } catch { /* ignore */ }
 }
+
+// ============ v0.8.3: 续接逻辑 (从 query 读 projectId + step) ============
+
+onMounted(() => {
+  const qProjectId = route.query.projectId as string | undefined
+  const qStep = route.query.step as string | undefined
+  if (qProjectId && qStep) {
+    // 续接: 跳到指定 step
+    projectId.value = qProjectId
+    currentStep.value = Math.min(Math.max(parseInt(qStep) || 1, 1), 5) as 1 | 2 | 3 | 4 | 5
+    // 加载项目名 (显示用)
+    import('@/api/projects').then(m => m.getProject(qProjectId)).then(d => {
+      projectName.value = d.name
+      if (currentStep.value === 3 || currentStep.value === 4) {
+        // Step 3+ 是 WS, 要 open chat
+        chat.open(currentStep.value)
+      }
+    }).catch(() => {})
+  }
+})
 
 // ============ Step 1-2 HTTP POST ============
 
@@ -121,6 +152,11 @@ async function nextFromHttpStep() {
   error.value = null
   try {
     if (currentStep.value === 1) {
+      // v0.8.3: 验证项目名 (必填, 1-50 字符)
+      if (!projectName.value || !projectName.value.trim()) {
+        error.value = '请先填写项目名'
+        return
+      }
       if (genres.value.length === 0 || styles.value.length === 0 || tone.value.length === 0) {
         error.value = '请完整选择题材、风格、基调（每类至少 1 个）'
         return
@@ -163,7 +199,7 @@ function handleSendUserMessage() {
   userInput.value = ''
 }
 
-/** "确认字段 → 写 7 件" 按钮 */
+/** "确认大纲 → 写 7 件" 按钮 */
 async function handleConfirm() {
   chat.confirm()
 }
@@ -172,10 +208,11 @@ async function handleConfirm() {
 watch(() => chat.stepDone.value, (done) => {
   if (!done) return
   if (currentStep.value === 3) {
-    // Step 3 done → Step 4 (重开 WS)
+    // Step 3 done → Step 4: 先关旧 ws → 切 step → 短暂延迟后开新 ws
     setTimeout(() => {
+      chat.close()
       currentStep.value = 4
-      chat.open(4)
+      setTimeout(() => chat.open(4), 100)
     }, 1500)  // 给用户时间看到 "Step 3 完成" 提示
   } else if (currentStep.value === 4) {
     // Step 4 done → Step 5
@@ -213,7 +250,7 @@ async function generateChapter() {
 // ============ 工具 ============
 
 function getStepTitle(step: number): string {
-  return ['', '必选标签', '视觉色调', '核心设定', '大纲初稿', '生成第 1 章'][step]
+  return ['', '必选标签', '视觉色调', '大纲生成', '大纲细化', '生成第 1 章'][step]
 }
 
 function getStepHint(step: number): string {
@@ -221,8 +258,8 @@ function getStepHint(step: number): string {
     '',
     '题材 / 风格 / 基调（每类至少 1 个）',
     '选一个喜欢的色调（影响 UI 主题，不影响世界树）',
-    '让 Agent 引导你填写 4 个核心设定',
-    '让 Agent 引导你填写 4 个大纲字段',
+    '让 Agent 帮你生成故事大纲',
+    '让 Agent 帮你进一步细化大纲',
     'AI 会读取前 4 步的所有信息生成第 1 章',
   ][step]
 }
@@ -254,6 +291,18 @@ function getStepHint(step: number): string {
 
     <!-- ============== Step 1 ============== -->
     <section v-if="currentStep === 1" class="step fade-in">
+      <div class="project-name-input">
+        <label for="project-name">🌍 给你的世界起个临时名 (Step 4 后会被 LLM 自动改)</label>
+        <input
+          id="project-name"
+          v-model="projectName"
+          type="text"
+          maxlength="50"
+          placeholder="例：天池秘界 / 剑与魔法的学院 / 废土拾荒者"
+          :disabled="!!projectId"
+        />
+        <p class="hint">这是占位名，Step 4 大纲完成后 LLM 会根据故事核心重新起名</p>
+      </div>
       <h3>题材</h3>
       <div class="tag-grid">
         <button
@@ -346,11 +395,11 @@ function getStepHint(step: number): string {
         </div>
       </div>
 
-      <!-- 右：4 字段展示框 -->
+      <!-- 右：故事大纲展示框 -->
       <div class="fields-pane">
         <div class="fields-header">
-          <h3>📋 {{ currentStep === 3 ? 'Step 3 · 核心设定' : 'Step 4 · 大纲初稿' }}</h3>
-          <p class="fields-hint">点下方「让 Agent 提议」生成，再「确认字段」写入 7 件基座</p>
+          <h3>📋 {{ currentStep === 3 ? 'Step 3 · 故事大纲' : 'Step 4 · 大纲细化' }}</h3>
+          <p class="fields-hint">点下方「让 Agent 提议」生成大纲，再「确认大纲」写入 7 件基座</p>
         </div>
         <div class="fields-list">
           <div
@@ -359,7 +408,10 @@ function getStepHint(step: number): string {
             class="field-card"
             :class="{ filled: chat.fields.value[f.key] }"
           >
-            <label>{{ f.label }}</label>
+            <div class="field-label-row">
+              <label class="field-label">{{ f.label }}</label>
+              <span v-if="f.sublabel" class="field-sublabel">{{ f.sublabel }}</span>
+            </div>
             <div v-if="chat.fields.value[f.key]" class="field-value">
               <pre>{{ chat.fields.value[f.key] }}</pre>
             </div>
@@ -382,7 +434,7 @@ function getStepHint(step: number): string {
             :disabled="!chat.hasFields.value || chat.thinking.value || chat.stepDone.value"
             @click="handleConfirm"
           >
-            {{ chat.stepDone.value ? '✅ 已写入 7 件' : '✅ 确认字段 → 写 7 件' }}
+            {{ chat.stepDone.value ? '✅ 已写入 7 件' : '✅ 确认大纲 → 写 7 件' }}
           </button>
         </div>
       </div>
@@ -392,7 +444,7 @@ function getStepHint(step: number): string {
     <section v-else-if="currentStep === 5" class="step fade-in">
       <div class="generate-card">
         <h2>🎬 准备生成第 1 章</h2>
-        <p>AI 会读取 Step 1-4 的所有信息（题材 / 风格 / 基调 / 核心设定 / 大纲），生成第 1 章 + 摘要。</p>
+        <p>AI 会读取 Step 1-4 的所有信息（题材 / 风格 / 基调 / 故事大纲），生成第 1 章 + 摘要。</p>
         <p class="time-hint">预计耗时 30-60 秒</p>
         <div v-if="loading" class="generating">
           <div class="spinner"></div>
@@ -439,6 +491,47 @@ function getStepHint(step: number): string {
   gap: var(--space-2);
   justify-content: center;
   margin-bottom: var(--space-6);
+}
+
+/* v0.8.3: Step 1 项目名输入框 */
+.project-name-input {
+  margin-bottom: var(--space-6);
+  padding: var(--space-4);
+  background: var(--color-night-1);
+  border: 1px solid var(--color-night-3);
+  border-radius: var(--radius-md);
+}
+.project-name-input label {
+  display: block;
+  font-size: var(--text-md);
+  font-weight: 600;
+  margin-bottom: var(--space-2);
+  color: var(--color-text);
+}
+.project-name-input input {
+  width: 100%;
+  padding: var(--space-3) var(--space-4);
+  font-size: var(--text-md);
+  background: var(--color-night-2);
+  border: 1px solid var(--color-night-3);
+  border-radius: var(--radius-md);
+  color: var(--color-text);
+  font-family: inherit;
+  transition: border-color 0.2s;
+}
+.project-name-input input:focus {
+  outline: none;
+  border-color: var(--color-accent-1);
+  box-shadow: var(--shadow-glow);
+}
+.project-name-input input:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.project-name-input .hint {
+  margin-top: var(--space-2);
+  font-size: var(--text-sm);
+  color: var(--color-text-dim);
 }
 .step-dot {
   width: 36px;
@@ -657,7 +750,7 @@ function getStepHint(step: number): string {
   cursor: not-allowed;
 }
 
-/* 右：4 字段展示框 */
+/* 右：故事大纲展示框 */
 .fields-pane {
   display: flex;
   flex-direction: column;
@@ -710,6 +803,25 @@ function getStepHint(step: number): string {
 }
 .field-card.filled label {
   color: var(--color-accent-3);
+}
+/* v0.8.3: 字段 label + sublabel 并排 */
+.field-label-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+  flex-wrap: wrap;
+}
+.field-label {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--color-accent-3);
+  margin-bottom: 0 !important;
+}
+.field-sublabel {
+  font-size: var(--text-xs);
+  color: var(--color-text-dim);
+  line-height: 1.4;
 }
 .field-value pre {
   margin: 0;

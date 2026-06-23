@@ -9,6 +9,10 @@ from __future__ import annotations
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+# v0.8.3: 初始化日志 (在 import 其他模块前调, 让后续 logger 接管)
+from realtime_novel.utils.logger import configure_logging
+configure_logging()
+
 from realtime_novel.api.system_routes import router as system_router
 from realtime_novel.api.ws_manager import router as ws_router
 from realtime_novel.api.project_routes import router as project_router

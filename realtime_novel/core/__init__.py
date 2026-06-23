@@ -4,11 +4,13 @@
 包括:
 - schemas/  7 件产物 Pydantic Schema + ChapterSummary
 - world_tree.py  S2 WorldTree 内存模型
-- project.py  S1 ProjectManager (项目目录 + 文件加载)
 - exceptions.py  异常层级（M-α 阶段用最少集合）
+
+v0.8.2: 删除了 project.py (v0.3 同步版 ProjectManager, 0 真调用)
+        删除了 SCHEMA_REGISTRY (v0.3 文件存储时代用, v0.4.1 入库后已不适用)
+        项目管理走 services.async_wrappers.AsyncProjectManager
 """
 from .world_tree import WorldTree
-from .project import ProjectManager, Project, LoadedProject
 from .schemas import (
     WorldTreeSchema,
     StyleCharterSchema,
@@ -18,15 +20,11 @@ from .schemas import (
     CharacterCardSchema,
     SeedTableSchema,
     ChapterSummarySchema,
-    SCHEMA_REGISTRY,
 )
 from . import exceptions
 
 __all__ = [
     "WorldTree",
-    "ProjectManager",
-    "Project",
-    "LoadedProject",
     "WorldTreeSchema",
     "StyleCharterSchema",
     "GenreResonanceSchema",
@@ -35,6 +33,5 @@ __all__ = [
     "CharacterCardSchema",
     "SeedTableSchema",
     "ChapterSummarySchema",
-    "SCHEMA_REGISTRY",
     "exceptions",
 ]

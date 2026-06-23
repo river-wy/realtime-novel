@@ -30,7 +30,7 @@ export function useOnboardingChat(projectId: () => string | null) {
   /** 当前 step（3 或 4），决定推哪个 prompt 给 LLM */
   const currentStep = ref<OnboardingStepNum | null>(null)
 
-  /** Agent 提议的 4 字段 */
+  /** Agent 提议的大纲 (4 字段) */
   const fields = ref<Record<string, string>>({})
 
   /** 对话历史（Agent 引导语 + 用户修改意见） */
@@ -88,15 +88,20 @@ export function useOnboardingChat(projectId: () => string | null) {
 
     const socket = new WebSocket(WS_BASE)
     socket.onopen = () => {
-      connected.value = true
-      connecting.value = false
-      addAgentMessage(
-        step === 3
-          ? '👋 你好！我是你的小说创作引导师。\n\n我已经看过你在 Step 1 选择的题材/风格/基调，也看到了 Step 2 的视觉色调偏好。\n\n点下方「让 Agent 提议」按钮，我会基于这些信息为你生成 Step 3 的 4 个核心设定字段（核心关系 / 情感锚点 / 禁区 / 结局偏好）。生成后你可以随时在输入框里告诉我「改一下 XXX」「更具体」之类的修改意见。'
-          : '👋 现在我们进入 Step 4 大纲初稿。\n\nStep 3 的核心设定已经写入 7 件基座。我会基于前 3 步的所有信息，为你生成 4 个大纲字段（主线核心矛盾 / 支线 / 人物 / 种子）。同样可以随时让 Agent 修改。',
-      )
+      // v0.8.3 修复: 只在还是同一个 ws 时才设 connected + 加开场白 (避免旧 ws onopen 误开新 ws 状态)
+      if (ws.value === socket) {
+        connected.value = true
+        connecting.value = false
+        addAgentMessage(
+          step === 3
+            ? '👋 你好！我是你的小说创作引导师。\n\n我已经看过你在 Step 1 选择的题材/风格/基调，也看到了 Step 2 的视觉色调偏好。\n\n点下方「让 Agent 提议」按钮，我会基于这些信息为你生成 Step 3 的故事大纲。生成后你可以随时在输入框里告诉我「改一下 XXX」「更具体」之类的修改意见。'
+            : '👋 现在我们进入 Step 4 大纲细化。\n\nStep 3 的故事大纲已经写入 7 件基座。我会基于前 3 步的所有信息，为你进一步细化大纲。同样可以随时让 Agent 修改。',
+        )
+      }
     }
     socket.onmessage = (event) => {
+      // v0.8.3 修复: 只处理当前 ws 的消息 (避免旧 ws 消息污染新 ws 状态)
+      if (ws.value !== socket) return
       try {
         const msg = JSON.parse(event.data)
         handleEvent(msg)
@@ -105,12 +110,18 @@ export function useOnboardingChat(projectId: () => string | null) {
       }
     }
     socket.onclose = () => {
-      connected.value = false
-      ws.value = null
+      // v0.8.3 修复: 只在还是同一个 ws 时才清空状态 (race condition 防护)
+      // 旧 ws 异步 close 时不应清掉新 ws 状态
+      if (ws.value === socket) {
+        connected.value = false
+        ws.value = null
+      }
     }
     socket.onerror = () => {
-      error.value = 'WebSocket 连接错误'
-      connecting.value = false
+      if (ws.value === socket) {
+        error.value = 'WebSocket 连接错误'
+        connecting.value = false
+      }
     }
     ws.value = socket
   }
@@ -125,7 +136,7 @@ export function useOnboardingChat(projectId: () => string | null) {
       // 更新最后一条非 thinking 的 agent 消息：标记为最终结果
       fields.value = msg.fields || {}
       addAgentMessage(
-        '✅ 已为你生成 4 个字段。点击右下「确认字段 → 写 7 件」按钮，或者继续在输入框告诉我你想调整的方向。',
+        '✅ 已为你生成故事大纲。点击右下「确认大纲」按钮，或者继续在输入框告诉我你想调整的方向。',
       )
     } else if (t === 'onboarding_confirmed') {
       thinking.value = false
@@ -147,7 +158,7 @@ export function useOnboardingChat(projectId: () => string | null) {
   }
 
   /**
-   * 让 Agent 提议 4 字段
+   * 让 Agent 提议大纲 (4 字段)
    * 首次调用 user_message='', 后续调用传修改意见
    */
   function requestProposal(userMessage = '') {
@@ -163,7 +174,7 @@ export function useOnboardingChat(projectId: () => string | null) {
     if (userMessage) {
       addUserMessage(userMessage)
     } else {
-      addAgentMessage('🤔 正在为你生成 4 字段...')
+      addAgentMessage('🤔 正在为你生成故事大纲...')
     }
     ws.value.send(JSON.stringify({
       type: 'onboarding_request_proposal',
@@ -175,7 +186,7 @@ export function useOnboardingChat(projectId: () => string | null) {
   }
 
   /**
-   * 用户确认 4 字段 → 写 7 件
+   * 用户确认大纲 → 写 7 件
    */
   function confirm() {
     if (!ws.value || ws.value.readyState !== WebSocket.OPEN) {
@@ -191,7 +202,7 @@ export function useOnboardingChat(projectId: () => string | null) {
       error.value = '字段为空，请先让 Agent 提议'
       return
     }
-    addUserMessage('✅ 确认这 4 个字段，写入 7 件基座')
+    addUserMessage('✅ 确认这个大纲，写入 7 件基座')
     ws.value.send(JSON.stringify({
       type: 'onboarding_confirm',
       project_id: pid,

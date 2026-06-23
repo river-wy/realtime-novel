@@ -1,9 +1,4 @@
-"""v0.7 onboarding_artifacts — 7 件基座拼装 helper
-
-m-v0.5-onboarding s2 自检后重构 (2026-06-18 22:11):
-- 自检发现 Step 3-4 走 WS 后, HTTP step=4 的 7 件拼装逻辑变成死代码
-- 3 件 (world_tree / genre_resonance / style_charter 完整结构) 写不出来
-- 修复: 把 7 件拼装逻辑抽到独立模块, HTTP 和 WS 都能调
+""" onboarding_artifacts — 7 件基座拼装 helper
 
 设计原则:
 - stateless helper: 输入 project_id + state_json.payload, 调 save_7_artifacts
@@ -66,21 +61,16 @@ def assemble_7_artifacts(project_id: str, payload: Dict[str, Any]) -> List[str]:
                 → style_charter (notes/taboos) + main_plot (metadata) + character_card (核心关系)
         Step 4: main_conflict / sub_plots / characters / seeds
                 → main_plot (arc_phrase/beats) + sub_plot + character_card + seed_table
-
-    注意:
-        - save_7_artifacts 是合并式写入 (不丢已有数据)
-        - 不调 LLM, 直接用结构化数据拼 (避免 1-2 分钟耗时)
-        - v0.7+: 考虑用 LLM 生成更丰富的 7 件内容
     """
     genres = payload.get("genres", []) or []
     styles = payload.get("styles", []) or []
     tone = payload.get("tone", "冷叙述")
-    palette = payload.get("palette", "") or ""  # v0.7: 改为单选 str
-    # v0.7 Step 3 (故事引擎) 字段
+    palette = payload.get("palette", "") or ""
+    # Step 3 (故事引擎) 字段
     story_core = payload.get("story_core", "") or ""
-    characters_step3 = payload.get("characters", "") or ""  # Step 3 填的 '名字-要什么-怕什么'
+    characters_step3 = payload.get("characters", "") or ""  # Step 3 填的 '名字 - 身份/角色 - 特点/目的'
     opening_scene = payload.get("opening_scene", "") or ""
-    # v0.7 Step 4 (故事路径) 字段
+    # Step 4 (故事路径) 字段
     main_arc_raw = payload.get("main_arc", "") or ""  # 3-5 节点, 每行 1 个
     sub_plots_raw = payload.get("sub_plots", "") or ""
     seeds_raw = payload.get("seeds", "") or ""
@@ -97,7 +87,7 @@ def assemble_7_artifacts(project_id: str, payload: Dict[str, Any]) -> List[str]:
     # 主线: 用 story_core (Step 3 故事内核) 作为主线信号
     main_arc = story_core or f"{theme}题材下主角的成长与命运"
 
-    # core_rules: 从主线 + 开篇场景 推断 (v0.7: 砍掉禁区/结局偏好)
+    # core_rules: 从主线 + 开篇场景 推断
     core_rules = [
         {"id": "R1", "statement": f"主线: {main_arc}", "enforcement": "hard", "applies_to": "all"},
     ]
@@ -109,8 +99,7 @@ def assemble_7_artifacts(project_id: str, payload: Dict[str, Any]) -> List[str]:
     if opening_scene:
         notes_list.append(f"开篇场景: {opening_scene}")
 
-    # style_charter: v0.8.2 由 Agent 推断完整笔法 (散文/句式/段落/心理活动 密度)
-    # 不暴露给用户, 用户只填 genres/styles/tone
+    # style_charter: 由 Agent 推断完整笔法 (散文/句式/段落/心理活动 密度)
     from realtime_novel.agent.style_inference import infer_style_charter
     inferred_style_charter = infer_style_charter(
         genres=genres,
@@ -118,7 +107,7 @@ def assemble_7_artifacts(project_id: str, payload: Dict[str, Any]) -> List[str]:
         tone=tone if isinstance(tone, list) else ([tone] if tone else []),
     )
 
-    # main_plot: beats 构造 (v0.7: 用 main_arc_raw 按行拆, 取代原来固定 3 beat)
+    # main_plot: beats 构造
     beats = []
     if main_arc_raw:
         for i, line in enumerate(main_arc_raw.split("\n")):
@@ -154,20 +143,21 @@ def assemble_7_artifacts(project_id: str, payload: Dict[str, Any]) -> List[str]:
                 "priority": "side",
             })
 
-    # 人物: Step 3 填的 '名字-要什么-怕什么' 
+    # 人物: Step 3 填的 '名字 - 身份/角色 - 特点/目的'
+    # 格式: name - identity - trait (3 段, 中划线分隔)
     characters = []
     for line in characters_step3.split("\n"):
         line = line.strip()
         if not line:
             continue
-        parts = line.split("-")
-        name = parts[0].strip() if parts else f"角色{len(characters)+1}"
-        want = parts[1].strip() if len(parts) > 1 else ""
-        fear = parts[2].strip() if len(parts) > 2 else ""
+        parts = [p.strip() for p in line.split("-")]
+        name = parts[0] if parts and parts[0] else f"角色{len(characters)+1}"
+        identity = parts[1] if len(parts) > 1 else ""
+        trait = parts[2] if len(parts) > 2 else ""
         # 第一个角色通常是主角
         role = "protagonist" if not characters else "supporting"
-        # background 合并 want + fear
-        background = f"想要: {want} | 害怕: {fear}" if want or fear else line
+        # background 合并 identity + trait
+        background = f"身份: {identity} | 特点/目的: {trait}" if identity or trait else line
         characters.append({
             "id": f"char-{len(characters)+1:03d}",
             "name": name,
@@ -218,10 +208,9 @@ def assemble_7_artifacts(project_id: str, payload: Dict[str, Any]) -> List[str]:
             },
         },
         style_charter={
-            **inferred_style_charter,  # v0.8.2: 完整笔法 (散文/句式/段落/密度/limits)
-            "taboos": [],  # v0.7: 砍掉禁区
+            **inferred_style_charter,  #  完整笔法 (散文/句式/段落/密度/limits)
+            "taboos": [],
             "notes": notes_list,
-            # v0.5 拍板: palette **不**写 7 件基座 (只存 projects.palette)
             "metadata": {
                 **inferred_style_charter.get("metadata", {}),  # 推断来源记录
                 "genres": genres,
@@ -245,6 +234,8 @@ def assemble_7_artifacts(project_id: str, payload: Dict[str, Any]) -> List[str]:
                 # v0.7: 砍掉 ending_preference, 加 story_core 和 reader_feeling
                 "story_core": story_core,
                 "reader_feeling": reader_feeling,
+                # v0.8.3: 保留 Step 4 main_arc 完整字符串 (拆成 beats 后, 原句不丢)
+                "main_arc": main_arc_raw,
             },
         },
         sub_plot={"threads": sub_plot_threads, "metadata": {}},
@@ -297,9 +288,12 @@ def merge_payload_to_state(project_id: str, step: int, fields: Dict[str, Any]) -
         merged = {**existing_payload, **fields}
         state_data["payload"] = merged
         state_data["updated_at"] = now.isoformat()
+        # 同步更新 current_step 列 (Step 3 confirm → current_step=3, Step 4 → 4)
+        # 语义: current_step = 用户最近完成到哪一步 (1-4, 4 表示 onboard 完成)
+        # 不然前端 status 读 current_step 永远显示 2/5
         conn.execute(
-            "UPDATE onboarding_state SET state_json = ?, updated_at = ? WHERE project_id = ?",
-            (json.dumps(state_data, ensure_ascii=False), now, project_id),
+            "UPDATE onboarding_state SET current_step = ?, state_json = ?, updated_at = ? WHERE project_id = ?",
+            (step, json.dumps(state_data, ensure_ascii=False), now, project_id),
         )
     return merged
 

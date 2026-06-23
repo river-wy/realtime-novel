@@ -31,7 +31,7 @@ class IntrospectCharacterTool(BaseTool):
     ) -> IntrospectResult:
         try:
             all_data = self._project_repo.load_all_artifacts(input.project_id)
-            character_card = all_data.get("06-character-card.yaml", {})
+            character_card = all_data.get("character_card", {})
             characters = character_card.get("characters", []) if isinstance(character_card, dict) else []
 
             target = next(

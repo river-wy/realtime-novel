@@ -35,7 +35,7 @@ class AdjustStyleTool(BaseTool):
 
             repo = ProjectRepository()
             all_data = repo.load_all_artifacts(input.project_id)
-            style_charter = all_data.get("02-style-charter.yaml", {})
+            style_charter = all_data.get("style_charter", {})
             if not isinstance(style_charter, dict):
                 style_charter = {"raw": str(style_charter)}
 
@@ -49,13 +49,13 @@ class AdjustStyleTool(BaseTool):
             # 写回 DB
             repo.save_7_artifacts(
                 project_id=input.project_id,
-                world_tree=all_data.get("01-world-tree.yaml", {}),
+                world_tree=all_data.get("world_tree", {}),
                 style_charter=style_charter,
-                genre_resonance=all_data.get("03-genre-resonance.yaml", {}),
-                main_plot=all_data.get("04-main-plot.yaml", {}),
-                sub_plot=all_data.get("05-sub-plot.yaml", {}),
-                character_card=all_data.get("06-character-card.yaml", {}),
-                seed_table=all_data.get("07-seed-table.yaml", {}),
+                genre_resonance=all_data.get("genre_resonance", {}),
+                main_plot=all_data.get("main_plot", {}),
+                sub_plot=all_data.get("sub_plot", {}),
+                character_card=all_data.get("character_card", {}),
+                seed_table=all_data.get("seed_table", {}),
             )
 
             if progress_callback:

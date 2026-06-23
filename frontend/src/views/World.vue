@@ -8,7 +8,7 @@ import { onMounted, computed, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useProjectsStore } from '@/stores/projects'
 import { useChaptersStore } from '@/stores/chapters'
-import { rollbackProject } from '@/api/actions'
+import { rollbackProject, onboardingStep } from '@/api/actions'
 
 const route = useRoute()
 const router = useRouter()
@@ -35,6 +35,27 @@ async function doDelete() {
   router.push('/')
 }
 
+/** v0.8.3: 生成第 1 章 (onboard 完成后) */
+const generating = ref(false)
+const genError = ref<string | null>(null)
+async function generateFirstChapter() {
+  if (generating.value) return
+  if (!confirm('🚀 开始生成第 1 章？预计耗时 30-60 秒。')) return
+  generating.value = true
+  genError.value = null
+  try {
+    await onboardingStep(projectId.value, '5', {})
+    await chaptersStore.loadList(projectId.value)
+    if (chaptersStore.count > 0) {
+      enterChapter(1)
+    }
+  } catch (e: any) {
+    genError.value = e.message || '生成失败'
+  } finally {
+    generating.value = false
+  }
+}
+
 function enterChapter(n: number) {
   router.push({ name: 'reader', params: { projectId: projectId.value, chapterNum: n } })
 }
@@ -58,9 +79,14 @@ onMounted(load)
           <dt>调色板</dt>
           <dd>{{ projectsStore.current?.palette || '-' }}</dd>
         </dl>
-        <button class="btn btn-primary" @click="enterChapter(chaptersStore.count || 1)">
+        <!-- v0.8.3: 无章节时显示生成第 1 章入口 (onboard 完成但未生成) -->
+        <button v-if="chaptersStore.count === 0" class="btn btn-primary" :disabled="generating" @click="generateFirstChapter">
+          {{ generating ? '生成中...' : '✨ 生成第 1 章' }}
+        </button>
+        <button v-else class="btn btn-primary" @click="enterChapter(chaptersStore.count || 1)">
           📖 进入阅读
         </button>
+        <p v-if="genError" class="error-text">{{ genError }}</p>
       </section>
 
       <section class="chapters-panel">

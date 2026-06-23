@@ -221,7 +221,10 @@ def _format_style_charter(style_charter: dict) -> str:
 def _format_main_plot(main_plot: dict) -> str:
     """压缩 main_plot 为字符串（文笔家用）
 
-    包含: arc_phrase (Step 4 main_conflict) + beats (Step 4 拆的节奏)
+    包含:
+    - arc_phrase (Step 3 story_core 故事一句话)
+    - beats (Step 4 main_arc 拆的节奏)
+    - metadata.story_core / main_arc / reader_feeling
     """
     if not main_plot or not isinstance(main_plot, dict):
         return "（主线为空）"
@@ -250,6 +253,15 @@ def _format_main_plot(main_plot: dict) -> str:
                 line += f" ({status})"
             line += cr_str
             parts.append(line)
+
+    # v0.8.3: metadata 里保存了 Step 3 story_core / Step 4 main_arc / reader_feeling
+    # 给 LLM 看到全量信息 (不能只靠 arc_phrase + beats)
+    metadata = main_plot.get('metadata') or {}
+    if isinstance(metadata, dict):
+        for key, label in [('story_core', '故事内核'), ('main_arc', '主线节点'), ('reader_feeling', '读者情绪')]:
+            v = metadata.get(key, '')
+            if v and v not in (main_plot.get('arc_phrase', '') or ''):
+                parts.append(f"{label}: {v}")
 
     return "\n".join(parts) if parts else "（主线无具体内容）"
 
@@ -571,25 +583,21 @@ def build_messages_for_onboarding_step3(
                 (project_id,),
             ).fetchone()
         if row:
-            state = json.loads(row["state_json"]) if hasattr(json, 'loads') else {}
+            state = json.loads(row["state_json"])
             payload = state.get("payload", {})
+            # v0.8.3: 不再重复 current_fields, history 里已经有了 + user message 也带了
+            # (避免多轮对话后 context 撑爆)
             data_block = f"""## Step 1-2 已有数据
 - 题材: {payload.get("genres", [])}
 - 风格: {payload.get("styles", [])}
 - 基调: {payload.get("tone", [])}
-- 调色板: {payload.get("palette", "")}
-
-## Step 3 当前字段 (用户填的或 LLM 提议的)
-- story_core: {current_fields.get("story_core", "") or "（未填）"}
-- characters: {current_fields.get("characters", "") or "（未填）"}
-- opening_scene: {current_fields.get("opening_scene", "") or "（未填）"}
 """
             messages.append({"role": "system", "content": data_block})
     except Exception:
         pass  # 推断失败不阻断 onboarding
 
-    # 3. history (Step 3 是多轮对话, 拿最近 3 轮)
-    history = _load_project_history(project_id, max_history=3)
+    # 3. history (Step 3/4 多轮对话, 拿最近 10 轮 = 5 轮 user + 5 轮 assistant)
+    history = _load_project_history(project_id, max_history=10)
     messages.extend(history)
 
     # 4. current
@@ -607,17 +615,62 @@ def build_messages_for_onboarding_step4(
 
     与 Step 3 不同: 此时 Step 3 已确认, 需要拼:
     - Step 1-2 已有数据
-    - Step 3 已写入的 7 件 (style_charter / main_plot / character_card)
+    - Step 3 已写入的 7 件 (style_charter / main_plot / character_card 等) — 从 DB 读
     - Step 4 当前 user 输入
-
-    结构同 Step 3 但 max_history 更大 (Step 4 在 Step 3 之后, 历史更长)
+    - Step 3/4 多轮对话 history
     """
-    return build_messages_for_onboarding_step3(
-        project_id=project_id,
-        current_user_message=current_user_message,
-        system_prompt=system_prompt,
-        current_fields=current_fields,
-    )
+    from realtime_novel.persistence.project_repository import ProjectRepository
+    from realtime_novel.persistence.sqlite_store import get_store
+
+    current_fields = current_fields or {}
+    messages = []
+    # 1. system
+    messages.append({"role": "system", "content": system_prompt})
+
+    # 2. data: Step 1-2 + Step 3 已写入的 7 件 (读 DB)
+    # Step 4 走完 Step 3 后, 7 件已入库, 从 DB load_all_artifacts 读
+    try:
+        # 2a. Step 1-2 payload
+        with get_store().connection() as conn:
+            row = conn.execute(
+                "SELECT state_json FROM onboarding_state WHERE project_id = ?",
+                (project_id,),
+            ).fetchone()
+        payload = {}
+        if row:
+            state = json.loads(row["state_json"])
+            payload = state.get("payload", {})
+
+        # 2b. 7 件 (从 DB 读, Step 3 确认后已写入)
+        artifacts = {}
+        try:
+            repo = ProjectRepository()
+            artifacts = repo.load_all_artifacts(project_id)
+        except Exception:
+            pass  # 7 件未写入不阻断
+
+        data_block = f"""## Step 1-2 已有数据
+- 题材: {payload.get("genres", [])}
+- 风格: {payload.get("styles", [])}
+- 基调: {payload.get("tone", [])}
+
+## Step 3 已写入的 7 件 (Step 3 确认后落库)
+- story_core: {artifacts.get("world_tree", {}).get("core_premise", "") or artifacts.get("world_tree", {}).get("story_core", "") or "（未填）"}
+- main_plot 主线: {artifacts.get("main_plot", {}).get("arc_phrase", "") or "（未填）"}
+- style_charter notes: {(artifacts.get("style_charter", {}).get("notes", []) or ["（未填）"])[-3:] if artifacts.get("style_charter", {}).get("notes") else "（未填）"}
+- 人物 ({len(artifacts.get("character_card", {}).get("characters", []))} 个): {[c.get("name", "") for c in artifacts.get("character_card", {}).get("characters", [])][:5]}
+"""
+        messages.append({"role": "system", "content": data_block})
+    except Exception:
+        pass  # 推断失败不阻断 onboarding
+
+    # 3. history (Step 3/4 多轮, 拿最近 10 轮)
+    history = _load_project_history(project_id, max_history=10)
+    messages.extend(history)
+
+    # 4. current
+    messages.append({"role": "user", "content": current_user_message or "请提议 4 个故事路径字段"})
+    return messages
 
 
 def _load_project_history(project_id: str, max_history: int = 5) -> list[dict[str, Any] | None]:

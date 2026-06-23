@@ -7,6 +7,7 @@
 import { onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useProjectsStore } from '@/stores/projects'
+import * as api from '@/api/projects'
 import heroImage from '@/assets/首页-主图.png'
 
 const router = useRouter()
@@ -16,8 +17,30 @@ onMounted(async () => {
   await projectsStore.loadList()
 })
 
-function goToProject(id: string) {
-  router.push({ name: 'world', params: { projectId: id } })
+/** v0.8.3: 智能跳转 — 未完成 onboard 续接, 已完成跳世界详情 */
+function goToProject(p: api.ProjectInfo | string) {
+  // 兼容传 id 字符串的旧调用
+  if (typeof p === 'string') {
+    const project = projectsStore.projects.find((x) => x.id === p)
+    if (!project) {
+      router.push({ name: 'world', params: { projectId: p } })
+      return
+    }
+    p = project
+  }
+  if (p.chapter_count > 0) {
+    // 有章节, 跳到阅读页第 1 章
+    router.push({ name: 'reader', params: { projectId: p.id, chapterNum: 1 } })
+  } else if (p.onboarding_step === 4) {
+    // v0.8.3: onboard 完成 (Step 4) 但还没生成章节 → 跳世界详情 (有"生成第 1 章"按钮)
+    router.push({ name: 'world', params: { projectId: p.id } })
+  } else if (p.onboarding_step && p.onboarding_step >= 1) {
+    // onboard 进行中 (Step 1-3), 跳到续接点
+    router.push({ name: 'onboarding', query: { projectId: p.id, step: String(p.onboarding_step) } })
+  } else {
+    // 从未进过, 跳到世界详情
+    router.push({ name: 'world', params: { projectId: p.id } })
+  }
 }
 
 function startNewProject() {
@@ -37,6 +60,26 @@ function explorationDesc(level: string): string {
     standard: '平衡, AI 合理补充',
     wild: '大胆发散, 探索不同方向',
   }[level] || ''
+}
+
+/** v0.8.3: 项目状态辅助函数 */
+function statusIcon(status: string): string {
+  return { not_started: '⚪', in_progress: '🟡', completed: '🟢' }[status] || '⚪'
+}
+function statusLabel(status: string, step: number | null): string {
+  if (status === 'completed') return '已完成'
+  if (status === 'in_progress' && step) {
+    return step >= 3 ? `大纲中 (${step}/5)` : `引导中 (${step}/5)`
+  }
+  return '未启动'
+}
+function statusDesc(status: string, step: number | null): string {
+  if (status === 'completed') return '可阅读, 可继续生成'
+  if (status === 'in_progress' && step) {
+    if (step >= 3) return `点击续接 Step ${step} 大纲生成`
+    return `点击续接 Step ${step} 启动`
+  }
+  return '点击继续启动'
 }
 </script>
 
@@ -58,7 +101,7 @@ function explorationDesc(level: string): string {
       <p class="hero-desc">基于 LLM 的小说创作平台。世界树 + 主线 + 人物 + 种子表，让 AI 写你心中的故事。</p>
       <div class="hero-actions">
         <button class="btn btn-primary" @click="startNewProject">✨ 新启动一个世界</button>
-        <button v-if="projectsStore.projects.length > 0" class="btn btn-secondary" @click="goToProject(projectsStore.projects[0].id)">
+        <button v-if="projectsStore.projects.length > 0" class="btn btn-secondary" @click="goToProject(projectsStore.projects[0])">
           打开最近项目
         </button>
       </div>
@@ -77,7 +120,7 @@ function explorationDesc(level: string): string {
           v-for="p in projectsStore.projects"
           :key="p.id"
           class="project-card"
-          @click="goToProject(p.id)"
+          @click="goToProject(p)"
         >
           <div class="card-bg" :style="{ background: `linear-gradient(135deg, var(--color-night-2), var(--color-night-3))` }"></div>
           <div class="card-content">
@@ -92,6 +135,15 @@ function explorationDesc(level: string): string {
               >
                 {{ explorationIcon(p.exploration_level || 'standard') }}
                 {{ explorationLabel(p.exploration_level || 'standard') }}
+              </span>
+              <!-- v0.8.3: 状态徽章 -->
+              <span
+                class="status-badge"
+                :class="`status-${p.status || 'not_started'}`"
+                :title="statusDesc(p.status || 'not_started', p.onboarding_step)"
+              >
+                {{ statusIcon(p.status || 'not_started') }}
+                {{ statusLabel(p.status || 'not_started', p.onboarding_step) }}
               </span>
               <span class="chapter-count">{{ p.chapter_count }} 章</span>
             </p>
@@ -349,6 +401,32 @@ function explorationDesc(level: string): string {
   background: rgba(236, 72, 153, 0.2);    /* 粉 */
   color: #f9a8d4;
   border: 1px solid rgba(236, 72, 153, 0.4);
+}
+
+/* v0.8.3: 状态徽章 (not_started / in_progress / completed) */
+.status-badge {
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.status-not_started {
+  background: rgba(156, 163, 175, 0.2);  /* 灰 */
+  color: #d1d5db;
+  border: 1px solid rgba(156, 163, 175, 0.4);
+}
+.status-in_progress {
+  background: rgba(251, 191, 36, 0.2);   /* 黄 */
+  color: #fde68a;
+  border: 1px solid rgba(251, 191, 36, 0.4);
+}
+.status-completed {
+  background: rgba(34, 197, 94, 0.2);    /* 绿 */
+  color: #86efac;
+  border: 1px solid rgba(34, 197, 94, 0.4);
 }
 
 /* Features */
