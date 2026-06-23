@@ -91,7 +91,8 @@ class ReadChapterTool(BaseTool):
 
     async def run(self, input: ReadChapterInput, progress_callback=None) -> ChapterContent:
         try:
-            chapter_path = Path(f"data/{input.project_id}/chapters/chapter_{input.chapter_num:03d}.md")
+            from backend.config.config_loader import PROJECT_ROOT
+            chapter_path = PROJECT_ROOT / f"data/{input.project_id}/chapters/chapter_{input.chapter_num:03d}.md"
             if not chapter_path.exists():
                 return ToolError(
                     code="NOT_FOUND",

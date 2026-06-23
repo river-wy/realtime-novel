@@ -79,7 +79,8 @@ async def generate_chapter_via_state_graph(
         chapter_content = f"# 第 {next_num} 章\n\n（章节生成失败：{result.get('opinion', '未知错误')}）\n"
 
     # 3. 写文件
-    chapters_dir = Path(f"data/projects/{project_id}/chapters")
+    from backend.config.config_loader import PROJECT_ROOT
+    chapters_dir = PROJECT_ROOT / f"data/projects/{project_id}/chapters"
     chapters_dir.mkdir(parents=True, exist_ok=True)
     chapter_path = chapters_dir / f"chapter_{next_num:03d}.md"
     chapter_path.write_text(chapter_content, encoding="utf-8")

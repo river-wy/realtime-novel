@@ -5,7 +5,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from pathlib import Path
+from pathlib import Path as FsPath
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Path
@@ -84,12 +84,15 @@ async def read_chapter(
 ):
     """读章节正文（v0.5 走 DB，正文从 file_path 读）"""
     from backend.persistence import ChapterRepository
+    from backend.config.config_loader import PROJECT_ROOT
     chap_repo = ChapterRepository()
     row = chap_repo.get(project_id, n)
     if not row:
         raise HTTPException(404, f"Chapter {n} not found")
-    # 正文从 file_path 读
-    chapter_path = Path(row.file_path)
+    # 正文从 file_path 读 (相对路径基于 PROJECT_ROOT)
+    chapter_path = FsPath(row.file_path)
+    if not chapter_path.is_absolute():
+        chapter_path = PROJECT_ROOT / chapter_path
     if not chapter_path.exists():
         raise HTTPException(404, f"Chapter file not found: {row.file_path}")
     content = chapter_path.read_text()

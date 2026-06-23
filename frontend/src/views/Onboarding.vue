@@ -111,12 +111,9 @@ function toggle(arr: string[], value: string) {
 
 async function ensureProject() {
   if (projectId.value) return
-  if (!projectName.value || !projectName.value.trim()) {
-    error.value = '请先填写项目名'
-    return
-  }
-  // v0.8.3: 用用户填的项目名, 后端自动生成 id
-  const r = await createProject(projectName.value.trim(), '')
+  // v0.8.3: 项目名非必填, 不填时用占位名, 后端返回 projectId 后再回填
+  const name = projectName.value.trim() || '未命名世界'
+  const r = await createProject(name, '')
   projectId.value = r.id
   // 加载项目名 (供其他 step 显示)
   try {
@@ -152,11 +149,7 @@ async function nextFromHttpStep() {
   error.value = null
   try {
     if (currentStep.value === 1) {
-      // v0.8.3: 验证项目名 (必填, 1-50 字符)
-      if (!projectName.value || !projectName.value.trim()) {
-        error.value = '请先填写项目名'
-        return
-      }
+      // v0.8.3: 项目名非必填, 不填时后端用 projectId 填充
       if (genres.value.length === 0 || styles.value.length === 0 || tone.value.length === 0) {
         error.value = '请完整选择题材、风格、基调（每类至少 1 个）'
         return
@@ -292,13 +285,13 @@ function getStepHint(step: number): string {
     <!-- ============== Step 1 ============== -->
     <section v-if="currentStep === 1" class="step fade-in">
       <div class="project-name-input">
-        <label for="project-name">🌍 给你的世界起个临时名 (Step 4 后会被 LLM 自动改)</label>
+        <label for="project-name">🌍 给你的世界起个临时名（选填，Step 4 后会被 LLM 自动改）</label>
         <input
           id="project-name"
           v-model="projectName"
           type="text"
           maxlength="50"
-          placeholder="例：天池秘界 / 剑与魔法的学院 / 废土拾荒者"
+          placeholder="不填会自动用项目 ID 占位"
           :disabled="!!projectId"
         />
         <p class="hint">这是占位名，Step 4 大纲完成后 LLM 会根据故事核心重新起名</p>
