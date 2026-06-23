@@ -281,21 +281,25 @@ class AsyncProjectManager:
         return result
 
     async def delete(self, project_id: str, confirm: bool = False) -> dict:
-        """删除项目（mv 到 trash + 软标记 projects.deleted_at）"""
+        """删除项目（mv 到 trash + 软标记 projects.deleted_at）
+        
+        文件目录不存在时（早期项目可能只有 DB 记录），跳过文件操作，只清 DB。
+        """
         if not confirm:
             raise ValueError("delete requires confirm=True")
         project_path = self.projects_root / project_id
-        if not project_path.exists():
-            raise FileNotFoundError(f"Project not found: {project_id}")
-        self.trash_root.mkdir(parents=True, exist_ok=True)
-        timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
-        trash_path = self.trash_root / f"{project_id}-{timestamp}"
-        await asyncio.to_thread(shutil.move, str(project_path), str(trash_path))
-        # 软标记（DB）
+        trash_path = ""
+        if project_path.exists():
+            self.trash_root.mkdir(parents=True, exist_ok=True)
+            timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+            trash_path = str(self.trash_root / f"{project_id}-{timestamp}")
+            await asyncio.to_thread(shutil.move, str(project_path), trash_path)
+        # DB: 先软标记, 再 hard_delete 确保彻底清除 (含 7 件基座等关联数据)
         self._proj_repo.soft_delete(project_id)
+        self._proj_repo.hard_delete(project_id)
         return {
             "project_id": project_id,
-            "trash_path": str(trash_path),
+            "trash_path": trash_path,
             "deleted_at": datetime.now().isoformat(),
         }
 
