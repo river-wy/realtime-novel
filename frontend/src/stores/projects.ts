@@ -46,6 +46,9 @@ export const useProjectsStore = defineStore('projects', () => {
 
   async function remove(id: string) {
     const r = await api.deleteProject(id)
+    // 本地立即过滤掉, 再后台刷新
+    projects.value = projects.value.filter(p => p.id !== id)
+    total.value = Math.max(0, total.value - 1)
     await loadList()
     return r
   }

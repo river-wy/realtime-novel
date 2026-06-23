@@ -151,14 +151,10 @@ async def update_exploration_level(
     - standard:     平衡
     - wild:         大胆发散
     """
-    from backend.persistence.project_repository import ProjectRepository
-
-    repo = ProjectRepository()
-    project = repo.get(project_id)
-    if project is None:
-        raise HTTPException(404, f"Project not found: {project_id}")
     try:
-        repo.update_exploration_level(project_id, req.exploration_level)
+        await _pm.update_exploration_level(project_id, req.exploration_level)
+    except FileNotFoundError:
+        raise HTTPException(404, f"Project not found: {project_id}")
     except ValueError as e:
         raise HTTPException(400, str(e))
     return UpdateExplorationLevelResponse(

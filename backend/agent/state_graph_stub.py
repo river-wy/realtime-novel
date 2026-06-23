@@ -10,12 +10,9 @@ Phase 3 写 novel-agent-state-graph 时替换为真实 build_graph() 调用
 """
 from __future__ import annotations
 
-import asyncio
 from typing import Optional
 
 from backend.agent.chapter_summarizer import (
-    extract_summary_from_llm_output,
-    parse_chapter_summary,
     fallback_summary,
 )
 
@@ -35,15 +32,15 @@ async def generate_chapter_via_state_graph(
     4. 写文件 + 入 DB
     5. 返回完整结果
     """
-    from pathlib import Path
-    from datetime import datetime
-    from backend.services.async_wrappers import AsyncProjectManager
     from backend.persistence import ChapterRepository
+    from backend.persistence.project_repository import ProjectRepository
 
-    pm = AsyncProjectManager()
-    project = await pm.load(project_id)
-    if project is None:
+    # 直接用 persistence 层，避免 agent → services 的反向依赖
+    _proj_repo = ProjectRepository()
+    project_row = _proj_repo.get(project_id)
+    if project_row is None:
         raise FileNotFoundError(f"Project not found: {project_id}")
+    project = {"id": project_row.id, "name": project_row.name}
 
     chap_repo = ChapterRepository()
     existing_count = chap_repo.count_chapters(project_id)

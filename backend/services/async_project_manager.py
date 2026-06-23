@@ -55,6 +55,21 @@ class AsyncProjectManager:
             "exploration_level": project.exploration_level,
         }
 
+    async def update_exploration_level(
+        self, project_id: str, exploration_level: str
+    ) -> None:
+        """切换项目探索度 (conservative/standard/wild)
+
+        统一入口：api 层通过此方法操作，不直接调 ProjectRepository。
+        Raises:
+            FileNotFoundError: 项目不存在
+            ValueError: exploration_level 非法
+        """
+        project = self._proj_repo.get(project_id)
+        if project is None:
+            raise FileNotFoundError(f"Project not found: {project_id}")
+        self._proj_repo.update_exploration_level(project_id, exploration_level)
+
     async def load(self, project_id: str) -> Optional[dict]:
         """加载项目（DB 优先）"""
         project = self._proj_repo.get(project_id)

@@ -2,9 +2,9 @@
 /**
  * Home 首页（v0.5 接入后端 API）
  *
- * 首屏 hero + 项目列表 + "新启动" 入口
+ * 首屏 hero + 项目列表（默认 7 个 + 更多入口）+ "新启动" 入口
  */
-import { onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useProjectsStore } from '@/stores/projects'
 import * as api from '@/api/projects'
@@ -13,13 +13,19 @@ import heroImage from '@/assets/首页-主图.png'
 const router = useRouter()
 const projectsStore = useProjectsStore()
 
+/** 首页最多展示数量 */
+const MAX_CARDS = 7
+
+/** 首页展示的项目（最近 MAX_CARDS 个） */
+const recentProjects = computed(() => projectsStore.projects.slice(0, MAX_CARDS))
+const hasMore = computed(() => projectsStore.projects.length > MAX_CARDS)
+
 onMounted(async () => {
   await projectsStore.loadList()
 })
 
 /** v0.8.3: 智能跳转 — 未完成 onboard 续接, 已完成跳世界详情 */
 function goToProject(p: api.ProjectInfo | string) {
-  // 兼容传 id 字符串的旧调用
   if (typeof p === 'string') {
     const project = projectsStore.projects.find((x) => x.id === p)
     if (!project) {
@@ -29,16 +35,12 @@ function goToProject(p: api.ProjectInfo | string) {
     p = project
   }
   if (p.chapter_count > 0) {
-    // 有章节, 跳到阅读页第 1 章
     router.push({ name: 'reader', params: { projectId: p.id, chapterNum: 1 } })
   } else if (p.onboarding_step === 4) {
-    // v0.8.3: onboard 完成 (Step 4) 但还没生成章节 → 跳世界详情 (有"生成第 1 章"按钮)
     router.push({ name: 'world', params: { projectId: p.id } })
   } else if (p.onboarding_step && p.onboarding_step >= 1) {
-    // onboard 进行中 (Step 1-3), 跳到续接点
     router.push({ name: 'onboarding', query: { projectId: p.id, step: String(p.onboarding_step) } })
   } else {
-    // 从未进过, 跳到世界详情
     router.push({ name: 'world', params: { projectId: p.id } })
   }
 }
@@ -47,7 +49,48 @@ function startNewProject() {
   router.push({ name: 'onboarding' })
 }
 
-/** v0.8: 探索度辅助函数 */
+function goToWorldList() {
+  router.push({ name: 'world-list' })
+}
+
+// ============ 卡片 "..." 删除菜单 ============
+
+const openMenuId = ref<string | null>(null)
+
+function toggleMenu(e: Event, projectId: string) {
+  e.stopPropagation()
+  openMenuId.value = openMenuId.value === projectId ? null : projectId
+}
+
+function closeMenu() {
+  openMenuId.value = null
+}
+
+const deleting = ref<string | null>(null)
+
+async function handleDelete(e: Event, project: api.ProjectInfo) {
+  e.stopPropagation()
+  closeMenu()
+  if (!confirm(`确定删除「${project.name}」吗？所有章节、世界树、大纲数据将一并删除，无法恢复。`)) return
+  deleting.value = project.id
+  try {
+    await projectsStore.remove(project.id)
+  } catch (err: any) {
+    alert(`删除失败: ${err.message}`)
+  } finally {
+    deleting.value = null
+  }
+}
+
+// 点击外部关闭菜单
+function onDocClick() {
+  closeMenu()
+}
+onMounted(() => document.addEventListener('click', onDocClick))
+onUnmounted(() => document.removeEventListener('click', onDocClick))
+
+// ============ 辅助函数 ============
+
 function explorationIcon(level: string): string {
   return { conservative: '🛡️', standard: '⚖️', wild: '🌌' }[level] || '⚖️'
 }
@@ -62,7 +105,6 @@ function explorationDesc(level: string): string {
   }[level] || ''
 }
 
-/** v0.8.3: 项目状态辅助函数 */
 function statusIcon(status: string): string {
   return { not_started: '⚪', in_progress: '🟡', completed: '🟢' }[status] || '⚪'
 }
@@ -109,7 +151,12 @@ function statusDesc(status: string, step: number | null): string {
 
     <!-- 项目列表 -->
     <section class="projects-section">
-      <h2 class="section-title">我的世界</h2>
+      <div class="section-header">
+        <h2 class="section-title">我的世界</h2>
+        <button v-if="hasMore" class="btn-text" @click="goToWorldList">
+          全部 ({{ projectsStore.total }}) →
+        </button>
+      </div>
       <div v-if="projectsStore.loading" class="loading">加载中...</div>
       <div v-else-if="projectsStore.projects.length === 0" class="empty">
         <p>还没有世界</p>
@@ -117,7 +164,7 @@ function statusDesc(status: string, step: number | null): string {
       </div>
       <div v-else class="project-grid">
         <article
-          v-for="p in projectsStore.projects"
+          v-for="p in recentProjects"
           :key="p.id"
           class="project-card"
           @click="goToProject(p)"
@@ -127,7 +174,6 @@ function statusDesc(status: string, step: number | null): string {
             <h3 class="card-title">{{ p.name }}</h3>
             <p class="card-meta">
               <span class="palette">{{ p.palette }}</span>
-              <!-- v0.8: 探索度徽章 -->
               <span
                 class="exploration-badge"
                 :class="`exploration-${p.exploration_level || 'standard'}`"
@@ -136,7 +182,6 @@ function statusDesc(status: string, step: number | null): string {
                 {{ explorationIcon(p.exploration_level || 'standard') }}
                 {{ explorationLabel(p.exploration_level || 'standard') }}
               </span>
-              <!-- v0.8.3: 状态徽章 -->
               <span
                 class="status-badge"
                 :class="`status-${p.status || 'not_started'}`"
@@ -147,6 +192,32 @@ function statusDesc(status: string, step: number | null): string {
               </span>
               <span class="chapter-count">{{ p.chapter_count }} 章</span>
             </p>
+          </div>
+          <!-- "..." 操作菜单 -->
+          <div class="card-menu" @click="toggleMenu($event, p.id)">
+            <span class="card-menu-icon">⋯</span>
+          </div>
+          <div
+            v-if="openMenuId === p.id"
+            class="card-menu-dropdown"
+            @click.stop
+          >
+            <button
+              class="menu-item menu-danger"
+              :disabled="deleting === p.id"
+              @click="handleDelete($event, p)"
+            >
+              {{ deleting === p.id ? '删除中...' : '🗑 删除' }}
+            </button>
+          </div>
+        </article>
+
+        <!-- "更多" 卡片 -->
+        <article v-if="hasMore" class="project-card more-card" @click="goToWorldList">
+          <div class="card-bg" :style="{ background: `linear-gradient(135deg, var(--color-night-1), var(--color-night-2))` }"></div>
+          <div class="card-content more-content">
+            <span class="more-icon">📚</span>
+            <span class="more-text">查看全部<br>{{ projectsStore.total }} 个世界</span>
           </div>
         </article>
       </div>
@@ -224,7 +295,6 @@ function statusDesc(status: string, step: number | null): string {
           drop-shadow(0 0 24px rgba(139, 92, 246, 0.2));
 }
 
-/* 渐变光晕容器：让透明 PNG 融进深紫底 */
 .hero-glow {
   position: relative;
   margin: 0 auto var(--space-6);
@@ -301,11 +371,30 @@ function statusDesc(status: string, step: number | null): string {
   background: rgba(139, 92, 246, 0.1);
 }
 
-/* Sections */
+/* Section header */
+.section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-5);
+}
+
 .section-title {
   font-size: var(--text-2xl);
-  margin-bottom: var(--space-5);
   color: var(--color-accent-1);
+  margin: 0;
+}
+
+.btn-text {
+  background: none;
+  border: none;
+  color: var(--color-accent-3);
+  font-size: var(--text-sm);
+  cursor: pointer;
+  transition: opacity var(--motion-fast);
+}
+.btn-text:hover {
+  opacity: 0.7;
 }
 
 .projects-section,
@@ -365,6 +454,7 @@ function statusDesc(status: string, step: number | null): string {
   gap: var(--space-3);
   font-size: var(--text-sm);
   color: var(--color-text-dim);
+  flex-wrap: wrap;
 }
 
 .palette {
@@ -388,22 +478,22 @@ function statusDesc(status: string, step: number | null): string {
   gap: 4px;
 }
 .exploration-conservative {
-  background: rgba(99, 102, 241, 0.2);   /* 蓝 */
+  background: rgba(99, 102, 241, 0.2);
   color: #a5b4fc;
   border: 1px solid rgba(99, 102, 241, 0.4);
 }
 .exploration-standard {
-  background: rgba(139, 92, 246, 0.2);    /* 紫 */
+  background: rgba(139, 92, 246, 0.2);
   color: #c4b5fd;
   border: 1px solid rgba(139, 92, 246, 0.4);
 }
 .exploration-wild {
-  background: rgba(236, 72, 153, 0.2);    /* 粉 */
+  background: rgba(236, 72, 153, 0.2);
   color: #f9a8d4;
   border: 1px solid rgba(236, 72, 153, 0.4);
 }
 
-/* v0.8.3: 状态徽章 (not_started / in_progress / completed) */
+/* v0.8.3: 状态徽章 */
 .status-badge {
   padding: 2px 8px;
   border-radius: var(--radius-sm);
@@ -414,19 +504,112 @@ function statusDesc(status: string, step: number | null): string {
   gap: 4px;
 }
 .status-not_started {
-  background: rgba(156, 163, 175, 0.2);  /* 灰 */
+  background: rgba(156, 163, 175, 0.2);
   color: #d1d5db;
   border: 1px solid rgba(156, 163, 175, 0.4);
 }
 .status-in_progress {
-  background: rgba(251, 191, 36, 0.2);   /* 黄 */
+  background: rgba(251, 191, 36, 0.2);
   color: #fde68a;
   border: 1px solid rgba(251, 191, 36, 0.4);
 }
 .status-completed {
-  background: rgba(34, 197, 94, 0.2);    /* 绿 */
+  background: rgba(34, 197, 94, 0.2);
   color: #86efac;
   border: 1px solid rgba(34, 197, 94, 0.4);
+}
+
+/* ============ 卡片 "..." 菜单 ============ */
+.card-menu {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  cursor: pointer;
+  z-index: 2;
+  opacity: 0;
+  transition: opacity var(--motion-fast);
+  background: rgba(0, 0, 0, 0.3);
+  backdrop-filter: blur(4px);
+}
+.project-card:hover .card-menu {
+  opacity: 1;
+}
+.card-menu-icon {
+  font-size: 20px;
+  color: var(--color-text-dim);
+  line-height: 1;
+  transform: rotate(90deg);
+  letter-spacing: -2px;
+}
+
+.card-menu-dropdown {
+  position: absolute;
+  top: 42px;
+  right: 8px;
+  z-index: 10;
+  background: var(--color-night-1);
+  border: 1px solid var(--color-night-3);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  min-width: 120px;
+  overflow: hidden;
+}
+
+.menu-item {
+  display: block;
+  width: 100%;
+  padding: var(--space-2) var(--space-4);
+  background: none;
+  border: none;
+  text-align: left;
+  font-size: var(--text-sm);
+  color: var(--color-text);
+  cursor: pointer;
+  transition: background var(--motion-fast);
+}
+.menu-item:hover:not(:disabled) {
+  background: var(--color-night-2);
+}
+.menu-item:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.menu-danger {
+  color: #f87171;
+}
+.menu-danger:hover:not(:disabled) {
+  background: rgba(248, 113, 113, 0.1);
+}
+
+/* ============ "更多" 卡片 ============ */
+.more-card {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.more-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  text-align: center;
+  height: 100%;
+  min-height: 120px;
+}
+.more-icon {
+  font-size: 36px;
+}
+.more-text {
+  font-size: var(--text-sm);
+  color: var(--color-accent-3);
+  line-height: 1.5;
 }
 
 /* Features */

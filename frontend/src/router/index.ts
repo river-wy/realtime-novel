@@ -26,6 +26,12 @@ const routes: RouteRecordRaw[] = [
     component: () => import('@/views/World.vue'),
     props: true,
     meta: { title: '世界' }
+  },
+  {
+    path: '/worlds',
+    name: 'world-list',
+    component: () => import('@/views/WorldList.vue'),
+    meta: { title: '全部世界' }
   }
 ]
 
