@@ -7,7 +7,7 @@ import { fileURLToPath, URL } from 'node:url'
  *
  * 端口约定（v0.6 起，hardcoded 写在配置里供前端开发查阅）：
  * - 前端 dev server:  7777
- * - 后端 API:         7778  （uvicorn realtime_novel.api.app:app --port 7778）
+ * - 后端 API:         7778  （uvicorn backend.api.app:app --port 7778）
  * - API 代理：        /api → http://127.0.0.1:7778
  *
  * 调整端口：改下面两个常量 + 同步改 scripts/start.sh。

@@ -20,7 +20,7 @@ dev = [
     # M-γ 时加: pytest
 ]
 
-# CLI 入口（python -m realtime_novel 也可）
+# CLI 入口（python -m backend 也可）
 # M-ε 后: CLI 入口保留 (供脚本调用), 同时新增 HTTP API 入口
 [project.scripts]
 realtime-novel = "realtime_novel.cli:main"

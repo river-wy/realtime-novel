@@ -69,7 +69,7 @@ check_dependencies() {
 }
 
 # 杀端口占用进程（只杀本项目相关的）
-# 判断: 进程 cmdline 包含 realtime_novel 或 vite --port 对应端口
+# 判断: 进程 cmdline 包含 backend 或 vite --port 对应端口
 kill_port_if_used() {
     local port=$1
     local name=$2
@@ -119,7 +119,7 @@ kill_port_if_used() {
 start_backend() {
     echo "🚀 启动后端 (port $BACKEND_PORT)..."
     cd "$PROJECT_ROOT"
-    nohup "$UVICORN" realtime_novel.api.app:app \
+    nohup "$UVICORN" backend.api.app:app \
         --host "$HOST" \
         --port "$BACKEND_PORT" \
         --log-level info \

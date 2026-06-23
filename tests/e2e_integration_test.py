@@ -135,7 +135,7 @@ async def main():
 
         # ============ 5. 验证 messages 落库（v0.4.1 record_tool_call）============
         print("\n5. 验证 messages 落库...")
-        from realtime_novel.persistence.sqlite_store import get_store
+        from backend.persistence.sqlite_store import get_store
         with get_store().connection() as conn:
             cnt_total = conn.execute("SELECT COUNT(*) AS c FROM messages").fetchone()["c"]
             cnt_project = conn.execute(
