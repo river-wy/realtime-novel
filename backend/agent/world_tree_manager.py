@@ -1,37 +1,42 @@
-"""world_tree_manager — 世界树管理（v0.6 顶层 Agent 之一）
+"""world_tree_manager — 世界树管理（v0.6 s3.4 AgentExecutor 接入）
 
-职责（对应 spec.md §3.3）：
-1. 基座一致性检查（7 件基座不能内部矛盾）
-2. 剧情干预影响分析（用户说"把师父改成反派"→ 影响范围分析）
-3. 种子/伏笔预留（长程规划）
-4. 走向调整（根据用户干预调整 main_arc / sub_plots）
-5. 返回结构化 diff 给管家
+职责（spec.md §3.3）：
+1. 基座一致性检查
+2. 剧情干预影响分析
+3. 种子/伏笔预留
+4. 走向调整
+5. diff 结构化输出（base_updates + plot_adjustments + new_seeds）
 
-关键设计：
-- 不生成章节正文（写不是它的职责）
-- 不直接和用户对话（通过管家中转）
-- 调用 MemoryKeeper 检索历史干预记录
-- 复用 specialists.WorldTreeKeeperSpecialist 的 LLM 调用逻辑
+实现：s3.4 起改用 AgentExecutor 跑 ReAct loop，LLM 自主决定调：
+- search_memory（查历史干预/记忆）
+- load_project（读 7 件基座）
+- edit_artifact（改 7 件）
+- update_base（直接改基座字段）
+- weave_plot（调整主线/支线）
+- introspect_character（更新角色状态）
+- adjust_style（调整文风）
+- switch_pov（切换 POV）
 
 对应 spec.md §3.3
 """
 from __future__ import annotations
 
+import json
 import logging
-from typing import Optional, Any
+from typing import Optional, Any, List
 from pydantic import BaseModel, Field
 
-from backend.agent.specialists import WorldTreeKeeperSpecialist
+from backend.agent.executor import AgentExecutor, AgentConfig, AgentOutput, get_agent_executor
 
 log = logging.getLogger(__name__)
 
 
-# ============ Diff 结构（v0.6 拍板）============
+# ============ Diff 结构 ============
 
 class BaseUpdate(BaseModel):
     """单条基座更新"""
-    artifact: str = Field(description="7 件之一: world_tree/style_charter/genre_resonance/main_plot/sub_plots/character_card/seed_table")
-    field: str = Field(description="字段路径（如 '师父.role' 或 'main_arc.第3章'）")
+    artifact: str = Field(description="7 件之一")
+    field: str = Field(description="字段路径")
     old_value: Any = None
     new_value: Any = None
     reason: str = ""
@@ -39,167 +44,242 @@ class BaseUpdate(BaseModel):
 
 class PlotAdjustment(BaseModel):
     """主线/支线走向调整"""
-    arc: str = Field(description="主线/支线名")
-    adjustment: str = Field(description="调整描述")
-    impact_chapters: list[int] = Field(default_factory=list, description="影响章节范围")
+    arc: str
+    adjustment: str
+    impact_chapters: List[int] = Field(default_factory=list)
 
 
 class NewSeed(BaseModel):
     """新埋种子/伏笔"""
-    name: str = Field(description="种子名")
-    trigger: str = Field(description="触发场景描述")
-    payoff: str = Field(description="回收场景描述")
-    estimated_chapter: Optional[int] = Field(default=None, description="预计触发章节")
+    name: str
+    trigger: str
+    payoff: str
+    estimated_chapter: Optional[int] = None
 
 
 class ConsistencyCheckResult(BaseModel):
     """一致性检查结果"""
     status: str = Field(default="PASS", description="PASS / WARN / FAIL")
-    conflicts: list[str] = Field(default_factory=list, description="冲突列表")
-    warnings: list[str] = Field(default_factory=list, description="警告列表")
+    conflicts: List[str] = Field(default_factory=list)
+    warnings: List[str] = Field(default_factory=list)
 
 
 class WorldTreeDiff(BaseModel):
-    """世界树管理返回的结构化 diff（管家转给用户确认）
-
-    对应 spec.md §1.2 目标 3 + §3.3
-    """
+    """世界树管理返回的结构化 diff"""
     intent: str = Field(description="intervene / adjust_base")
-    summary: str = Field(description="一句话总结这次干预的影响")
+    summary: str = Field(description="一句话总结")
 
-    # 三段 diff
-    base_updates: list[BaseUpdate] = Field(default_factory=list)
-    plot_adjustments: list[PlotAdjustment] = Field(default_factory=list)
-    new_seeds: list[NewSeed] = Field(default_factory=list)
+    base_updates: List[BaseUpdate] = Field(default_factory=list)
+    plot_adjustments: List[PlotAdjustment] = Field(default_factory=list)
+    new_seeds: List[NewSeed] = Field(default_factory=list)
 
-    # 一致性检查
     consistency: ConsistencyCheckResult = Field(default_factory=ConsistencyCheckResult)
-
-    # 风险评估
     risk_level: str = Field(default="low", description="low/medium/high")
     requires_double_confirm: bool = Field(default=False)
 
+    # v0.6 s3.4 新增：trace 字段（记录推演过程）
+    iterations: int = 0
+    tool_calls_count: int = 0
+    tool_calls_trace: List[dict] = Field(default_factory=list)
 
-class NovelWriterManager:
-    """占位（误用名），保留为兼容旧引用，正式类是下面的 WorldTreeManager"""
-    pass
+
+# ============ 系统提示 ============
+
+WORLD_TREE_MANAGER_SYSTEM_PROMPT = """你是「世界树管理」。
+
+【职责】
+当用户对项目内的世界树基座进行干预时，你负责分析影响范围、调整基座、保持一致性。
+
+【可用基座 7 件】
+1. world_tree - 时间线、地理、核心规则
+2. style_charter - 写作风格
+3. genre_resonance - 题材、情绪基调
+4. main_plot - 主线弧线
+5. sub_plots - 支线
+6. character_card - 角色卡
+7. seed_table - 伏笔种子
+
+【典型工作流】
+1. 调用 load_project 获取当前 7 件基座
+2. 调用 search_memory 检索相关历史干预记录
+3. 分析用户干预的影响：
+   - 涉及哪些基座的哪些字段？
+   - 是否影响主线弧线（main_plot）？
+   - 是否需要埋伏笔（seed_table）？
+   - 是否引发 7 件之间的矛盾？
+4. 调用对应 tool 执行修改：
+   - 简单字段改 → update_base
+   - 复杂结构改 → edit_artifact
+   - 主线/支线调整 → weave_plot
+   - 角色状态变化 → introspect_character
+5. 输出 final_response，必须是 JSON 格式：
+
+```json
+{
+  "intent": "intervene",
+  "summary": "一句话总结这次干预",
+  "base_updates": [
+    {"artifact": "character_card", "field": "师父.role", "old_value": "师父", "new_value": "幕后反派", "reason": "..."}
+  ],
+  "plot_adjustments": [
+    {"arc": "main_arc", "adjustment": "主角从师徒对抗变为...", "impact_chapters": [3, 5, 12]}
+  ],
+  "new_seeds": [
+    {"name": "师父秘密", "trigger": "第3章主角发现...", "payoff": "第12章决战", "estimated_chapter": 3}
+  ],
+  "consistency": {"status": "PASS", "conflicts": [], "warnings": []},
+  "risk_level": "medium",
+  "requires_double_confirm": false
+}
+```
+
+【关键约束】
+- 修改基座前必须先 load_project 看清现状
+- 不能让 7 件基座内部矛盾（如改完 character_card 让 world_tree 冲突）
+- 长程伏笔（seed_table）必须明确 trigger + payoff + estimated_chapter
+- 多个改动可并行调用 tool
+- 最终 JSON 必须是合法 JSON，不要包含 markdown 包裹
+
+【一致性原则】
+- world_tree 与 character_card 不能矛盾（如世界规则说"无魔法"，角色不能会魔法）
+- main_plot 与 sub_plots 不能矛盾
+- seed_table 的 payoff 不能超出 main_plot 范围
+"""
 
 
 # ============ WorldTreeManager 主类 ============
 
 class WorldTreeManager:
-    """世界树管理（v0.6 顶层 Agent）
+    """世界树管理（v0.6 s3.4：AgentExecutor 接入）"""
 
-    使用方式：
-        manager = WorldTreeManager()
-        diff = await manager.analyze_intervention(
-            project_id="abc123",
-            intervention_text="把主角的师父改成反派",
-        )
-        # diff = WorldTreeDiff(...)
-        # diff.base_updates / diff.plot_adjustments / diff.new_seeds / diff.consistency
-
-    v0.6 s2 阶段：调用 specialists.WorldTreeKeeperSpecialist，包装为 WorldTreeDiff
-    v0.6 s4 阶段：实装完整的一致性检查器 + 多步 diff 合并
-    """
-
-    def __init__(self):
-        # 复用现有 specialist（v0.5 已实装的 WorldTreeKeeperSpecialist）
-        self.worldtree_specialist = WorldTreeKeeperSpecialist()
+    def __init__(self, executor: Optional[AgentExecutor] = None):
+        self.executor = executor or get_agent_executor()
 
     async def analyze_intervention(
         self,
         project_id: str,
         intervention_text: str,
-        max_history: int = 5,
+        max_iterations: int = 7,
     ) -> WorldTreeDiff:
-        """分析干预影响，返回结构化 diff
+        """分析干预影响，返回结构化 diff"""
+        cfg = AgentConfig(
+            agent_name="world_tree_manager",
+            system_prompt=WORLD_TREE_MANAGER_SYSTEM_PROMPT,
+        )
 
-        Args:
-            project_id: 项目 ID
-            intervention_text: 用户干预描述（如 "把主角的师父改成反派"）
-            max_history: 历史干预记录数
+        executor_output = await self.executor.execute(
+            agent=cfg,
+            user_message=f"用户干预：{intervention_text}",
+            project_id=project_id,
+            max_iterations=max_iterations,
+        )
 
-        Returns:
-            WorldTreeDiff
-        """
-        log.info(f"world_tree_manager: analyze intervention project_id={project_id} text={intervention_text[:50]}")
-
-        try:
-            # 委托给 WorldTreeKeeperSpecialist（v0.5 已实装）
-            specialist_result = await self.worldtree_specialist.consult({
-                "project_id": project_id,
-                "user_message": intervention_text,
-                "max_history": max_history,
-            })
-
-            # 解析 specialist 返回的 diff（v0.5 可能是 raw dict）
-            specialist_diff = specialist_result.get("diff", [])
-            action = specialist_result.get("action", "view")
-
-            # 转 WorldTreeDiff
-            base_updates = []
-            plot_adjustments = []
-            new_seeds = []
-
-            if isinstance(specialist_diff, list):
-                for item in specialist_diff:
-                    # item 可能是 dict，需要根据 type 分发
-                    if isinstance(item, dict):
-                        item_type = item.get("type", "")
-                        if item_type == "base_update":
-                            base_updates.append(BaseUpdate(**item))
-                        elif item_type == "plot_adjustment":
-                            plot_adjustments.append(PlotAdjustment(**item))
-                        elif item_type == "new_seed":
-                            new_seeds.append(NewSeed(**item))
-
-            # 一致性检查（s4 阶段实装完整版本）
-            consistency = ConsistencyCheckResult(
-                status="PASS",  # s2 阶段先 PASS，s4 实装 checker
-                conflicts=[],
-                warnings=[],
-            )
-
-            # 风险评估
-            risk_level = "low"
-            requires_double_confirm = False
-            if len(base_updates) > 3 or len(plot_adjustments) > 0:
-                risk_level = "medium"
-            if len(base_updates) > 5:
-                risk_level = "high"
-                requires_double_confirm = True
-
-            return WorldTreeDiff(
-                intent="intervene",
-                summary=specialist_result.get("opinion", "已分析干预影响"),
-                base_updates=base_updates,
-                plot_adjustments=plot_adjustments,
-                new_seeds=new_seeds,
-                consistency=consistency,
-                risk_level=risk_level,
-                requires_double_confirm=requires_double_confirm,
-            )
-
-        except Exception as e:
-            log.error(f"world_tree_manager: analyze_intervention failed: {e}")
-            return WorldTreeDiff(
-                intent="intervene",
-                summary=f"分析失败: {e}",
-                consistency=ConsistencyCheckResult(status="FAIL", conflicts=[str(e)]),
-                risk_level="high",
-                requires_double_confirm=True,
-            )
+        # 解析 final_response 为 WorldTreeDiff
+        diff = self._parse_diff(executor_output, intent="intervene")
+        diff.iterations = executor_output.iterations
+        diff.tool_calls_count = len(executor_output.tool_calls_history)
+        diff.tool_calls_trace = executor_output.tool_calls_history
+        return diff
 
     async def analyze_base_adjustment(
         self,
         project_id: str,
         adjustment_text: str,
+        max_iterations: int = 7,
     ) -> WorldTreeDiff:
         """分析基座调整（与干预类似，但 intent 不同）"""
-        return await self.analyze_intervention(
+        cfg = AgentConfig(
+            agent_name="world_tree_manager",
+            system_prompt=WORLD_TREE_MANAGER_SYSTEM_PROMPT,
+        )
+
+        executor_output = await self.executor.execute(
+            agent=cfg,
+            user_message=f"用户基座调整：{adjustment_text}",
             project_id=project_id,
-            intervention_text=adjustment_text,
+            max_iterations=max_iterations,
+        )
+
+        diff = self._parse_diff(executor_output, intent="adjust_base")
+        diff.iterations = executor_output.iterations
+        diff.tool_calls_count = len(executor_output.tool_calls_history)
+        diff.tool_calls_trace = executor_output.tool_calls_history
+        return diff
+
+    def _parse_diff(self, executor_output: AgentOutput, intent: str) -> WorldTreeDiff:
+        """从 AgentExecutor 输出解析 WorldTreeDiff"""
+        final = executor_output.final_response.strip()
+
+        # 多种 JSON 格式处理
+        # 1. 先尝试直接解析
+        parsed = None
+        try:
+            parsed = json.loads(final)
+        except json.JSONDecodeError:
+            pass
+
+        # 2. 尝试去掉 markdown 包裹
+        if parsed is None and final.startswith("```"):
+            lines = final.split("```")
+            for chunk in lines:
+                chunk = chunk.strip()
+                if chunk.startswith("json"):
+                    chunk = chunk[4:].strip()
+                try:
+                    parsed = json.loads(chunk)
+                    break
+                except json.JSONDecodeError:
+                    continue
+
+        # 3. 尝试提取文本中的第一个 JSON 对象（{...} 包含在最外层）
+        if parsed is None:
+            # 从前往后找第一个 {，从后往前找对应的 }
+            start = final.find("{")
+            if start >= 0:
+                depth = 0
+                for i in range(start, len(final)):
+                    if final[i] == "{":
+                        depth += 1
+                    elif final[i] == "}":
+                        depth -= 1
+                        if depth == 0:
+                            candidate = final[start:i+1]
+                            try:
+                                parsed = json.loads(candidate)
+                                break
+                            except json.JSONDecodeError:
+                                continue
+
+        if parsed is None:
+            log.warning(f"world_tree_manager: LLM 输出无法提取 JSON: {final[:200]}")
+            return WorldTreeDiff(
+                intent=intent,
+                summary=final[:200] or "LLM 输出无法解析",
+                consistency=ConsistencyCheckResult(status="FAIL", conflicts=["JSON 解析失败"]),
+                risk_level="high",
+                requires_double_confirm=True,
+            )
+
+        return WorldTreeDiff(
+            intent=parsed.get("intent", intent),
+            summary=parsed.get("summary", ""),
+            base_updates=[BaseUpdate(**u) for u in parsed.get("base_updates", []) or []],
+            plot_adjustments=[PlotAdjustment(**a) for a in parsed.get("plot_adjustments", []) or []],
+            new_seeds=[NewSeed(**s) for s in parsed.get("new_seeds", []) or []],
+            consistency=ConsistencyCheckResult(**(parsed.get("consistency") or {"status": "PASS"})),
+            risk_level=parsed.get("risk_level", "low"),
+            requires_double_confirm=parsed.get("requires_double_confirm", False),
+        )
+
+        return WorldTreeDiff(
+            intent=parsed.get("intent", intent),
+            summary=parsed.get("summary", ""),
+            base_updates=[BaseUpdate(**u) for u in parsed.get("base_updates", []) or []],
+            plot_adjustments=[PlotAdjustment(**a) for a in parsed.get("plot_adjustments", []) or []],
+            new_seeds=[NewSeed(**s) for s in parsed.get("new_seeds", []) or []],
+            consistency=ConsistencyCheckResult(**(parsed.get("consistency") or {"status": "PASS"})),
+            risk_level=parsed.get("risk_level", "low"),
+            requires_double_confirm=parsed.get("requires_double_confirm", False),
         )
 
 

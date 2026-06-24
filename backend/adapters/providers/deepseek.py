@@ -10,7 +10,7 @@ from openai import AsyncOpenAI
 from typing import AsyncIterator
 
 from backend.adapters.providers.base import LLMProvider
-from backend.adapters.types import LLMRequest, LLMResponse, LLMStreamChunk, ModelProvider
+from backend.adapters.types import LLMRequest, LLMResponse, LLMStreamChunk, ModelProvider, ToolCall, ToolCallFunction
 from backend.config.config_loader import load_llm_api_key, get_model_config
 from backend.utils.logger import logger
 
@@ -63,8 +63,15 @@ class DeepSeekProvider(LLMProvider):
             stream_kwargs["frequency_penalty"] = request.frequency_penalty
         if request.presence_penalty:
             stream_kwargs["presence_penalty"] = request.presence_penalty
+        # v0.6: 透传 tools / tool_choice（OpenAI function calling）
+        if request.tools:
+            stream_kwargs["tools"] = request.tools
+        if request.tool_choice is not None:
+            stream_kwargs["tool_choice"] = request.tool_choice
 
         content_parts = []
+        # v0.6: tool_calls 流式累积（OpenAI 协议按 fragment 返回）
+        tool_calls_accumulator: dict[int, dict] = {}
         input_tokens = 0
         output_tokens = 0
         finish_reason = None
@@ -79,15 +86,54 @@ class DeepSeekProvider(LLMProvider):
             delta = chunk.choices[0].delta
             if delta.content:
                 content_parts.append(delta.content)
+            # v0.6: 累积 tool_calls fragments
+            if hasattr(delta, "tool_calls") and delta.tool_calls:
+                for tc_delta in delta.tool_calls:
+                    idx = tc_delta.index
+                    if idx not in tool_calls_accumulator:
+                        tool_calls_accumulator[idx] = {
+                            "id": tc_delta.id or "",
+                            "type": "function",
+                            "function": {"name": "", "arguments": ""},
+                        }
+                    acc = tool_calls_accumulator[idx]
+                    if tc_delta.id:
+                        acc["id"] = tc_delta.id
+                    if hasattr(tc_delta, "function") and tc_delta.function:
+                        if tc_delta.function.name:
+                            acc["function"]["name"] = (
+                                acc["function"].get("name", "") + tc_delta.function.name
+                                if acc["function"].get("name") and not tc_delta.function.name.startswith(acc["function"]["name"])
+                                else tc_delta.function.name
+                            )
+                            # 简化：直接覆盖（OpenAI protocol name 一般一次发完）
+                            acc["function"]["name"] = tc_delta.function.name
+                        if tc_delta.function.arguments:
+                            acc["function"]["arguments"] += tc_delta.function.arguments
             if chunk.choices[0].finish_reason:
                 finish_reason = chunk.choices[0].finish_reason
 
         duration_ms = int((time.time() - start) * 1000)
         content = "".join(content_parts)
-        self.log.info("LLM complete DONE: model=%s, input_tokens=%d, output_tokens=%d, duration_ms=%d, content_len=%d, finish=%s",
-                 self.model, input_tokens, output_tokens, duration_ms, len(content), finish_reason)
+        # v0.6: 转 ToolCall 列表
+        tool_calls = None
+        if tool_calls_accumulator:
+            tool_calls = [
+                ToolCall(
+                    id=v["id"],
+                    type=v["type"],
+                    function=ToolCallFunction(
+                        name=v["function"]["name"],
+                        arguments=v["function"]["arguments"],
+                    ),
+                )
+                for k, v in sorted(tool_calls_accumulator.items())
+            ]
+        self.log.info("LLM complete DONE: model=%s, input_tokens=%d, output_tokens=%d, duration_ms=%d, content_len=%d, tool_calls=%d, finish=%s",
+                 self.model, input_tokens, output_tokens, duration_ms, len(content), len(tool_calls) if tool_calls else 0, finish_reason)
         return LLMResponse(
             content=content,
+            tool_calls=tool_calls,
             provider=ModelProvider.DEEPSEEK,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
@@ -115,6 +161,11 @@ class DeepSeekProvider(LLMProvider):
             stream_kwargs["frequency_penalty"] = request.frequency_penalty
         if request.presence_penalty:
             stream_kwargs["presence_penalty"] = request.presence_penalty
+        # v0.6: 流式也支持 tools / tool_choice
+        if request.tools:
+            stream_kwargs["tools"] = request.tools
+        if request.tool_choice is not None:
+            stream_kwargs["tool_choice"] = request.tool_choice
         _stream_start = time.time()
         _total_chars = 0
         stream = await self.client.chat.completions.create(**stream_kwargs)
@@ -126,6 +177,20 @@ class DeepSeekProvider(LLMProvider):
             reasoning = getattr(delta, "reasoning_content", None) or ""
             _total_chars += len(content)
             is_final = chunk.choices[0].finish_reason is not None
+            # v0.6: 提取 tool_calls 增量（原始 OpenAI 格式）
+            tool_calls_delta = None
+            if hasattr(delta, "tool_calls") and delta.tool_calls:
+                tool_calls_delta = []
+                for tc in delta.tool_calls:
+                    tool_calls_delta.append({
+                        "index": tc.index,
+                        "id": tc.id,
+                        "type": "function",
+                        "function": {
+                            "name": tc.function.name if tc.function else None,
+                            "arguments": tc.function.arguments if tc.function else None,
+                        } if tc.function else None,
+                    })
             if is_final:
                 self.log.info("LLM stream DONE: model=%s, duration_ms=%d, total_chars=%d, finish=%s",
                          self.model, int((time.time() - _stream_start) * 1000),
@@ -136,6 +201,7 @@ class DeepSeekProvider(LLMProvider):
                 provider=ModelProvider.DEEPSEEK,
                 is_final=is_final,
                 finish_reason=chunk.choices[0].finish_reason,
+                tool_calls_delta=tool_calls_delta,
             )
 
     def _build_messages(self, request: LLMRequest) -> list[dict]:

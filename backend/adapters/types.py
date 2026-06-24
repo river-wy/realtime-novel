@@ -2,6 +2,8 @@
 
 对应 infra.md §B.2.2 + novel-llm-adapter.json
 v0.4.1: LLMRequest 加 messages 字段，支持多轮对话上下文
+v0.6: 加 tools/tool_choice 字段（OpenAI function calling 支持）
+v0.6: LLMResponse 加 tool_calls 字段
 """
 from __future__ import annotations
 
@@ -27,29 +29,53 @@ class LLMRequest(BaseModel):
     """统一的 LLM 调用请求
 
     v0.4.1 扩展：加 messages 字段（标准 OpenAI 格式）
-    - 如果传了 messages：直接用（可包含 system / user / assistant / tool 消息）
-    - 如果没传 messages：兼容旧代码，system_prompt + prompt 拼成单条 user
-
-    v0.6 新增：response_format 强制 JSON 输出（v0.3 路径清理用）
+    v0.6 扩展：加 tools / tool_choice 字段（OpenAI function calling）
     """
-    prompt: str = Field(default="", min_length=0)  # v0.4.1 改成可空（messages 模式不需要）
-    messages: List[Dict[str, Any]] = Field(default_factory=list)  # v0.4.1 新增
+    prompt: str = Field(default="", min_length=0)
+    messages: List[Dict[str, Any]] = Field(default_factory=list)
     role: ModelRole = ModelRole.TEXT
     temperature: float = Field(0.7, ge=0, le=2)
     max_tokens: int = Field(8192, ge=1, le=16384)
     system_prompt: Optional[str] = None
     stream: bool = False
-    response_format: Optional[Dict[str, Any]] = None  # v0.6 新增：{type: "json_object"}
-    # v0.8.1: 探索度参数（透传到 OpenAI 兼容 provider）
+    response_format: Optional[Dict[str, Any]] = None
     frequency_penalty: float = Field(default=0.0, ge=-2, le=2)
     presence_penalty: float = Field(default=0.0, ge=-2, le=2)
-    # v0.8.2: 是否启用 thinking 模式（DeepSeek v4-pro）；summary/分类等轻量调用可关闭以节省 token
     enable_thinking: bool = True
+
+    # ─── v0.6 OpenAI Function Calling ──────────────────
+    tools: Optional[List[Dict[str, Any]]] = Field(
+        default=None,
+        description="OpenAI tools 格式列表，每个元素是 {type: 'function', function: {name, description, parameters}}",
+    )
+    tool_choice: Optional[Any] = Field(
+        default=None,
+        description="'auto' | 'none' | 'required' | {type: 'function', function: {name: ...}}",
+    )
+
+
+class ToolCallFunction(BaseModel):
+    """LLM 调用的 function 详情（OpenAI 格式）"""
+    name: str
+    arguments: str  # JSON 字符串，调用方需手动 json.loads
+
+
+class ToolCall(BaseModel):
+    """LLM 输出的一次 tool 调用（OpenAI 格式）"""
+    id: str
+    type: str = "function"
+    function: ToolCallFunction
 
 
 class LLMResponse(BaseModel):
-    """同步调用响应"""
-    content: str
+    """同步调用响应
+
+    v0.6 扩展：加 tool_calls 字段，LLM 决定调工具时填这个
+    - 有 tool_calls 时 content 通常为空（LLM 只输出 tool_call）
+    - 无 tool_calls 时 content 是 LLM 文本回复
+    """
+    content: str = ""
+    tool_calls: Optional[List[ToolCall]] = None
     provider: ModelProvider
     input_tokens: int = 0
     output_tokens: int = 0
@@ -58,9 +84,14 @@ class LLMResponse(BaseModel):
 
 
 class LLMStreamChunk(BaseModel):
-    """流式输出 chunk（含 thinking reasoning_content）"""
+    """流式输出 chunk（含 thinking reasoning_content）
+
+    v0.6 扩展：加 tool_calls_delta 字段，流式累积 tool_calls
+    """
     delta: str = ""
-    reasoning: str = ""  # 思考内容（DeepSeek Thinking 模式）
+    reasoning: str = ""
     provider: ModelProvider
     is_final: bool = False
-    finish_reason: Optional[str] = None  # "stop" | "length" | "error"
+    finish_reason: Optional[str] = None
+    # v0.6 新增：流式 tool_calls 增量（OpenAI 协议按 fragment 返回）
+    tool_calls_delta: Optional[List[Dict[str, Any]]] = None

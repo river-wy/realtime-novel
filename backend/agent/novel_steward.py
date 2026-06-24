@@ -199,14 +199,31 @@ class NovelSteward:
         }
 
     async def _handle_create_project(self, intent_result: IntentResult, user_id: str) -> dict:
-        """CREATE_PROJECT: 启动 Onboarding"""
+        """CREATE_PROJECT: 启动 Onboarding（s3 实装）"""
         initial_idea = intent_result.args.initial_idea or "（未提供初始想法）"
+        # 启动 Onboarding Step 3（Step 1-2 走按钮式入口）
+        from backend.agent.onboarding_controller import (
+            get_onboarding_controller, OnboardingState, OnboardingStep,
+        )
+        controller = get_onboarding_controller()
+        state = OnboardingState(
+            project_id=None,
+            current_step=OnboardingStep.STEP_3,
+        )
+        result = await controller.run_step_3_or_4(
+            user_message=initial_idea,
+            state=state,
+        )
         return {
             "intent": Intent.CREATE_PROJECT.value,
             "confidence": intent_result.confidence,
-            "response": f"🚀 [s2 骨架] 启动 Onboarding (initial_idea={initial_idea})，完整实装待 s3",
-            "structured_data": {"initial_idea": initial_idea},
-            "downstream_called": None,
+            "response": result.assistant_response or f"好的！'{initial_idea}' 听起来很有意思～ 我们开始一步步搭建这个世界吧。",
+            "structured_data": {
+                "initial_idea": initial_idea,
+                "onboarding_step": result.new_state.current_step.value,
+                "onboarding_history": result.new_state.history,
+            },
+            "downstream_called": "onboarding_controller",
         }
 
     async def _handle_open_project(self, intent_result: IntentResult, user_id: str) -> dict:
@@ -235,35 +252,72 @@ class NovelSteward:
     # ─── 项目级 intent 处理方法（v0.6 s3/s4 实装） ─────
 
     async def _handle_generate(self, project_id: str, user_message: str, intent_result: IntentResult) -> dict:
-        """GENERATE: 转发到小说文笔家"""
-        # s3 实装：调 self.novel_writer.generate_chapter(project_id, user_message)
-        # s2 骨架：占位
+        """GENERATE: 转发到小说文笔家（s3 实装）"""
+        chapter_output = await self.novel_writer.generate_chapter(
+            project_id=project_id,
+            user_message=user_message,
+        )
+        if chapter_output.error:
+            return {
+                "intent": Intent.GENERATE.value,
+                "confidence": intent_result.confidence,
+                "response": f"❌ 章节生成失败：{chapter_output.error}",
+                "structured_data": {"project_id": project_id, "error": chapter_output.error},
+                "downstream_called": "novel_writer",
+            }
         return {
             "intent": Intent.GENERATE.value,
             "confidence": intent_result.confidence,
-            "response": "📖 [s2 骨架] 章节生成待 s3 实装（转 NovelWriter）",
-            "structured_data": {"project_id": project_id},
+            "response": f"📖 已生成下一章（{chapter_output.iterations} 轮推演、{chapter_output.tool_calls_count} 个 tool）\n\n{chapter_output.chapter_content[:500]}...",
+            "structured_data": {
+                "project_id": project_id,
+                "chapter_content": chapter_output.chapter_content,
+                "chapter_summary": chapter_output.chapter_summary,
+                "iterations": chapter_output.iterations,
+            },
             "downstream_called": "novel_writer",
         }
 
     async def _handle_intervene(self, project_id: str, user_message: str, intent_result: IntentResult) -> dict:
-        """INTERVENE: 转发到世界树管理"""
+        """INTERVENE: 转发到世界树管理（s3 实装）"""
         intervention = intent_result.args.intervention_text or user_message
+        diff = await self.world_tree_manager.analyze_intervention(
+            project_id=project_id,
+            intervention_text=intervention,
+        )
+        # 转成对话文本
+        response_text = self._format_diff_response(diff)
         return {
             "intent": Intent.INTERVENE.value,
             "confidence": intent_result.confidence,
-            "response": f"🌿 [s2 骨架] 干预分析 '{intervention}' 待 s4 实装（转 WorldTreeManager）",
-            "structured_data": {"intervention_text": intervention},
+            "response": response_text,
+            "structured_data": {
+                "project_id": project_id,
+                "intervention_text": intervention,
+                "diff": diff.model_dump(),
+                "require_confirm": diff.requires_double_confirm,
+            },
             "downstream_called": "world_tree_manager",
         }
 
     async def _handle_adjust_base(self, project_id: str, user_message: str, intent_result: IntentResult) -> dict:
-        """ADJUST_BASE: 转发到世界树管理"""
+        """ADJUST_BASE: 转发到世界树管理（s3 实装）"""
+        adjustment = intent_result.args.intervention_text or user_message
+        diff = await self.world_tree_manager.analyze_base_adjustment(
+            project_id=project_id,
+            adjustment_text=adjustment,
+        )
+        response_text = self._format_diff_response(diff)
         return {
             "intent": Intent.ADJUST_BASE.value,
             "confidence": intent_result.confidence,
-            "response": f"🌳 [s2 骨架] 基座调整待 s4 实装（转 WorldTreeManager）",
-            "structured_data": {"project_id": project_id},
+            "response": response_text,
+            "structured_data": {
+                "project_id": project_id,
+                "adjustment_text": adjustment,
+                "diff": diff.model_dump(),
+                "require_confirm": diff.requires_double_confirm,
+            },
             "downstream_called": "world_tree_manager",
         }
 
@@ -272,20 +326,72 @@ class NovelSteward:
         return {
             "intent": Intent.ROLLBACK.value,
             "confidence": 1.0,
-            "response": "⏪ [s2 骨架] 回档待 s3 实装（需用户二次确认）",
+            "response": "⏪ [s3 骨架] 回档待后续实装（需用户二次确认）",
             "structured_data": {"project_id": project_id, "require_confirm": True},
             "downstream_called": None,
         }
 
     async def _handle_onboarding_continue(self, project_id: str, user_message: str, intent_result: IntentResult) -> dict:
-        """ONBOARDING_CONTINUE: Onboarding 多轮对话（管家内部处理）"""
+        """ONBOARDING_CONTINUE: 启动 OnboardingController（s3.5 实装）"""
+        from backend.agent.onboarding_controller import (
+            get_onboarding_controller, OnboardingState, OnboardingStep,
+        )
+        controller = get_onboarding_controller()
+        state = OnboardingState(
+            project_id=project_id,
+            current_step=OnboardingStep.STEP_3,
+        )
+        result = await controller.run_step_3_or_4(
+            user_message=user_message,
+            state=state,
+        )
+        # 如果触发 Step 5，调 NovelWriter 生成
+        if result.should_generate_chapter:
+            if project_id:
+                chapter_result = await controller.run_step_5_generate_chapter(project_id=project_id)
+                if chapter_result.chapter_content:
+                    return {
+                        "intent": Intent.ONBOARDING_CONTINUE.value,
+                        "confidence": intent_result.confidence,
+                        "response": f"✅ Onboarding 完成！第 1 章已生成（{chapter_result.iterations} 轮推演）\n\n{chapter_result.chapter_content[:300]}...",
+                        "structured_data": {
+                            "project_id": project_id,
+                            "chapter_content": chapter_result.chapter_content,
+                            "chapter_summary": chapter_result.chapter_summary,
+                            "step": "step_5_done",
+                        },
+                        "downstream_called": "novel_writer",
+                    }
         return {
             "intent": Intent.ONBOARDING_CONTINUE.value,
             "confidence": intent_result.confidence,
-            "response": f"📝 [s2 骨架] Onboarding 继续对话待 s3 实装",
-            "structured_data": {"project_id": project_id},
+            "response": result.assistant_response,
+            "structured_data": {
+                "project_id": project_id,
+                "step": result.new_state.current_step.value,
+                "should_generate_chapter": result.should_generate_chapter,
+            },
             "downstream_called": None,
         }
+
+    def _format_diff_response(self, diff) -> str:
+        """把 WorldTreeDiff 转成对话文本"""
+        lines = [
+            f"🌿 {diff.summary}",
+            f"\n风险等级：{diff.risk_level}" + ("（需二次确认）" if diff.requires_double_confirm else ""),
+        ]
+        if diff.base_updates:
+            lines.append(f"\n基座变更：{len(diff.base_updates)} 条")
+            for u in diff.base_updates[:3]:
+                lines.append(f"  • {u.artifact}.{u.field}: {u.old_value} → {u.new_value}")
+        if diff.plot_adjustments:
+            lines.append(f"\n走向调整：{len(diff.plot_adjustments)} 条")
+        if diff.new_seeds:
+            lines.append(f"\n新埋伏笔：{len(diff.new_seeds)} 条")
+        if diff.consistency.status != "PASS":
+            lines.append(f"\n一致性：{diff.consistency.status} - {diff.consistency.conflicts[:1]}")
+        lines.append(f"\n（经过 {diff.iterations} 轮推演、{diff.tool_calls_count} 个 tool 调用）")
+        return "\n".join(lines)
 
     async def _handle_chat(self, user_message: str, project_id: Optional[str], user_id: str) -> dict:
         """CHAT: 兜底闲聊（管家直接调 LLM）"""
