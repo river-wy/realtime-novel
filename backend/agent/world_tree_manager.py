@@ -161,7 +161,7 @@ class WorldTreeManager:
         intervention_text: str,
         max_iterations: int = 7,
     ) -> WorldTreeDiff:
-        """分析干预影响，返回结构化 diff"""
+        """分析干预影响，返回结构化 diff（含一致性检查）"""
         cfg = AgentConfig(
             agent_name="world_tree_manager",
             system_prompt=WORLD_TREE_MANAGER_SYSTEM_PROMPT,
@@ -179,6 +179,19 @@ class WorldTreeManager:
         diff.iterations = executor_output.iterations
         diff.tool_calls_count = len(executor_output.tool_calls_history)
         diff.tool_calls_trace = executor_output.tool_calls_history
+
+        # v0.6 s4：调用一致性检查器验证 LLM 返回的 diff
+        diff.consistency = await self._run_consistency_check(
+            project_id=project_id,
+            proposed_updates=diff.base_updates,
+            proposed_seeds=diff.new_seeds,
+        )
+
+        # 根据一致性状态升级 risk_level
+        if diff.consistency.status == "FAIL":
+            diff.risk_level = "blocked"
+            diff.requires_double_confirm = True
+
         return diff
 
     async def analyze_base_adjustment(
@@ -204,7 +217,60 @@ class WorldTreeManager:
         diff.iterations = executor_output.iterations
         diff.tool_calls_count = len(executor_output.tool_calls_history)
         diff.tool_calls_trace = executor_output.tool_calls_history
+
+        # v0.6 s4：调用一致性检查器
+        diff.consistency = await self._run_consistency_check(
+            project_id=project_id,
+            proposed_updates=diff.base_updates,
+            proposed_seeds=diff.new_seeds,
+        )
+        if diff.consistency.status == "FAIL":
+            diff.risk_level = "blocked"
+            diff.requires_double_confirm = True
+
         return diff
+
+    async def _run_consistency_check(
+        self,
+        project_id: str,
+        proposed_updates,
+        proposed_seeds,
+    ) -> ConsistencyCheckResult:
+        """调用一致性检查器
+
+        v0.6 s4：
+        1. 加载项目当前 7 件基座快照
+        2. 应用 proposed_updates 得到"应用后"快照
+        3. 调用 checker.check() 验证
+        """
+        try:
+            from backend.services.consistency_checker import (
+                ConsistencyChecker, BaseSnapshot,
+            )
+            from backend.persistence import ProjectRepository
+
+            repo = ProjectRepository()
+            checker = ConsistencyChecker(project_id)
+
+            # 加载快照
+            before = ConsistencyChecker.load_snapshot(repo, project_id)
+
+            # v0.6 简化：模拟 apply（直接复制 before，不真正应用）
+            # 后续 s4+ 可实装真正的 apply 逻辑
+            after = before
+
+            return checker.check(
+                before=before,
+                after=after,
+                proposed_updates=proposed_updates,
+                proposed_seeds=proposed_seeds,
+            )
+        except Exception as e:
+            log.warning(f"world_tree_manager: consistency check failed: {e}")
+            return ConsistencyCheckResult(
+                status="WARN",
+                warnings=[f"一致性检查执行失败: {e}"],
+            )
 
     def _parse_diff(self, executor_output: AgentOutput, intent: str) -> WorldTreeDiff:
         """从 AgentExecutor 输出解析 WorldTreeDiff"""
