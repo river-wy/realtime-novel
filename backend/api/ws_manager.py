@@ -42,15 +42,15 @@ class WebSocketManager:
         log.info(f"ws_manager: user_id={user_id} connected")
 
     async def disconnect(self, user_id: str):
-        if user_id in self.connections:
-            del self.connections[user_id]
-        if user_id in self.active_tasks:
-            self.active_tasks[user_id].cancel()
+        self.connections.pop(user_id, None)
+        # 用 pop + 顺序重排，避免 race condition
+        task = self.active_tasks.pop(user_id, None)
+        if task is not None and not task.done():
+            task.cancel()
             try:
-                await self.active_tasks[user_id]
+                await task
             except (asyncio.CancelledError, Exception):
                 pass
-            del self.active_tasks[user_id]
         log.info(f"ws_manager: user_id={user_id} disconnected")
 
     async def send_event(self, user_id: str, event: dict):
@@ -232,15 +232,17 @@ async def handle_user_message(ws: WebSocket, user_id: str, data: dict):
         })
 
         # 7. 落 assistant message
+        # v0.6 简化：intent / downstream 信息放到 tool_calls 字段里（schema 允许 dict）
         await conv_repo.add_message(
             conversation_id=conversation.id,
             role=MessageRole.ASSISTANT,
             content=result.get("response", ""),
             project_id=project_id,
-            metadata={
+            tool_calls={
                 "intent": result.get("intent", ""),
                 "downstream_called": result.get("downstream_called", ""),
-            },
+                "confidence": result.get("confidence", 0.0),
+            } if result.get("intent") else None,
         )
 
     except asyncio.CancelledError:
