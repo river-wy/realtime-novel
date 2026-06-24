@@ -10,17 +10,15 @@ v0.4 简化版：
 from __future__ import annotations
 
 import asyncio
-import sqlite3
 import json
-from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Awaitable
 
-from backend.agent.state import AgentState
 from backend.agent.nodes import (
     intake_node, consult_experts_node, plan_node, act_node,
-    reflect_node, respond_node, should_retry, should_interrupt,
-)
+    reflect_node, respond_node, should_retry, )
+from backend.agent.state import AgentState
+from backend.persistence import AgentStateRepository
 
 
 # ============ 简化 StateGraph ============
@@ -85,28 +83,20 @@ class SimpleStateGraph:
                     # 继续到 respond
             # 持久化 checkpoint（每步）
             if self.checkpoint_path:
-                self._save_checkpoint()
+                await self._save_checkpoint()
         return self.state
 
-    def _save_checkpoint(self):
-        """保存 checkpoint 到 SQLite agent_state 表"""
+    async def _save_checkpoint(self):
+        """保存 checkpoint 到 SQLite agent_state 表（经 AgentStateRepository）"""
         if not self.checkpoint_path:
             return
-        from backend.persistence import get_store
         try:
-            with get_store().connection() as conn:
-                conn.execute(
-                    """INSERT INTO agent_state (thread_id, checkpoint_data, updated_at)
-                       VALUES (?, ?, ?)
-                       ON CONFLICT(thread_id) DO UPDATE SET
-                         checkpoint_data = excluded.checkpoint_data,
-                         updated_at = excluded.updated_at""",
-                    (
-                        self.state.conversation_id or "default",
-                        json.dumps(self.state.model_dump(), default=str),
-                        datetime.now(),
-                    ),
-                )
+            repo = AgentStateRepository()
+            thread_id = self.state.conversation_id or "default"
+            await repo.save_checkpoint(
+                thread_id=thread_id,
+                checkpoint_data=self.state.model_dump(),
+            )
         except Exception:
             pass  # 不影响主流程
 

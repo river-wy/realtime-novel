@@ -13,7 +13,10 @@ from __future__ import annotations
 import json
 from typing import List, Dict, Any, Optional, Literal
 
-from backend.persistence import get_store, ProjectRepository, ChapterRepository
+from backend.persistence import (
+    ProjectRepository, ChapterRepository,
+    ConversationRepository, OnboardingRepository,
+)
 
 
 # ============ v0.4.1 基础 ============
@@ -54,21 +57,39 @@ def load_history_messages(
         max_history: int = 10,
         exclude_message_id: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
-    """从 messages 表取历史 N 条（按 created_at 升序），转 OpenAI 格式"""
-    with get_store().connection() as conn:
-        rows = conn.execute(
-            """SELECT * FROM messages
-            WHERE conversation_id = ?
-            ORDER BY created_at DESC
-            LIMIT ?""",
-            (conversation_id, max_history),
-        ).fetchall()
+    """从 ConversationRepository 取历史 N 条（按 created_at 升序），转 OpenAI 格式"""
+    import asyncio
+    import concurrent.futures
+
+    repo = ConversationRepository()
+
+    async def _fetch():
+        return await repo.get_messages(conversation_id, limit=max_history)
+
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            with concurrent.futures.ThreadPoolExecutor() as ex:
+                rows = ex.submit(asyncio.run, _fetch()).result()
+        else:
+            rows = asyncio.run(_fetch())
+    except RuntimeError:
+        rows = asyncio.run(_fetch())
+
+    # get_messages 返回 DESC，需要翻转为 ASC
     rows = list(rows)[::-1]
     messages = []
-    for r in rows:
-        d = dict(r)
-        if exclude_message_id and d.get("id") == exclude_message_id:
+    for msg_obj in rows:
+        if exclude_message_id and msg_obj.id == exclude_message_id:
             continue
+        # 将 Message dataclass 转为 dict 供 _row_to_message 使用
+        d = {
+            "id": msg_obj.id,
+            "role": msg_obj.role.value if hasattr(msg_obj.role, 'value') else msg_obj.role,
+            "content": msg_obj.content,
+            "tool_calls": msg_obj.tool_calls,
+            "tool_results": msg_obj.tool_results,
+        }
         msg = _row_to_message(d)
         if msg:
             messages.append(msg)
@@ -397,22 +418,30 @@ def build_messages_for_steward(
         conv_id = asyncio.run(_get_active_conv_id())
 
     if conv_id:
+        # 3. summary（先查，插在 history 之前）
+        async def _get_conv():
+            return await ConversationRepository().get_conversation(conv_id)
+
+        try:
+            loop2 = asyncio.get_event_loop()
+            if loop2.is_running():
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor() as ex:
+                    conv_obj = ex.submit(asyncio.run, _get_conv()).result()
+            else:
+                conv_obj = asyncio.run(_get_conv())
+        except RuntimeError:
+            conv_obj = asyncio.run(_get_conv())
+
         history = load_history_messages(conv_id, max_history=max_history)
         # 2. history
         messages.extend(history)
         # 3. summary（如果有）
-        from backend.persistence import ConversationRepository as CR
-        from backend.persistence import get_store as gs
-        with gs().connection() as conn:
-            row = conn.execute(
-                "SELECT summary FROM conversations WHERE id = ?", (conv_id,)
-            ).fetchone()
-            if row and row["summary"]:
-                # 插在 history 之前
-                messages.insert(1, {
-                    "role": "system",
-                    "content": f"历史对话摘要: {row['summary']}",
-                })
+        if conv_obj and conv_obj.summary:
+            messages.insert(1, {
+                "role": "system",
+                "content": f"历史对话摘要: {conv_obj.summary}",
+            })
 
     # 4. current user message
     messages.append({"role": "user", "content": current_user_message})
@@ -565,8 +594,6 @@ def build_messages_for_onboarding_step3(
     3. history: 用户与管家之前的对话
     4. current: user message
     """
-    from backend.persistence.project_repository import ProjectRepository
-    from backend.persistence.sqlite_store import get_store
 
     current_fields = current_fields or {}
     messages = []
@@ -577,22 +604,13 @@ def build_messages_for_onboarding_step3(
     # v0.8.2 重要修正: Step 3 时 7 件还未写入 (Step 4 才调 assemble_7_artifacts),
     # 不能读 7 件. 只能读 state_json.payload + current_fields.
     try:
-        with get_store().connection() as conn:
-            row = conn.execute(
-                "SELECT state_json FROM onboarding_state WHERE project_id = ?",
-                (project_id,),
-            ).fetchone()
-        if row:
-            state = json.loads(row["state_json"])
-            payload = state.get("payload", {})
-            # v0.8.3: 不再重复 current_fields, history 里已经有了 + user message 也带了
-            # (避免多轮对话后 context 撑爆)
-            data_block = f"""## Step 1-2 已有数据
+        payload = OnboardingRepository().get_payload(project_id)
+        data_block = f"""## Step 1-2 已有数据
 - 题材: {payload.get("genres", [])}
 - 风格: {payload.get("styles", [])}
 - 基调: {payload.get("tone", [])}
 """
-            messages.append({"role": "system", "content": data_block})
+        messages.append({"role": "system", "content": data_block})
     except Exception:
         pass  # 推断失败不阻断 onboarding
 
@@ -620,7 +638,6 @@ def build_messages_for_onboarding_step4(
     - Step 3/4 多轮对话 history
     """
     from backend.persistence.project_repository import ProjectRepository
-    from backend.persistence.sqlite_store import get_store
 
     current_fields = current_fields or {}
     messages = []
@@ -631,15 +648,7 @@ def build_messages_for_onboarding_step4(
     # Step 4 走完 Step 3 后, 7 件已入库, 从 DB load_all_artifacts 读
     try:
         # 2a. Step 1-2 payload
-        with get_store().connection() as conn:
-            row = conn.execute(
-                "SELECT state_json FROM onboarding_state WHERE project_id = ?",
-                (project_id,),
-            ).fetchone()
-        payload = {}
-        if row:
-            state = json.loads(row["state_json"])
-            payload = state.get("payload", {})
+        payload = OnboardingRepository().get_payload(project_id)
 
         # 2b. 7 件 (从 DB 读, Step 3 确认后已写入)
         artifacts = {}
@@ -674,17 +683,41 @@ def build_messages_for_onboarding_step4(
 
 
 def _load_project_history(project_id: str, max_history: int = 5) -> list[dict[str, Any] | None]:
-    """按 project_id 取历史（per-project 维度）"""
-    with get_store().connection() as conn:
-        rows = conn.execute(
-            """SELECT * FROM messages
-            WHERE project_id = ? AND role IN ('user', 'assistant')
-            ORDER BY created_at DESC
-            LIMIT ?""",
-            (project_id, max_history),
-        ).fetchall()
-    rows = list(rows)[::-1]
-    return [_row_to_message(dict(r)) for r in rows if _row_to_message(dict(r))]
+    """按 project_id 取历史（per-project 维度），经 ConversationRepository 查询"""
+    import asyncio
+    import concurrent.futures
+
+    repo = ConversationRepository()
+
+    async def _fetch():
+        return await repo.get_messages_by_project(project_id, limit=max_history)
+
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            with concurrent.futures.ThreadPoolExecutor() as ex:
+                msg_list = ex.submit(asyncio.run, _fetch()).result()
+        else:
+            msg_list = asyncio.run(_fetch())
+    except RuntimeError:
+        msg_list = asyncio.run(_fetch())
+
+    # get_messages_by_project 返回 DESC，翻转为 ASC
+    msg_list = [m for m in reversed(msg_list)
+                if m.role.value in ('user', 'assistant')]
+    result = []
+    for msg_obj in msg_list:
+        d = {
+            "id": msg_obj.id,
+            "role": msg_obj.role.value if hasattr(msg_obj.role, 'value') else msg_obj.role,
+            "content": msg_obj.content,
+            "tool_calls": msg_obj.tool_calls,
+            "tool_results": msg_obj.tool_results,
+        }
+        m = _row_to_message(d)
+        if m:
+            result.append(m)
+    return result
 
 
 def json_dumps(obj: Any) -> str:
