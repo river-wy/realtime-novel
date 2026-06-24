@@ -1,6 +1,10 @@
 """AgentState + Intent + ToolCall Pydantic Schemas
 
-对应 core.md §B.2.1
+对应 core.md §B.2.1 + v0.6 spec.md §4.2
+
+v0.6 扩展：
+- Intent 枚举新增 6 类：ONBOARDING_CONTINUE, LIST_PROJECTS, QUERY_PROJECTS,
+  RECOMMEND_PROJECTS, OPEN_PROJECT, ADJUST_GLOBAL_PREFERENCE
 """
 from __future__ import annotations
 
@@ -10,13 +14,30 @@ from pydantic import BaseModel, Field
 
 
 class Intent(str, Enum):
-    """主 Agent 决策的 6 类意图（spec §6.2）"""
-    GENERATE = "generate"
-    INTERVENE = "intervene"
-    ROLLBACK = "rollback"
-    ADJUST_BASE = "adjust_base"
-    CREATE_PROJECT = "create_project"
-    CHAT = "chat"
+    """管家决策的 intent（v0.6 完整版）
+
+    分为两组：
+    - 项目级（需 project_id 上下文）：GENERATE, INTERVENE, ROLLBACK, ADJUST_BASE, ONBOARDING_CONTINUE
+    - 用户级（无需 project_id）：LIST_PROJECTS, QUERY_PROJECTS, RECOMMEND_PROJECTS,
+                                 CREATE_PROJECT, OPEN_PROJECT, ADJUST_GLOBAL_PREFERENCE, CHAT
+    """
+    # ─── 项目级（v0.4 已有） ─────────────────────
+    GENERATE = "generate"               # 生成下一章 → 小说文笔家
+    INTERVENE = "intervene"             # 剧情干预 → 世界树管理
+    ROLLBACK = "rollback"               # 回档（危险）→ 管家直处理
+    ADJUST_BASE = "adjust_base"         # 调整基座 → 世界树管理
+    CHAT = "chat"                       # 闲聊（项目级/用户级共用）
+
+    # ─── 项目级（v0.6 新增） ─────────────────────
+    ONBOARDING_CONTINUE = "onboarding_continue"  # Onboarding 多轮对话 → 管家内部
+
+    # ─── 用户级（v0.6 新增，管家大厅） ─────────
+    LIST_PROJECTS = "list_projects"                   # "我有哪些小说"
+    QUERY_PROJECTS = "query_projects"                 # "古风的有什么"
+    RECOMMEND_PROJECTS = "recommend_projects"         # "推荐几部爽文"
+    CREATE_PROJECT = "create_project"                 # "我想写个..." → Onboarding
+    OPEN_PROJECT = "open_project"                     # "打开《赛博》"
+    ADJUST_GLOBAL_PREFERENCE = "adjust_global_pref"   # "以后默认 standard"
 
 
 class ToolCall(BaseModel):
@@ -29,7 +50,7 @@ class ToolCall(BaseModel):
 
 
 class ExpertOpinion(BaseModel):
-    """专家 Agent 咨询结果（v0.4 stub）"""
+    """专家 Agent 咨询结果（v0.4 stub → v0.6 已废除，仅保留 schema）"""
     expert_name: str
     opinion: str
     confidence: float = Field(..., ge=0, le=1)
@@ -37,28 +58,31 @@ class ExpertOpinion(BaseModel):
 
 
 class AgentState(BaseModel):
-    """LangGraph StateGraph 的状态"""
-    # 输入
+    """管家处理的统一状态（v0.6）
+
+    替代 v0.4 的 LangGraph StateGraph 状态，作为管家 receive() 方法的入参/出参
+    """
+    # ─── 输入 ──────────────────────────────
     user_message: str = ""
     project_id: Optional[str] = None
     conversation_id: str = ""
     message_id: str = ""
 
-    # 中间态
+    # ─── 中间态（intent 识别后填充）─────
     intent: Optional[Intent] = None
-    expert_opinions: list[ExpertOpinion] = Field(default_factory=list)
+    intent_args: dict = Field(default_factory=dict)
     plan: Optional[str] = None
     tool_calls: list[ToolCall] = Field(default_factory=list)
-    retry_count: int = 0
 
-    # 输出
+    # ─── 上下文 ──────────────────────────
+    messages: list[dict[str, Any]] = Field(default_factory=list)  # 历史 messages 表
+    project_context: dict = Field(default_factory=dict)            # 当前项目快照（项目级 intent 用）
+
+    # ─── 输出 ──────────────────────────────
     final_response: Optional[str] = None
+    structured_data: dict = Field(default_factory=dict)  # 结构化数据（如项目列表、跳转 URL）
     error: Optional[str] = None
 
-    # LangGraph 内部
-    messages: list[dict[str, Any]] = Field(default_factory=list)
+    # ─── 流程控制 ────────────────────────
     interrupt_requested: bool = False
-
-    # v0.4.1: LLM 调用的多轮上下文（从 messages 表拿，节点调 LLM 时传）
-    history_messages: list[dict[str, Any]] = Field(default_factory=list)
-    system_prompt: Optional[str] = None  # v0.4.1: 节点调 LLM 用的 system prompt
+    retry_count: int = 0
