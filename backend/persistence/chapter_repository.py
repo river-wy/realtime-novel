@@ -125,6 +125,23 @@ class ChapterRepository:
                     (detailed_summary, _now(), project_id, chapter_num),
                 )
 
+    def update_intervention(
+        self,
+        project_id: str,
+        chapter_num: int,
+        intervention: Optional[str] = None,
+        actor_feedback: Optional[str] = None,
+        actor_character: Optional[str] = None,
+    ) -> None:
+        """更新章节干预字段（InterventionParser 调用）"""
+        with get_store().connection() as conn:
+            conn.execute(
+                "UPDATE chapters SET intervention = ?, actor_feedback = ?, actor_character = ?, updated_at = ? "
+                "WHERE project_id = ? AND chapter_num = ?",
+                (intervention or "", actor_feedback or "", actor_character or "",
+                 _now(), project_id, chapter_num),
+            )
+
     def delete(self, project_id: str, chapter_num: int) -> None:
         """删除章节（cascade 删关联表）"""
         with get_store().connection() as conn:

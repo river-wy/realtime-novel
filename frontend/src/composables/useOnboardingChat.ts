@@ -51,6 +51,9 @@ export function useOnboardingChat(projectId: () => string | null) {
   /** Step 4 完成后 LLM 自动生成的项目名（通过 project_name_updated 事件接收） */
   const generatedProjectName = ref<string | null>(null)
 
+  /** Step 4 完成后生成的封面图 URL（通过 cover_image_updated 事件接收） */
+  const generatedCoverImageUrl = ref<string | null>(null)
+
   function addAgentMessage(content: string, isThinking = false) {
     messages.value.push({
       role: 'agent',
@@ -181,6 +184,11 @@ export function useOnboardingChat(projectId: () => string | null) {
       if (msg.name) {
         generatedProjectName.value = msg.name
       }
+    } else if (t === 'cover_image_updated') {
+      // Step 4 完成后生成的封面图 URL
+      if (msg.cover_image_url) {
+        generatedCoverImageUrl.value = msg.cover_image_url
+      }
     } else if (t === 'error') {
       thinking.value = false
       confirming.value = false
@@ -276,6 +284,7 @@ export function useOnboardingChat(projectId: () => string | null) {
     stepDone,
     confirming,
     generatedProjectName,  // Step 4 完成后 LLM 生成的世界名称
+    generatedCoverImageUrl,  // Step 4 完成后生成的封面图 URL
     // computed
     hasFields: computed(() => Object.keys(fields.value).length > 0),
     isStreaming: computed(() => thinking.value),

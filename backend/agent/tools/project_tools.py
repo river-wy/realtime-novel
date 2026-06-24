@@ -11,7 +11,7 @@ from backend.agent.tools.base import BaseTool, ToolError, register_tool
 from backend.agent.tools.schemas import (
     LoadProjectInput, CreateProjectInput, DeleteProjectInput, ProjectDetail,
 )
-from backend.services.async_wrappers import AsyncProjectManager
+from backend.services.project_manager import ProjectManager
 
 
 class LoadProjectTool(BaseTool):
@@ -21,7 +21,7 @@ class LoadProjectTool(BaseTool):
     output_schema = ProjectDetail
 
     def __init__(self):
-        self._manager = AsyncProjectManager()
+        self._manager = ProjectManager()
 
     async def run(self, input: LoadProjectInput, progress_callback=None) -> ProjectDetail:
         try:
@@ -51,7 +51,7 @@ class CreateProjectTool(BaseTool):
     output_schema = ProjectDetail
 
     def __init__(self):
-        self._manager = AsyncProjectManager()
+        self._manager = ProjectManager()
 
     async def run(self, input: CreateProjectInput, progress_callback=None) -> ProjectDetail:
         try:
@@ -75,7 +75,7 @@ class DeleteProjectTool(BaseTool):
     output_schema = ProjectDetail
 
     def __init__(self):
-        self._manager = AsyncProjectManager()
+        self._manager = ProjectManager()
 
     def is_dangerous(self) -> bool:
         return True

@@ -148,6 +148,15 @@ class ProjectRepository:
             conn.execute("DELETE FROM projects WHERE id = ?", (project_id,))
         self.log.info("DB project HARD DELETE: id=%s", project_id)
 
+    def restore_delete(self, project_id: str) -> None:
+        """取消软删标记（用于 trash 恢复）"""
+        with get_store().connection() as conn:
+            conn.execute(
+                "UPDATE projects SET deleted_at = NULL WHERE id = ?",
+                (project_id,),
+            )
+        self.log.info("DB project RESTORE: id=%s", project_id)
+
     # ----- 7 件基座 upsert -----
 
     def _upsert_world_tree(self, project_id: str, data: Dict[str, Any]) -> None:

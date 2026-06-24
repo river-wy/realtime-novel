@@ -1,4 +1,4 @@
-"""AsyncProjectManager — 异步项目管理器（DB 优先）
+"""ProjectManager — 项目管理器（DB 优先）
 
 职责：项目的 CRUD + 软删除 + 回档 + trash 恢复
 """
@@ -11,14 +11,14 @@ from pathlib import Path
 from typing import Optional, Dict, Any
 
 from backend.persistence import (
-    ProjectRepository, ChapterRepository, get_store,
-    ProjectDeletedRepository,
+    ProjectRepository, ChapterRepository,
+    ProjectDeletedRepository, ChapterStatusRepository, OnboardingRepository,
 )
 from backend.utils.logger import logger
 
 
 @logger
-class AsyncProjectManager:
+class ProjectManager:
     """ 异步项目管理器 """
 
     def __init__(self, workspace_root: Path | str = "data"):
@@ -96,17 +96,12 @@ class AsyncProjectManager:
         onboarding_step = None
         onboarding_payload: dict = {}
         try:
-            from backend.persistence.sqlite_store import get_store
-            import json as _json
-            with get_store().connection() as conn:
-                row = conn.execute(
-                    "SELECT current_step, state_json FROM onboarding_state WHERE project_id = ?",
-                    (project_id,),
-                ).fetchone()
-            if row:
-                onboarding_step = int(row["current_step"])
+            ob_row = OnboardingRepository().get(project_id)
+            if ob_row:
+                onboarding_step = ob_row.current_step
                 try:
-                    state_data = _json.loads(row["state_json"])
+                    import json as _json
+                    state_data = _json.loads(ob_row.state_json)
                     onboarding_payload = state_data.get("payload", {}) or {}
                 except Exception:
                     pass
@@ -128,21 +123,12 @@ class AsyncProjectManager:
 
     async def list_projects(self, limit: int = 20, offset: int = 0) -> list[dict]:
         """列项目（DB 优先）"""
-        from backend.persistence.sqlite_store import get_store
 
         projects = self._proj_repo.list_all(limit=limit + offset)
         # v0.8.3: 一次查所有 onboarding_state (避免 N+1)
         onboarding_map: dict[str, int] = {}
         try:
-            with get_store().connection() as conn:
-                rows = conn.execute(
-                    "SELECT project_id, current_step FROM onboarding_state"
-                ).fetchall()
-            for r in rows:
-                try:
-                    onboarding_map[r["project_id"]] = int(r["current_step"])
-                except Exception:
-                    pass
+            onboarding_map = OnboardingRepository().list_current_steps()
         except Exception:
             pass
 
@@ -197,12 +183,11 @@ class AsyncProjectManager:
         table = key_to_table.get(key)
         old_preview = ""
         if table:
-            with get_store().connection() as conn:
-                row = conn.execute(
-                    f"SELECT * FROM {table} WHERE project_id = ?", (project_id,)
-                ).fetchone()
-                if row:
-                    old_preview = str(dict(row))[:100]
+            try:
+                old_data = self._load_one(project_id, key)
+                old_preview = str(old_data)[:100]
+            except Exception:
+                pass
 
         # 读其他 6 件保持不变
         world_tree = parsed if key == "world_tree" else self._load_one(project_id, "world_tree")
@@ -253,11 +238,7 @@ class AsyncProjectManager:
         removed = self._chap_repo.rollback_to(project_id, to_chapter)
         kept = kept - removed
         # 同步 chapter_status 表
-        with get_store().connection() as conn:
-            conn.execute(
-                "DELETE FROM chapter_status WHERE project_id = ? AND chapter_num > ?",
-                (project_id, to_chapter),
-            )
+        ChapterStatusRepository().delete_after_chapter(project_id, to_chapter)
         # 文件系统清理：删 > to_chapter 的 chapter_NNN.md
         project_path = self.projects_root / project_id
         chapters_dir = project_path / "chapters"
@@ -333,10 +314,6 @@ class AsyncProjectManager:
             raise FileExistsError(f"Project {project_id} already exists")
         await asyncio.to_thread(shutil.move, str(trash_path), str(target))
         # DB 取消软删标记
-        with get_store().connection() as conn:
-            conn.execute(
-                "UPDATE projects SET deleted_at = NULL WHERE id = ?",
-                (project_id,),
-            )
+        self._proj_repo.restore_delete(project_id)
         return {"project_id": project_id, "restored_from": str(trash_path)}
 

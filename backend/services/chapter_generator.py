@@ -1,4 +1,4 @@
-"""AsyncChapterGenerator — 异步章节生成器
+"""ChapterGenerator — 章节生成器
 
 职责：委托 state_graph_stub 生成小说章节
 """
@@ -10,8 +10,8 @@ from backend.utils.logger import logger
 
 
 @logger
-class AsyncChapterGenerator:
-    """v0.4 章节生成占位（v0.4.1 不变，仍委托给 state_graph_stub）"""
+class ChapterGenerator:
+    """章节生成（委托 state_graph_stub）"""
 
     def __init__(self, workspace_root: Path | str = "data"):
         self.workspace_root = Path(workspace_root)

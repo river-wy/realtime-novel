@@ -6,14 +6,14 @@ Phase 4: http_routes（12 个 RESTful 端点）
 """
 from __future__ import annotations
 
-from pathlib import Path
-
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from pathlib import Path
 
 # v0.8.3: 初始化日志 (在 import 其他模块前调, 让后续 logger 接管)
 from backend.utils.logger import configure_logging
+
 configure_logging()
 
 from backend.api.system_routes import router as system_router
@@ -21,6 +21,10 @@ from backend.api.ws_manager import router as ws_router
 from backend.api.project_routes import router as project_router
 from backend.api.chapter_routes import router as chapter_router
 from backend.api.action_routes import router as action_router
+from backend.api.onboarding_routes import router as onboarding_router
+
+# 触发领域事件 handler 注册（import 即注册，无需显式调用）
+import backend.agent.onboarding_hooks  # noqa: F401
 
 # === FastAPI app ===
 
@@ -43,6 +47,7 @@ app.add_middleware(
 app.include_router(system_router)
 app.include_router(project_router)
 app.include_router(chapter_router)
+app.include_router(onboarding_router)
 app.include_router(action_router)
 app.include_router(ws_router)
 

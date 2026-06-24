@@ -51,12 +51,11 @@ class LLMRouter:
 
     def get_provider(self, role):
         """保留旧接口（向后兼容）：根据 role 选 provider"""
-        # 旧 primary_map 等价实现
         from backend.adapters.types import ModelRole
         if role == ModelRole.TEXT:
-            return self.get_provider_by_name("friday/deepseek-v4-pro-tencent")
+            return self.get_provider_by_name(ModelProvider.DEEPSEEK.value)
         elif role == ModelRole.IMAGE:
-            return self.get_provider_by_name("friday/gemini-3.1-flash-image-preview")
+            return self.get_provider_by_name(ModelProvider.GEMINI.value)
         else:
             raise RuntimeError(f"Unknown role: {role}")
 

@@ -5,7 +5,13 @@
 - ConversationRepository / ToolCallLogRepository / AgentStateRepository
 - UserPreferenceRepository / ChapterStatusRepository / ProjectDeletedRepository
 - ProjectRepository (v0.4.1 新增)
+- ChapterRepository
+- OnboardingRepository
 """
+from backend.persistence.agent_state_repository import AgentStateRepository
+from backend.persistence.chapter_repository import ChapterRepository
+from backend.persistence.chapter_status_repository import ChapterStatusRepository
+from backend.persistence.conversation_repository import ConversationRepository
 from backend.persistence.models import (
     Conversation, Message, MessageRole, ToolCallLog, AgentState,
     UserPreference, ChapterStatus, ChapterState, ProjectDeleted,
@@ -15,16 +21,12 @@ from backend.persistence.models import (
     ChapterRow, OnboardingStateRow,
     ChapterSeedChangeRow, ChapterCharacterStateRow,
 )
-from backend.persistence.sqlite_store import SQLiteStore, get_store, reset_store
-from backend.persistence.conversation_store import ConversationRepository
-from backend.persistence.tool_call_log import ToolCallLogRepository
-from backend.persistence.agent_state_store import AgentStateRepository
-from backend.persistence.user_preference_store import UserPreferenceRepository
-from backend.persistence.chapter_status_store import (
-    ChapterStatusRepository, ProjectDeletedRepository,
-)
+from backend.persistence.onboarding_repository import OnboardingRepository
+from backend.persistence.project_deleted_repository import ProjectDeletedRepository
 from backend.persistence.project_repository import ProjectRepository
-from backend.persistence.chapter_repository import ChapterRepository
+from backend.persistence.sqlite_store import SQLiteStore, get_store, reset_store
+from backend.persistence.tool_call_log_repository import ToolCallLogRepository
+from backend.persistence.user_preference_repository import UserPreferenceRepository
 
 __all__ = [
     # models
@@ -40,5 +42,5 @@ __all__ = [
     # repos
     "ConversationRepository", "ToolCallLogRepository", "AgentStateRepository",
     "UserPreferenceRepository", "ChapterStatusRepository", "ProjectDeletedRepository",
-    "ProjectRepository", "ChapterRepository",
+    "ProjectRepository", "ChapterRepository", "OnboardingRepository",
 ]

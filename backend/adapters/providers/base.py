@@ -35,5 +35,10 @@ class LLMProvider(Protocol):
         image_size: str = "1K",
         reference_image_url: str | None = None,
     ) -> dict:
-        """图片生成（Gemini 专属，其他 Provider 可 raise）"""
+        """图片生成（image role 专属，text-only Provider 应 raise NotImplementedError）
+
+        注意：此方法仅对 ModelRole.IMAGE 的 Provider（如 GeminiProvider）有意义。
+        text-only Provider（如 DeepSeekProvider）实现时直接 raise NotImplementedError 即可。
+        TODO: 未来接入更多 image provider 时，可将此方法拆出单独的 ImageProvider Protocol。
+        """
         ...

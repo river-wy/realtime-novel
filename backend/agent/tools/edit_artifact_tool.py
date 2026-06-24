@@ -34,7 +34,7 @@ class EditArtifactTool(BaseTool):
     output_schema = EditArtifactResult
 
     def __init__(self):
-        self._pm = AsyncProjectManager()
+        self._pm = ProjectManager()
 
     async def run(
         self, input: EditArtifactInput, progress_callback=None
@@ -605,8 +605,8 @@ class EditArtifactTool(BaseTool):
             )
 
 
-# 补上 AsyncProjectManager import
-from backend.services.async_wrappers import AsyncProjectManager
+# 补上 ProjectManager import
+from backend.services.project_manager import ProjectManager
 
 # 注册
 register_tool(EditArtifactTool())

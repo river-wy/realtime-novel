@@ -13,7 +13,7 @@ from backend.agent.tools.schemas import (
     GenerateChapterInput, ReadChapterInput, ChapterContent,
 )
 from backend.agent.tools.locks import get_project_lock
-from backend.services.async_wrappers import AsyncProjectManager
+from backend.services.project_manager import ProjectManager
 from backend.persistence import ChapterStatusRepository, ChapterState
 
 
@@ -24,7 +24,7 @@ class GenerateChapterTool(BaseTool):
     output_schema = ChapterContent
 
     def __init__(self):
-        self._pm = AsyncProjectManager()
+        self._pm = ProjectManager()
         self._status_repo = ChapterStatusRepository()
 
     async def run(

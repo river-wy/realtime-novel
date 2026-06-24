@@ -1,6 +1,6 @@
-import { defineConfig } from 'vite'
+import {defineConfig} from 'vite'
 import vue from '@vitejs/plugin-vue'
-import { fileURLToPath, URL } from 'node:url'
+import {fileURLToPath, URL} from 'node:url'
 
 /**
  * realtime-novel 前端 Vite 配置
@@ -35,6 +35,10 @@ export default defineConfig({
         ws: true
       },
       '/openapi.json': {
+        target: `http://127.0.0.1:${BACKEND_PORT}`,
+        changeOrigin: true
+      },
+      '/static': {
         target: `http://127.0.0.1:${BACKEND_PORT}`,
         changeOrigin: true
       }

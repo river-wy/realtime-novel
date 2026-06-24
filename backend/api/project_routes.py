@@ -4,16 +4,15 @@
 """
 from __future__ import annotations
 
-from typing import Optional, Any, Literal
-
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
+from typing import Optional, Any, Literal
 
 from backend.persistence import ProjectDeletedRepository, ConversationRepository, MessageRole  # noqa: F401
-from backend.services.async_wrappers import AsyncProjectManager
+from backend.services.project_manager import ProjectManager
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
-_pm = AsyncProjectManager()
+_pm = ProjectManager()
 
 
 class ProjectInfo(BaseModel):
@@ -89,7 +88,7 @@ class DeleteProjectResponse(BaseModel):
 
 @router.get("", response_model=ProjectListResponse)
 async def list_projects(
-    limit: int = Query(20, ge=1, le=100),
+    limit: int = Query(20, ge=1, le=500),
     offset: int = Query(0, ge=0),
     include_deleted: bool = Query(False),
 ):

@@ -16,8 +16,7 @@ from __future__ import annotations
 import json
 from typing import Dict, Any, List
 
-from backend.persistence import get_store, ProjectRepository
-
+from backend.persistence import ProjectRepository, OnboardingRepository
 
 # ============ 字段映射常量 ============
 
@@ -257,55 +256,22 @@ def assemble_7_artifacts(project_id: str, payload: Dict[str, Any]) -> List[str]:
 # ============ 工具函数 ============
 
 def merge_payload_to_state(project_id: str, step: int, fields: Dict[str, Any]) -> Dict[str, Any]:
-    """把 WS confirm 的 4 字段合并到 onboarding_state.state_json.payload
+    """把 WS confirm 的字段合并到 onboarding_state.state_json.payload
 
     Args:
         project_id: 项目 ID
         step: 3 or 4
-        fields: 4 字段 dict (来自用户确认)
+        fields: 字段 dict (来自用户确认)
 
     Returns:
         merged_payload: 合并后的完整 payload
 
     注意:
         - 合并而非覆盖 (Step 3 字段保留, Step 4 字段追加)
-        - 用同一个 connection 保证原子性
     """
-    import json
-    from datetime import datetime
-
-    now = datetime.now()
-    with get_store().connection() as conn:
-        row = conn.execute(
-            "SELECT state_json FROM onboarding_state WHERE project_id = ?",
-            (project_id,),
-        ).fetchone()
-        if not row:
-            raise ValueError(f"onboarding state not found for project: {project_id}")
-        state_data = json.loads(row["state_json"])
-        existing_payload = state_data.get("payload", {}) or {}
-        # 合并 (新字段覆盖旧字段, 旧字段保留)
-        merged = {**existing_payload, **fields}
-        state_data["payload"] = merged
-        state_data["updated_at"] = now.isoformat()
-        # 同步更新 current_step 列 (Step 3 confirm → current_step=3, Step 4 → 4)
-        # 语义: current_step = 用户最近完成到哪一步 (1-4, 4 表示 onboard 完成)
-        # 不然前端 status 读 current_step 永远显示 2/5
-        conn.execute(
-            "UPDATE onboarding_state SET current_step = ?, state_json = ?, updated_at = ? WHERE project_id = ?",
-            (step, json.dumps(state_data, ensure_ascii=False), now, project_id),
-        )
-    return merged
+    return OnboardingRepository().merge_payload(project_id, step, fields)
 
 
 def load_payload(project_id: str) -> Dict[str, Any]:
     """从 onboarding_state.state_json 读完整 payload (Step 1-4 合并)"""
-    with get_store().connection() as conn:
-        row = conn.execute(
-            "SELECT state_json FROM onboarding_state WHERE project_id = ?",
-            (project_id,),
-        ).fetchone()
-    if not row:
-        return {}
-    state_data = json.loads(row["state_json"])
-    return state_data.get("payload", {}) or {}
+    return OnboardingRepository().get_payload(project_id)

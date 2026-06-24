@@ -13,7 +13,7 @@ from backend.agent.tools.schemas import (
     UpdateBaseInput, UpdateBaseResult, RollbackBaseInput, ProjectDetail,
 )
 from backend.agent.tools.locks import get_project_lock
-from backend.services.async_wrappers import AsyncProjectManager
+from backend.services.project_manager import ProjectManager
 from pathlib import Path  # noqa: F401  (保留 import 以防 Path 被未来代码需要)
 
 
@@ -24,7 +24,7 @@ class UpdateBaseTool(BaseTool):
     output_schema = UpdateBaseResult
 
     def __init__(self):
-        self._manager = AsyncProjectManager()
+        self._manager = ProjectManager()
 
     async def run(
         self, input: UpdateBaseInput, progress_callback=None
@@ -54,7 +54,7 @@ class RollbackBaseTool(BaseTool):
     output_schema = ProjectDetail
 
     def __init__(self):
-        self._pm = AsyncProjectManager()
+        self._pm = ProjectManager()
 
     def is_dangerous(self) -> bool:
         return True

@@ -97,37 +97,40 @@ function statusLabel(status: string, step: number | null): string {
         class="project-card"
         @click="goToProject(p)"
       >
-        <!-- v0.9: 封面图背景（有图用图，无图用渐变占位） -->
-        <div
-          class="card-bg"
-          :class="p.cover_image_url ? 'card-bg-image' : 'card-bg-placeholder'"
-          :style="p.cover_image_url
-            ? { backgroundImage: `url(${p.cover_image_url})` }
-            : {}"
-        >
-          <span v-if="!p.cover_image_url" class="card-bg-placeholder-icon">📖</span>
+        <!-- v0.9: 左图右字布局（与 Home.vue 一致） -->
+        <div class="card-inner">
+          <!-- 左：封面缩略图 -->
+          <div
+            class="card-thumb"
+            :class="p.cover_image_url ? 'card-thumb-image' : 'card-thumb-placeholder'"
+            :style="p.cover_image_url ? { backgroundImage: `url(${p.cover_image_url})` } : {}"
+          >
+            <span v-if="!p.cover_image_url" class="card-thumb-icon">📖</span>
+          </div>
+          <!-- 右：标题 + 标签 + 章节 -->
+          <div class="card-content">
+            <h3 class="card-title">{{ p.name }}</h3>
+            <div class="card-meta">
+              <span class="palette">{{ p.palette }}</span>
+              <span
+                class="exploration-badge"
+                :class="`exploration-${p.exploration_level || 'standard'}`"
+              >
+                {{ explorationIcon(p.exploration_level || 'standard') }}
+                {{ explorationLabel(p.exploration_level || 'standard') }}
+              </span>
+              <span
+                class="status-badge"
+                :class="`status-${p.status || 'not_started'}`"
+              >
+                {{ statusIcon(p.status || 'not_started') }}
+                {{ statusLabel(p.status || 'not_started', p.onboarding_step) }}
+              </span>
+            </div>
+            <div class="card-chapter-count">{{ p.chapter_count }} 章</div>
+          </div>
         </div>
-        <div class="card-content">
-          <h3 class="card-title">{{ p.name }}</h3>
-          <p class="card-meta">
-            <span class="palette">{{ p.palette }}</span>
-            <span
-              class="exploration-badge"
-              :class="`exploration-${p.exploration_level || 'standard'}`"
-            >
-              {{ explorationIcon(p.exploration_level || 'standard') }}
-              {{ explorationLabel(p.exploration_level || 'standard') }}
-            </span>
-            <span
-              class="status-badge"
-              :class="`status-${p.status || 'not_started'}`"
-            >
-              {{ statusIcon(p.status || 'not_started') }}
-              {{ statusLabel(p.status || 'not_started', p.onboarding_step) }}
-            </span>
-            <span class="chapter-count">{{ p.chapter_count }} 章</span>
-          </p>
-        </div>
+        <!-- "..." 操作菜单 -->
         <div class="card-menu" @click="toggleMenu($event, p.id)">
           <span class="card-menu-icon">⋯</span>
         </div>

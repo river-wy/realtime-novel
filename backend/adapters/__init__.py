@@ -1,6 +1,7 @@
 """backend.adapters 包入口
 
 v0.6: v0.3 adapters/llm.py 已删除，所有 LLM 调用走 LLMAdapter (v0.4+)
+v0.4.1: adapters/io.py 已删除（7 件全入 DB，YAML 读写已废弃）
 - DeepSeek Provider (text, OpenAI 兼容 + Thinking)
 - Gemini Provider (image, Google 原生异步 submit+poll)
 - Router (按 role 路由 + fallback)
@@ -8,16 +9,16 @@ v0.6: v0.3 adapters/llm.py 已删除，所有 LLM 调用走 LLMAdapter (v0.4+)
 - Streaming (流式回调)
 - types.py (LLMRequest, LLMResponse, LLMStreamChunk)
 """
-from backend.adapters.types import (
-    LLMRequest, LLMResponse, LLMStreamChunk, ModelRole, ModelProvider,
-)
+from backend.adapters.llm_adapter import LLMAdapter, get_llm_adapter, reset_llm_adapter
+from backend.adapters.llm_router import LLMRouter, get_router, reset_router
 from backend.adapters.providers.base import LLMProvider
 from backend.adapters.providers.deepseek import DeepSeekProvider
 from backend.adapters.providers.gemini import GeminiProvider
-from backend.adapters.llm_router import LLMRouter, get_router, reset_router
 from backend.adapters.retry import with_retry, AuthenticationError, RateLimitError
 from backend.adapters.streaming import stream_with_callback
-from backend.adapters.llm_adapter import LLMAdapter, get_llm_adapter, reset_llm_adapter
+from backend.adapters.types import (
+    LLMRequest, LLMResponse, LLMStreamChunk, ModelRole, ModelProvider,
+)
 
 __all__ = [
     # types

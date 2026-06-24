@@ -1,14 +1,13 @@
-"""AsyncInterventionParser — 异步剧情干预解析器
+"""InterventionParser — 剧情干预解析器
 
 职责：将用户的干预指令写入最新章节的 intervention 字段
 """
 from __future__ import annotations
 
-from datetime import datetime
 from pathlib import Path
 
 
-class AsyncInterventionParser:
+class InterventionParser:
 
     def __init__(self, workspace_root: Path | str = "data"):
         self.workspace_root = Path(workspace_root)
@@ -32,14 +31,13 @@ class AsyncInterventionParser:
                 "reason": "no chapter yet",
             }
         # 更新最新章节的 intervention
-        from backend.persistence import get_store
-        with get_store().connection() as conn:
-            conn.execute(
-                "UPDATE chapters SET intervention = ?, actor_feedback = ?, actor_character = ?, updated_at = ? "
-                "WHERE project_id = ? AND chapter_num = ?",
-                (intervention or "", actor_feedback or "", actor_character or "",
-                 datetime.now(), project_id, latest.chapter_num),
-            )
+        chap_repo.update_intervention(
+            project_id=project_id,
+            chapter_num=latest.chapter_num,
+            intervention=intervention,
+            actor_feedback=actor_feedback,
+            actor_character=actor_character,
+        )
         return {
             "project_id": project_id,
             "chapter_num": latest.chapter_num,
