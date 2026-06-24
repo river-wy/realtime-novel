@@ -16,6 +16,10 @@ FRONTEND_PORT=7777
 BACKEND_PORT=7778
 HOST=127.0.0.1
 
+# LLM 完整 prompt 日志开关：设为 1 时每次 LLM 调用前打印完整上下文
+# 生产/日常不需要，调试 prompt 时开启
+LLM_PROMPT_LOG=0
+
 # FRIDAY 代理凭证
 # v0.7: api_key 从 .llm_api_key 文件读 (gitignored)，不再走环境变量
 # 脚本只校验文件存在性 + ASCII 纯字符，实际读取在 Python 层 (config_loader.py)
@@ -69,7 +73,8 @@ check_dependencies() {
 }
 
 # 杀端口占用进程（只杀本项目相关的）
-# 判断: 进程 cmdline 包含 backend 或 vite --port 对应端口
+# 判断: cmdline 含 realtime-novel / uvicorn backend.api / backend.api.app /
+#        vite --port <port> / PROJECT_ROOT 路径，其中一个命中即视为本项目进程
 kill_port_if_used() {
     local port=$1
     local name=$2
@@ -85,7 +90,7 @@ kill_port_if_used() {
     for pid in $pids; do
         # 取进程命令行
         local cmdline=$(ps -p $pid -o command= 2>/dev/null | tr -d '\n')
-        if echo "$cmdline" | grep -qE "realtime_novel|realtime-novel.*vite|vite --port $port"; then
+        if echo "$cmdline" | grep -qE "realtime.novel|uvicorn.*backend\.api|backend\.api\.app|vite --port $port" || echo "$cmdline" | grep -qF "$PROJECT_ROOT"; then
             echo "   kill PID $pid (realtime-novel 进程): $cmdline"
             kill $pid 2>/dev/null
             sleep 1
@@ -119,7 +124,8 @@ kill_port_if_used() {
 start_backend() {
     echo "🚀 启动后端 (port $BACKEND_PORT)..."
     cd "$PROJECT_ROOT"
-    nohup "$UVICORN" backend.api.app:app \
+    nohup env LLM_PROMPT_LOG="$LLM_PROMPT_LOG" \
+        "$UVICORN" backend.api.app:app \
         --host "$HOST" \
         --port "$BACKEND_PORT" \
         --log-level info \

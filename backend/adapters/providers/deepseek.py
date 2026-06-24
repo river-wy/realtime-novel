@@ -6,15 +6,16 @@ v0.7 改造：provider_name 加 friday/ 前缀表示提供方，api_key 走 conf
 from __future__ import annotations
 
 import time
-from typing import AsyncIterator
-
 from openai import AsyncOpenAI
+from typing import AsyncIterator
 
 from backend.adapters.providers.base import LLMProvider
 from backend.adapters.types import LLMRequest, LLMResponse, LLMStreamChunk, ModelProvider
 from backend.config.config_loader import load_llm_api_key, get_model_config
+from backend.utils.logger import logger
 
 
+@logger
 class DeepSeekProvider(LLMProvider):
     """friday/deepseek-v4-pro-tencent（经 friday 代理 OpenAI 兼容协议）"""
 
@@ -32,48 +33,90 @@ class DeepSeekProvider(LLMProvider):
         self.default_params = model_cfg.get("default_params", {})
 
     async def complete(self, request: LLMRequest) -> LLMResponse:
-        """同步调用（关 thinking，节省时间）"""
-        start = time.time()
-        kwargs = {
-            "model": self.model,
-            "messages": self._build_messages(request),
-            "temperature": request.temperature,
-            "max_tokens": request.max_tokens,
-        }
-        # v0.6 新增：response_format 透传（强制 JSON 输出）
-        if request.response_format:
-            kwargs["response_format"] = request.response_format
-        # v0.8.1: 透传探索度参数 (frequency/presence penalty)
-        if request.frequency_penalty:
-            kwargs["frequency_penalty"] = request.frequency_penalty
-        if request.presence_penalty:
-            kwargs["presence_penalty"] = request.presence_penalty
-        response = await self.client.chat.completions.create(**kwargs)
-        duration_ms = int((time.time() - start) * 1000)
-        return LLMResponse(
-            content=response.choices[0].message.content or "",
-            provider=ModelProvider.DEEPSEEK,
-            input_tokens=getattr(response.usage, "prompt_tokens", 0) if response.usage else 0,
-            output_tokens=getattr(response.usage, "completion_tokens", 0) if response.usage else 0,
-            duration_ms=duration_ms,
-            cached=False,
-        )
+        """同步调用（流式聚合，兼容 DeepSeek thinking 模式 content 返空问题）
 
-    async def stream(self, request: LLMRequest) -> AsyncIterator[LLMStreamChunk]:
-        """流式调用 + Thinking 模式（reasoning_content 透传）"""
+        DeepSeek v4-pro thinking 模式下非流式调用 content 始终为空，
+        答案在 reasoning_content 里且容易被 max_tokens 截断。
+        改用流式聚合 content delta，与 stream() 行为一致。
+        """
+        start = time.time()
+        msg_count = len(request.messages or [])
+        est_tokens = int(sum(len(m.get("content") or "") for m in (request.messages or [])) * 0.4)
+        self.log.info("LLM complete START: model=%s, temp=%.2f, max_tokens=%d, thinking=%s, msg_count=%d, est_input_tokens~=%d",
+                 self.model, request.temperature, request.max_tokens,
+                 request.enable_thinking, msg_count, est_tokens)
+        # v0.8.2: enable_thinking=False 时关闭 thinking（防止 reasoning token 占用 max_tokens）
+        thinking_body = {"thinking": {"type": "enabled"}} if request.enable_thinking else {"thinking": {"type": "disabled"}}
         stream_kwargs = {
             "model": self.model,
             "messages": self._build_messages(request),
             "temperature": request.temperature,
             "max_tokens": request.max_tokens,
             "stream": True,
-            "extra_body": {"thinking": {"type": "enabled"}},  # Thinking 模式
+            "extra_body": thinking_body,
+        }
+        # v0.6 新增：response_format 透传（强制 JSON 输出）
+        if request.response_format:
+            stream_kwargs["response_format"] = request.response_format
+        # v0.8.1: 透传探索度参数 (frequency/presence penalty)
+        if request.frequency_penalty:
+            stream_kwargs["frequency_penalty"] = request.frequency_penalty
+        if request.presence_penalty:
+            stream_kwargs["presence_penalty"] = request.presence_penalty
+
+        content_parts = []
+        input_tokens = 0
+        output_tokens = 0
+        finish_reason = None
+        stream = await self.client.chat.completions.create(**stream_kwargs)
+        async for chunk in stream:
+            if not chunk.choices:
+                # usage 汇总 chunk（无 choices）
+                if hasattr(chunk, "usage") and chunk.usage:
+                    input_tokens = getattr(chunk.usage, "prompt_tokens", 0)
+                    output_tokens = getattr(chunk.usage, "completion_tokens", 0)
+                continue
+            delta = chunk.choices[0].delta
+            if delta.content:
+                content_parts.append(delta.content)
+            if chunk.choices[0].finish_reason:
+                finish_reason = chunk.choices[0].finish_reason
+
+        duration_ms = int((time.time() - start) * 1000)
+        content = "".join(content_parts)
+        self.log.info("LLM complete DONE: model=%s, input_tokens=%d, output_tokens=%d, duration_ms=%d, content_len=%d, finish=%s",
+                 self.model, input_tokens, output_tokens, duration_ms, len(content), finish_reason)
+        return LLMResponse(
+            content=content,
+            provider=ModelProvider.DEEPSEEK,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            duration_ms=duration_ms,
+            cached=False,
+        )
+
+    async def stream(self, request: LLMRequest) -> AsyncIterator[LLMStreamChunk]:
+        """流式调用 + Thinking 模式（reasoning_content 透传）"""
+        msg_count = len(request.messages or [])
+        self.log.info("LLM stream START: model=%s, temp=%.2f, max_tokens=%d, thinking=%s, msg_count=%d",
+                 self.model, request.temperature, request.max_tokens, request.enable_thinking, msg_count)
+        # v0.8.2: enable_thinking=False 时关闭 thinking
+        thinking_body = {"thinking": {"type": "enabled"}} if request.enable_thinking else {"thinking": {"type": "disabled"}}
+        stream_kwargs = {
+            "model": self.model,
+            "messages": self._build_messages(request),
+            "temperature": request.temperature,
+            "max_tokens": request.max_tokens,
+            "stream": True,
+            "extra_body": thinking_body,
         }
         # v0.8.1: 流式也支持 frequency/presence penalty
         if request.frequency_penalty:
             stream_kwargs["frequency_penalty"] = request.frequency_penalty
         if request.presence_penalty:
             stream_kwargs["presence_penalty"] = request.presence_penalty
+        _stream_start = time.time()
+        _total_chars = 0
         stream = await self.client.chat.completions.create(**stream_kwargs)
         async for chunk in stream:
             if not chunk.choices:
@@ -81,11 +124,17 @@ class DeepSeekProvider(LLMProvider):
             delta = chunk.choices[0].delta
             content = delta.content or ""
             reasoning = getattr(delta, "reasoning_content", None) or ""
+            _total_chars += len(content)
+            is_final = chunk.choices[0].finish_reason is not None
+            if is_final:
+                self.log.info("LLM stream DONE: model=%s, duration_ms=%d, total_chars=%d, finish=%s",
+                         self.model, int((time.time() - _stream_start) * 1000),
+                         _total_chars, chunk.choices[0].finish_reason)
             yield LLMStreamChunk(
                 delta=content,
                 reasoning=reasoning,
                 provider=ModelProvider.DEEPSEEK,
-                is_final=chunk.choices[0].finish_reason is not None,
+                is_final=is_final,
                 finish_reason=chunk.choices[0].finish_reason,
             )
 

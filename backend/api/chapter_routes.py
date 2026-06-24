@@ -15,7 +15,7 @@ from backend.agent.tools import get_tool
 from backend.agent.tools.schemas import (
     GenerateChapterInput,
 )
-from backend.persistence import ChapterStatusRepository, ChapterState, ConversationRepository, \
+from backend.persistence import ConversationRepository, \
     MessageRole  # noqa: F401
 
 router = APIRouter(prefix="/api/projects", tags=["chapters"])
@@ -96,9 +96,29 @@ async def read_chapter(
     if not chapter_path.exists():
         raise HTTPException(404, f"Chapter file not found: {row.file_path}")
     content = chapter_path.read_text()
+    # 优先用 DB 里的标题；若 DB 标题只是"第N章"占位符，则从正文首行 # 提取
+    title = row.title or ""
+    import re as _re
+    if not title or _re.fullmatch(r"第\s*\d+\s*章", title):
+        for line in content.split("\n"):
+            line = line.strip()
+            if line.startswith("# "):
+                extracted = line[2:].strip()
+                if extracted and not _re.fullmatch(r"第\s*\d+\s*章", extracted):
+                    title = extracted
+                    # 回填 DB，修复旧章节的占位符 title
+                    from backend.persistence import get_store
+                    with get_store().connection() as conn:
+                        conn.execute(
+                            "UPDATE chapters SET title = ? WHERE project_id = ? AND chapter_num = ?",
+                            (title, project_id, n),
+                        )
+                break
+    if not title:
+        title = f"第 {n} 章"
     return ChapterContentResponse(
         num=n,
-        title=row.title or f"第 {n} 章",
+        title=title,
         content=content,
         word_count=len(content),
         generated_at=row.generated_at.isoformat() if row.generated_at else None,

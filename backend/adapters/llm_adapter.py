@@ -9,18 +9,57 @@
 """
 from __future__ import annotations
 
+import os
 from typing import AsyncIterator, Callable, Awaitable, Optional
 
 from backend.adapters.llm_router import get_router, LLMRouter
-from backend.adapters.retry import with_retry, AuthenticationError
+from backend.adapters.retry import with_retry
 from backend.adapters.streaming import stream_with_callback
 from backend.adapters.types import (
     LLMRequest, LLMResponse, LLMStreamChunk,
-    ModelRole, ModelProvider,
-)
-from backend.adapters.providers.base import LLMProvider
+    ModelRole, )
+from backend.utils.logger import logger
+
+# 设置环境变量 LLM_PROMPT_LOG=1 即可开启完整 prompt 打印（独立于 LOG_LEVEL）
+_PROMPT_LOG_ENABLED = os.environ.get("LLM_PROMPT_LOG", "").strip() in ("1", "true", "yes")
 
 
+@logger
+def _log_request(request: LLMRequest) -> None:
+    """在 LLM 实际调用前，打印完整上下文。
+    需设置环境变量 LLM_PROMPT_LOG=1 开启，避免正常运行时刷屏。
+    """
+    if not _PROMPT_LOG_ENABLED:
+        return
+
+    lines = ["[LLM PROMPT] ══════════════════════════════════════════════════════"]
+    lines.append(f"  role={request.role.value}  temp={request.temperature}"
+                 f"  max_tokens={request.max_tokens}  thinking={request.enable_thinking}")
+
+    if request.system_prompt:
+        lines.append("  ── system ─────────────────────────────────────────────────────")
+        lines.append(request.system_prompt)
+
+    if request.messages:
+        for i, msg in enumerate(request.messages):
+            role = msg.get("role", "?")
+            content = msg.get("content", "")
+            if isinstance(content, list):
+                # tool_result / multipart content 格式
+                content = " | ".join(
+                    (part.get("text") or str(part)) for part in content
+                )
+            lines.append(f"  ── [{i}] {role} ───────────────────────────────────────────")
+            lines.append(str(content))
+    elif request.prompt:
+        lines.append("  ── prompt ──────────────────────────────────────────────────────")
+        lines.append(request.prompt)
+
+    lines.append("════════════════════════════════════════════════════════════════")
+    _log_request.log.info("\n".join(lines))
+
+
+@logger
 class LLMAdapter:
     """v0.4 统一 LLM 调用入口（业务代码只用这个）"""
 
@@ -30,6 +69,7 @@ class LLMAdapter:
     async def complete(self, request: LLMRequest) -> LLMResponse:
         """同步调用（带重试）"""
         provider = self.router.get_provider(request.role)
+        _log_request(request)
         return await with_retry(provider.complete, request, max_retries=3, base_delay=1.0)
 
     async def complete_with_messages(
@@ -41,6 +81,7 @@ class LLMAdapter:
         role: ModelRole = ModelRole.TEXT,
         frequency_penalty: float = 0.0,
         presence_penalty: float = 0.0,
+        enable_thinking: bool = True,
     ) -> LLMResponse:
         """v0.4.1 新增：多轮对话便捷调用 (v0.8.1 加 frequency/presence penalty)
 
@@ -52,6 +93,7 @@ class LLMAdapter:
             frequency_penalty/presence_penalty: v0.8.1 探索度旋钮用
                 - frequency_penalty: 正值减少重复用词 (OpenAI 标准参数)
                 - presence_penalty:  正值鼓励新话题 (OpenAI 标准参数)
+            enable_thinking: v0.8.2 是否启用 thinking 模式（DeepSeek）；summary/分类等轻量任务可设 False
         """
         request = LLMRequest(
             prompt="",  # messages 模式下不需要
@@ -62,6 +104,7 @@ class LLMAdapter:
             role=role,
             frequency_penalty=frequency_penalty,
             presence_penalty=presence_penalty,
+            enable_thinking=enable_thinking,
         )
         return await self.complete(request)
 
@@ -70,16 +113,18 @@ class LLMAdapter:
     ) -> AsyncIterator[LLMStreamChunk]:
         """流式调用（不重试，调用方自己处理）"""
         provider = self.router.get_provider(request.role)
+        _log_request(request)
         async for chunk in provider.stream(request):
             yield chunk
 
     async def stream_with_callback(
         self,
         request: LLMRequest,
-        on_chunk: Callable[[LLMStreamChunk], Awaitable[None]],
+        on_chunk: Callable,
     ) -> LLMStreamChunk:
         """流式 + 回调（给 WS 推送用）"""
         provider = self.router.get_provider(request.role)
+        _log_request(request)
         return await stream_with_callback(provider, request, on_chunk)
 
     async def generate_image(

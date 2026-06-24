@@ -147,6 +147,8 @@ class Project(BaseModel):
     # v0.8: 探索度旋钮 (conservative/standard/wild)
     exploration_level: str = "standard"
     current_pov: Optional[str] = None
+    # v0.9: 世界封面图 URL（相对路径 /static/projects/{id}/cover.png，null 表示未生成）
+    cover_image_url: Optional[str] = None
     created_at: datetime
     updated_at: datetime
     deleted_at: Optional[datetime] = None

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from enum import Enum
 from typing import Optional, List, Dict, Any
+
 from pydantic import BaseModel, Field
 
 
@@ -35,13 +36,15 @@ class LLMRequest(BaseModel):
     messages: List[Dict[str, Any]] = Field(default_factory=list)  # v0.4.1 新增
     role: ModelRole = ModelRole.TEXT
     temperature: float = Field(0.7, ge=0, le=2)
-    max_tokens: int = Field(2048, ge=1, le=8192)
+    max_tokens: int = Field(8192, ge=1, le=16384)
     system_prompt: Optional[str] = None
     stream: bool = False
     response_format: Optional[Dict[str, Any]] = None  # v0.6 新增：{type: "json_object"}
     # v0.8.1: 探索度参数（透传到 OpenAI 兼容 provider）
     frequency_penalty: float = Field(default=0.0, ge=-2, le=2)
     presence_penalty: float = Field(default=0.0, ge=-2, le=2)
+    # v0.8.2: 是否启用 thinking 模式（DeepSeek v4-pro）；summary/分类等轻量调用可关闭以节省 token
+    enable_thinking: bool = True
 
 
 class LLMResponse(BaseModel):

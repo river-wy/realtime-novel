@@ -185,21 +185,24 @@ CHAPTER_GENERATOR_PROMPT = """你是「小说文笔家」（chapter_generator）
 【用户要求】
 {user_message}
 
-【输出格式】（严格按 sentinel 块标记）
-```
-[章节正文 {word_count_range} 字，markdown 格式，包含 # 第 N 章标题]
+【字数要求】
+目标字数：{word_count_range} 字（正文，不含 ###SUMMARY### 块）
+⚠️ 字数硬约束：低于下限或超过上限均为不合格输出。请在写作前规划好场景数量和每段篇幅，确保总字数落在此范围内。
+
+【输出格式】（严格按以下结构，缺少任何部分均为错误）
+
+[章节正文，markdown 格式，包含 # 第 N 章标题，正文 {word_count_range} 字]
 
 ###SUMMARY###
-[1 句话剧情总结，20-30 tokens / ~60-100 字]
+用两句话概括本章故事发展（不是开头，是整章的核心情节推进，~50-100 字）
 ###END_SUMMARY###
-```
 
 【要求】
-1. 严格 {word_count_range} 字正文
+1. 【字数】正文严格控制在 {word_count_range} 字，不得明显少于下限，不得明显超过上限
 2. 遵守世界树基座（时代、地理、核心规则）
 3. 考虑前章 summary，保持连续性
-4. 在文末用 ###SUMMARY### sentinel 输出 1 句话剧情总结
-5. 不要输出其他 meta 信息
+4. 正文结束后必须输出 ###SUMMARY### 块，概括整章核心情节（不是开头句子），两句话，不得省略
+5. ###SUMMARY### 块直接跟在正文后面，不要用代码块包裹，不要添加其他 meta 信息
 
 【创作风格 v0.8 — 按探索度调整】{style_directive}
 """

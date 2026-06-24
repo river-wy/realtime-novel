@@ -27,6 +27,8 @@ class ProjectInfo(BaseModel):
     # onboard 续接用
     onboarding_step: Optional[int] = None  # null=从未进过, 0=未开始, 1-4=进行中
     status: Optional[str] = "not_started"  # not_started / in_progress / completed
+    # v0.9: 世界封面图
+    cover_image_url: Optional[str] = None
 
 
 class ProjectListResponse(BaseModel):
@@ -61,6 +63,11 @@ class ProjectDetailResponse(BaseModel):
     seven_artifacts: Optional[dict[str, Any]] = None
     world_tree: Optional[dict[str, Any]] = None
     chapters: Optional[list[dict]] = None
+    # onboard 续接用
+    onboarding_step: Optional[int] = None      # 已完成到哪步 (0=未开始, 1-4=进行中)
+    onboarding_payload: Optional[dict[str, Any]] = None  # 已填入的 payload (续接回填用)
+    # v0.9: 世界封面图
+    cover_image_url: Optional[str] = None
 
 
 class UpdateExplorationLevelRequest(BaseModel):
@@ -136,6 +143,9 @@ async def get_project(project_id: str):
         seven_artifacts=project.get("seven_artifacts"),
         world_tree=project.get("world_tree"),
         chapters=project.get("chapters"),
+        onboarding_step=project.get("onboarding_step"),
+        onboarding_payload=project.get("onboarding_payload") or None,
+        cover_image_url=project.get("cover_image_url"),  # v0.9
     )
 
 

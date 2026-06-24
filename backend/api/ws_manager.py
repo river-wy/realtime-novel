@@ -484,28 +484,64 @@ async def handle_onboarding_confirm(ws: WebSocket, user_id: str, data: dict):
         project_id=project_id,
     )
 
-    # v0.8.3: Step 4 完成 → LLM 自动生成项目名
+    # v0.8.3 / v0.9: Step 4 完成 → 并发生成项目名 + 封面图
     if step == 4:
         try:
             from backend.services.onboarding_artifacts import load_payload
             from backend.persistence.project_repository import ProjectRepository
             from backend.agent.onboarding_agent import _generate_project_name
             from backend.services.async_onboarding_flow import AsyncOnboardingFlow
+            from backend.services.cover_image_generator import generate_and_save_cover
+            from backend.config.config_loader import PROJECT_ROOT
 
             payload = load_payload(project_id)
-            new_name = await _generate_project_name(
+            proj_repo = ProjectRepository()
+            projects_root = PROJECT_ROOT / "data" / "projects"
+
+            # v0.9: 并发生成名称 + 封面图（互不依赖）
+            name_task = _generate_project_name(
                 story_core=payload.get("story_core", ""),
                 characters=payload.get("characters", ""),
                 tone=payload.get("tone", []),
             )
+            cover_task = generate_and_save_cover(
+                project_id=project_id,
+                payload=payload,
+                projects_root=projects_root,
+            )
+            new_name, cover_image_url = await asyncio.gather(
+                name_task, cover_task, return_exceptions=True
+            )
+
+            # 处理名称结果
+            if isinstance(new_name, Exception):
+                log.warning("auto-generate project name failed: %s", str(new_name))
+                new_name = None
             if new_name:
-                # 1. 改 projects.name
-                ProjectRepository().update_name(project_id, new_name)
-                # 2. 存到 state_json.project_name（委托给 service 层）
+                proj_repo.update_name(project_id, new_name)
                 AsyncOnboardingFlow().update_project_name_in_state(project_id, new_name)
                 log.info("auto-generated project name: project_id=%s, name=%s", project_id, new_name)
+                await ws.send_json({
+                    "type": "project_name_updated",
+                    "project_id": project_id,
+                    "name": new_name,
+                })
+
+            # 处理封面图结果
+            if isinstance(cover_image_url, Exception):
+                log.warning("auto-generate cover image failed: %s", str(cover_image_url))
+                cover_image_url = None
+            if cover_image_url:
+                proj_repo.update_cover_image_url(project_id, cover_image_url)
+                log.info("cover image saved: project_id=%s, url=%s", project_id, cover_image_url)
+                await ws.send_json({
+                    "type": "cover_image_updated",
+                    "project_id": project_id,
+                    "cover_image_url": cover_image_url,
+                })
+
         except Exception as e:
-            log.warning("auto-generate project name failed: %s", str(e))
+            log.warning("Step 4 post-confirm tasks failed: %s", str(e))
 
 
 async def _write_onboarding_to_artifacts(

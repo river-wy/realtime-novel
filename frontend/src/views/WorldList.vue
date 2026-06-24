@@ -97,7 +97,16 @@ function statusLabel(status: string, step: number | null): string {
         class="project-card"
         @click="goToProject(p)"
       >
-        <div class="card-bg" :style="{ background: `linear-gradient(135deg, var(--color-night-2), var(--color-night-3))` }"></div>
+        <!-- v0.9: 封面图背景（有图用图，无图用渐变占位） -->
+        <div
+          class="card-bg"
+          :class="p.cover_image_url ? 'card-bg-image' : 'card-bg-placeholder'"
+          :style="p.cover_image_url
+            ? { backgroundImage: `url(${p.cover_image_url})` }
+            : {}"
+        >
+          <span v-if="!p.cover_image_url" class="card-bg-placeholder-icon">📖</span>
+        </div>
         <div class="card-content">
           <h3 class="card-title">{{ p.name }}</h3>
           <p class="card-meta">
@@ -209,45 +218,79 @@ function statusLabel(status: string, step: number | null): string {
 }
 
 .project-card {
-  position: relative;
+  background: var(--color-night-2);
+  border: 1px solid var(--color-night-3);
   border-radius: var(--radius-md);
   overflow: hidden;
   cursor: pointer;
-  transition: transform var(--motion-base) var(--ease-out);
-  min-height: 160px;
+  transition: all var(--motion-base) var(--ease-out);
+  position: relative;
 }
 .project-card:hover {
-  transform: translateY(-4px);
+  transform: translateY(-3px);
+  border-color: var(--color-accent-3);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
 }
 
-.card-bg {
-  position: absolute;
-  inset: 0;
-  opacity: 0.7;
+/* v0.9: 左图右字 */
+.card-inner {
+  display: flex;
+  align-items: stretch;
+  min-height: 100px;
+}
+.card-thumb {
+  width: 100px;
+  flex-shrink: 0;
+  background-size: cover;
+  background-position: center;
+  position: relative;
+  overflow: hidden;
+}
+.card-thumb-placeholder {
+  background: linear-gradient(160deg, var(--color-night-1), var(--color-night-3));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.card-thumb-icon {
+  font-size: 36px;
+  opacity: 0.35;
 }
 .card-content {
-  position: relative;
-  padding: var(--space-5);
+  flex: 1;
+  padding: var(--space-4);
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
 }
 .card-title {
-  font-size: var(--text-xl);
-  margin-bottom: var(--space-3);
+  font-size: var(--text-base);
+  font-weight: 600;
   color: var(--color-text);
+  margin-bottom: var(--space-2);
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 .card-meta {
   display: flex;
-  gap: var(--space-3);
-  font-size: var(--text-sm);
-  color: var(--color-text-dim);
+  gap: var(--space-2);
   flex-wrap: wrap;
+  margin-bottom: var(--space-2);
 }
 .palette {
   background: rgba(139, 92, 246, 0.2);
-  padding: 2px 8px;
+  padding: 2px 6px;
   border-radius: var(--radius-sm);
+  font-size: var(--text-xs);
 }
-.chapter-count {
+.card-chapter-count {
+  font-size: var(--text-xs);
   color: var(--color-accent-2);
+  font-weight: 500;
 }
 
 .exploration-badge, .status-badge {

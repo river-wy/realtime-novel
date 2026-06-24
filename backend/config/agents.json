@@ -2,25 +2,29 @@
   "_comment": "v0.8 模型路由 + 探索度配置。所有可用模型 + 每个 agent 调用的 model + 探索度档位。api_key 走 .llm_api_key 文件（gitignored）。",
   "exploration_levels": {
     "_comment": "v0.8 探索度档位 (conservative 严守 / standard 平衡 / wild 大胆). 项目级开关, specialist 调用 LLM 时按项目 exploration_level 查表",
+    "_word_count_comment": "chapter_word_count: 每章目标字数 (精确值). Prompt 注入时转为 [N×0.95 ~ N×1.05] 的浮动范围给 LLM 适当弹性.",
     "conservative": {
       "temperature": 0.6,
-      "max_tokens": 2500,
+      "max_tokens": 8192,
       "frequency_penalty": 0.1,
       "supplement_aggressiveness": "low",
+      "chapter_word_count": 5000,
       "description": "严守用户输入, AI 补充少, 适合'我已经有完整想法'"
     },
     "standard": {
       "temperature": 0.85,
-      "max_tokens": 4500,
+      "max_tokens": 8192,
       "frequency_penalty": 0.3,
       "supplement_aggressiveness": "medium",
+      "chapter_word_count": 5000,
       "description": "平衡, AI 基于用户输入合理补充, 适合日常创作"
     },
     "wild": {
       "temperature": 1.05,
-      "max_tokens": 6000,
+      "max_tokens": 8192,
       "frequency_penalty": 0.5,
       "supplement_aggressiveness": "high",
+      "chapter_word_count": 5000,
       "description": "大胆探索, AI 补充发散, 适合'我想试不同方向'"
     }
   },
@@ -31,7 +35,7 @@
       "model_id": "deepseek-v4-pro-tencent",
       "default_params": {
         "temperature": 0.7,
-        "max_tokens": 2048
+        "max_tokens": 8192
       },
       "supports_thinking": true
     },

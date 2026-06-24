@@ -8,7 +8,7 @@
  * - 事件订阅：agent_thinking / onboarding_proposal / onboarding_confirmed / onboarding_step_done / error
  * - 暴露 messages / fields / streaming / requestProposal / confirm / close
  */
-import { ref, computed, onUnmounted } from 'vue'
+import {computed, onUnmounted, ref} from 'vue'
 
 const WS_BASE = `ws://${window.location.host}/api/chat`
 
@@ -45,6 +45,12 @@ export function useOnboardingChat(projectId: () => string | null) {
   /** Step 是否已完成（onboarding_step_done 收到） */
   const stepDone = ref(false)
 
+  /** confirm 是否正在发送中（防双击） */
+  const confirming = ref(false)
+
+  /** Step 4 完成后 LLM 自动生成的项目名（通过 project_name_updated 事件接收） */
+  const generatedProjectName = ref<string | null>(null)
+
   function addAgentMessage(content: string, isThinking = false) {
     messages.value.push({
       role: 'agent',
@@ -70,7 +76,12 @@ export function useOnboardingChat(projectId: () => string | null) {
     })
   }
 
-  function open(step: OnboardingStepNum) {
+  /**
+   * 打开 WS 连接并进入指定 step
+   * @param step 3 or 4
+   * @param initialFields 续接时传入的已落库字段（传入时直接回填，跳过自动 proposal）
+   */
+  function open(step: OnboardingStepNum, initialFields?: Record<string, string>) {
     if (ws.value && currentStep.value === step) {
       // 已连接同一 step，直接复用
       return
@@ -82,9 +93,13 @@ export function useOnboardingChat(projectId: () => string | null) {
     connecting.value = true
     error.value = null
     currentStep.value = step
-    fields.value = {}
+    // 续接：预填已有字段（不触发 proposal，让用户决定是否重新生成）
+    fields.value = initialFields ? { ...initialFields } : {}
     messages.value = []
     stepDone.value = false
+
+    // 是否为续接（有已有数据）
+    const hasInitialFields = initialFields && Object.keys(initialFields).length > 0
 
     const socket = new WebSocket(WS_BASE)
     socket.onopen = () => {
@@ -92,11 +107,24 @@ export function useOnboardingChat(projectId: () => string | null) {
       if (ws.value === socket) {
         connected.value = true
         connecting.value = false
-        addAgentMessage(
-          step === 3
-            ? '👋 你好！我是你的小说创作引导师。\n\n我已经看过你在 Step 1 选择的题材/风格/基调，也看到了 Step 2 的视觉色调偏好。\n\n点下方「让 Agent 提议」按钮，我会基于这些信息为你生成 Step 3 的故事大纲。生成后你可以随时在输入框里告诉我「改一下 XXX」「更具体」之类的修改意见。'
-            : '👋 现在我们进入 Step 4 大纲细化。\n\nStep 3 的故事大纲已经写入 7 件基座。我会基于前 3 步的所有信息，为你进一步细化大纲。同样可以随时让 Agent 修改。',
-        )
+        if (hasInitialFields) {
+          // 续接模式：显示上次数据已恢复，不自动触发 proposal
+          addAgentMessage(
+            step === 3
+              ? '👋 欢迎回来！我已为你恢复了上次的故事大纲。\n\n你可以直接「确认大纲 → 写 7 件」，或告诉我你想调整的方向，也可以点「让 Agent 重新提议」换一套方案。'
+              : '👋 欢迎回来！我已为你恢复了上次的大纲细化内容。\n\n你可以直接「确认大纲 → 写 7 件」，或告诉我你想调整的方向，也可以点「让 Agent 重新提议」换一套方案。',
+          )
+          // 续接不自动触发 proposal，让用户主动操作
+        } else {
+          // 全新模式：自动触发第一次提议
+          addAgentMessage(
+            step === 3
+              ? '👋 你好！我是你的小说创作引导师。\n\n我已经看过你在 Step 1 选择的题材/风格/基调，也看到了 Step 2 的视觉色调偏好。正在为你生成故事大纲...'
+              : '👋 现在我们进入 Step 4 大纲细化。\n\nStep 3 的故事大纲已经写入 7 件基座。正在为你进一步细化大纲...',
+          )
+          // silent=true: 开场白已含「正在生成...」，跳过多余的 inline 提示
+          requestProposal('', true)
+        }
       }
     }
     socket.onmessage = (event) => {
@@ -140,6 +168,7 @@ export function useOnboardingChat(projectId: () => string | null) {
       )
     } else if (t === 'onboarding_confirmed') {
       thinking.value = false
+      confirming.value = false
       addAgentMessage(
         `✅ Step ${msg.step} 字段已写入 7 件基座（${msg.artifacts_written?.join(', ') || ''}）`,
       )
@@ -147,8 +176,14 @@ export function useOnboardingChat(projectId: () => string | null) {
       thinking.value = false
       stepDone.value = true
       addAgentMessage(`🎉 Step ${msg.step} 完成，准备进入 Step ${msg.next_step}。`)
+    } else if (t === 'project_name_updated') {
+      // Step 4 完成后 LLM 自动生成的世界名称
+      if (msg.name) {
+        generatedProjectName.value = msg.name
+      }
     } else if (t === 'error') {
       thinking.value = false
+      confirming.value = false
       error.value = msg.message || '未知错误'
       addAgentMessage(`❌ 错误：${msg.message || '未知错误'}`)
     } else {
@@ -159,9 +194,10 @@ export function useOnboardingChat(projectId: () => string | null) {
 
   /**
    * 让 Agent 提议大纲 (4 字段)
-   * 首次调用 user_message='', 后续调用传修改意见
+   * @param userMessage 首次自动触发传 ''，后续用户修改意见传文字
+   * @param silent 为 true 时跳过「🤔 正在为你生成...」提示（自动触发时开场白已经说了）
    */
-  function requestProposal(userMessage = '') {
+  function requestProposal(userMessage = '', silent = false) {
     if (!ws.value || ws.value.readyState !== WebSocket.OPEN) {
       error.value = 'WS 未连接'
       return
@@ -173,7 +209,7 @@ export function useOnboardingChat(projectId: () => string | null) {
     }
     if (userMessage) {
       addUserMessage(userMessage)
-    } else {
+    } else if (!silent) {
       addAgentMessage('🤔 正在为你生成故事大纲...')
     }
     ws.value.send(JSON.stringify({
@@ -202,6 +238,9 @@ export function useOnboardingChat(projectId: () => string | null) {
       error.value = '字段为空，请先让 Agent 提议'
       return
     }
+    // 防双击：发送中时直接忽略
+    if (confirming.value) return
+    confirming.value = true
     addUserMessage('✅ 确认这个大纲，写入 7 件基座')
     ws.value.send(JSON.stringify({
       type: 'onboarding_confirm',
@@ -235,6 +274,8 @@ export function useOnboardingChat(projectId: () => string | null) {
     thinking,
     error,
     stepDone,
+    confirming,
+    generatedProjectName,  // Step 4 完成后 LLM 生成的世界名称
     // computed
     hasFields: computed(() => Object.keys(fields.value).length > 0),
     isStreaming: computed(() => thinking.value),

@@ -6,8 +6,11 @@ Phase 4: http_routes（12 个 RESTful 端点）
 """
 from __future__ import annotations
 
+from pathlib import Path
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 # v0.8.3: 初始化日志 (在 import 其他模块前调, 让后续 logger 接管)
 from backend.utils.logger import configure_logging
@@ -42,6 +45,12 @@ app.include_router(project_router)
 app.include_router(chapter_router)
 app.include_router(action_router)
 app.include_router(ws_router)
+
+# v0.9: 静态文件服务（封面图等）
+# /static/projects/{project_id}/cover.png → data/projects/{project_id}/cover.png
+_PROJECTS_DATA_DIR = Path(__file__).parent.parent.parent / "data" / "projects"
+_PROJECTS_DATA_DIR.mkdir(parents=True, exist_ok=True)
+app.mount("/static/projects", StaticFiles(directory=str(_PROJECTS_DATA_DIR)), name="project-static")
 
 
 def create_app() -> FastAPI:

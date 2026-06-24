@@ -151,8 +151,6 @@ class OnboardingAgent:
             return {"fields": current_fields, "error": f"LLM 调用失败: {e}"}
 
         # 4. 解析 + Pydantic 校验
-        # v0.8.3: LLM 偶尔返 markdown 包裹的 JSON (即使 response_format=json_object 也不一定 100% 严格)
-        # 先 strip markdown code block, 再 parse
         import re
         def _extract_json(text: str) -> str:
             """从 LLM 输出中提取 JSON object. 三种策略递进:
@@ -176,10 +174,10 @@ class OnboardingAgent:
                 if escape:
                     escape = False
                     continue
-                if c == "\\\\":
+                if c == "\\":  # 单个反斜杠，触发 escape 状态
                     escape = True
                     continue
-                if c == '\"' and not escape:
+                if c == '"' and not escape:
                     in_string = not in_string
                     continue
                 if in_string:
@@ -196,7 +194,44 @@ class OnboardingAgent:
                 return text[first:last + 1]
             return text
 
+        def _sanitize_json_string(text: str) -> str:
+            """清洗 JSON 字符串中 LLM 写入的裸控制字符（换行/tab 等）。
+
+            LLM 有时在 JSON 字段值内直接写真实换行（\n）而不是转义 \\n，
+            导致 json.loads 报 Invalid control character。
+            """
+            result = []
+            in_string = False
+            escape = False
+            for ch in text:
+                if escape:
+                    escape = False
+                    result.append(ch)
+                    continue
+                if ch == "\\":
+                    escape = True
+                    result.append(ch)
+                    continue
+                if ch == '"':
+                    in_string = not in_string
+                    result.append(ch)
+                    continue
+                if in_string:
+                    # 字符串内部的裸控制字符转义
+                    if ch == "\n":
+                        result.append("\\n")
+                    elif ch == "\r":
+                        result.append("\\r")
+                    elif ch == "\t":
+                        result.append("\\t")
+                    else:
+                        result.append(ch)
+                else:
+                    result.append(ch)
+            return "".join(result)
+
         raw_clean = _extract_json(raw) if raw else raw
+        raw_clean = _sanitize_json_string(raw_clean) if raw_clean else raw_clean
         try:
             data = json.loads(raw_clean)
             if step == 3:
@@ -217,7 +252,7 @@ class OnboardingAgent:
         }
 
     def _is_regenerate_request(self, user_message: str) -> bool:
-        """v0.8.3: 检测「重新提议」信号
+        """检测「重新提议」信号
 
         匹配: 重新提议/重新生成/再想想/不一样/为什么没变/换个/重做/再来
         不匹配: 明确修改意见 (e.g. "主角改成女性")
@@ -318,9 +353,10 @@ async def _generate_project_name(story_core: str, characters: str, tone: list[st
                     tone=tone_str,
                 ),
             }],
-            max_tokens=100,
-            temperature=1.0,
+            max_tokens=200,    # 名字很短，不需要大 budget
+            temperature=0.7,
             role=ModelRole.TEXT,
+            enable_thinking=False,  # 轻量命名任务，关闭 thinking 节省 token + 避免 thinking 吞噬 output
         )
         response = await adapter.complete(request)
         raw = (response.content or "").strip()

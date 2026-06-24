@@ -62,14 +62,32 @@ def get_style_directive(level: str) -> str:
     return directives.get(level, directives["standard"])
 
 
+def get_chapter_word_count_range(level: str) -> str:
+    """v0.9: 从 agents.json 读 chapter_word_count，生成 ±5% 浮动范围字符串
+
+    例: chapter_word_count=5000 → "4750-5250"
+    fallback: 未配置时默认 5000 字
+    """
+    from backend.config import get_exploration_level_config
+    try:
+        cfg = get_exploration_level_config(level)
+        target = int(cfg.get("chapter_word_count", 5000))
+    except Exception:
+        target = 5000
+    low = int(target * 0.95)
+    high = int(target * 1.05)
+    return f"{low}-{high}"
+
+
 def fill_chapter_prompt_placeholders(template: str, project_id: str) -> str:
     """v0.8: 填充 CHAPTER_GENERATOR_PROMPT 的探索度占位符 (按项目动态注入)
 
     v0.8.1: 用 string.Template ($-placeholder) 避免和 {world_tree}/{chapter_summaries}
     等其他 {}-placeholder 冲突。
+    v0.9: word_count_range 从 agents.json.exploration_levels[level].chapter_word_count 读取（±5% 浮动）
 
     占位符 (用 $ 前缀避免冲突):
-    - $word_count_range: 字数范围 (conservative=2000-2500, standard=2000-3000, wild=2500-3500)
+    - $word_count_range: 字数范围，由 chapter_word_count ± 5% 生成（如 "4750-5250"）
     - $style_directive:   创作风格指导 (按 level)
 
     如果 template 不含占位符 (用户自定义 system_prompt), 原样返回。
@@ -84,12 +102,7 @@ def fill_chapter_prompt_placeholders(template: str, project_id: str) -> str:
     project = repo.get(project_id)
     level = project.exploration_level if project else "standard"
 
-    word_count_map = {
-        "conservative": "2000-2500",
-        "standard": "2000-3000",
-        "wild": "2500-3500",
-    }
-    word_count_range = word_count_map.get(level, "2000-3000")
+    word_count_range = get_chapter_word_count_range(level)
     style_directive = get_style_directive(level)
 
     # string.Template 要求 $-placeholder，先把模板里的 {} 占位符替换为 $ 格式

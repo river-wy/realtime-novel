@@ -6,7 +6,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from backend.utils.logger import logger
 
+
+@logger
 class AsyncChapterGenerator:
     """v0.4 章节生成占位（v0.4.1 不变，仍委托给 state_graph_stub）"""
 
@@ -21,11 +24,19 @@ class AsyncChapterGenerator:
         actor_character: str | None = None,
     ) -> dict:
         """委托给 state_graph_stub.generate_chapter_via_state_graph（DB-aware）"""
+        import time
+        self.log.info("ChapterGen START: project=%s, intervention=%s, actor=%s",
+                 project_id, bool(intervention), bool(actor_character))
+        t0 = time.monotonic()
         from backend.agent.state_graph_stub import generate_chapter_via_state_graph
-        return await generate_chapter_via_state_graph(
+        result = await generate_chapter_via_state_graph(
             project_id=project_id,
             intervention=intervention,
             actor_feedback=actor_feedback,
             actor_character=actor_character,
         )
+        self.log.info("ChapterGen DONE: project=%s, num=%s, title=%r, word_count=%s, elapsed=%.1fs",
+                 project_id, result.get("num"), result.get("title"),
+                 result.get("word_count"), time.monotonic() - t0)
+        return result
 

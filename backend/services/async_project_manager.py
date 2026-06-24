@@ -14,8 +14,10 @@ from backend.persistence import (
     ProjectRepository, ChapterRepository, get_store,
     ProjectDeletedRepository,
 )
+from backend.utils.logger import logger
 
 
+@logger
 class AsyncProjectManager:
     """ 异步项目管理器 """
 
@@ -39,6 +41,7 @@ class AsyncProjectManager:
         # id 自动生成, 与 name 分离
         import secrets
         project_id = f"world-{secrets.token_hex(4)}"  # 8 字符 hex, 例 world-3f7a8b2c
+        self.log.info("PM create START: name=%r, exploration_level=%s, id=%s", name, exploration_level, project_id)
         # 1. DB 落项目 (v0.8: 传 exploration_level)
         project = self._proj_repo.create(
             project_id=project_id, name=name, palette=palette,
@@ -48,6 +51,7 @@ class AsyncProjectManager:
         project_path = self.projects_root / project_id
         project_path.mkdir(parents=True, exist_ok=True)
         (project_path / "chapters").mkdir(parents=True, exist_ok=True)
+        self.log.info("PM create DONE: id=%s, path=%s", project_id, project_path)
         return {
             "id": project.id,
             "name": project.name,
@@ -88,17 +92,24 @@ class AsyncProjectManager:
                 "word_count": c.word_count,
                 "file_path": c.file_path,
             })
-        # 读 onboarding_state.current_step (项目从哪一步开始续接)
+        # 读 onboarding_state.current_step + payload (项目从哪一步续接 + 已填入的数据)
         onboarding_step = None
+        onboarding_payload: dict = {}
         try:
             from backend.persistence.sqlite_store import get_store
+            import json as _json
             with get_store().connection() as conn:
                 row = conn.execute(
-                    "SELECT current_step FROM onboarding_state WHERE project_id = ?",
+                    "SELECT current_step, state_json FROM onboarding_state WHERE project_id = ?",
                     (project_id,),
                 ).fetchone()
             if row:
                 onboarding_step = int(row["current_step"])
+                try:
+                    state_data = _json.loads(row["state_json"])
+                    onboarding_payload = state_data.get("payload", {}) or {}
+                except Exception:
+                    pass
         except Exception:
             pass
         return {
@@ -107,7 +118,9 @@ class AsyncProjectManager:
             "palette": project.palette,
             "exploration_level": project.exploration_level,  # v0.8
             "current_pov": project.current_pov,
+            "cover_image_url": project.cover_image_url,  # v0.9
             "onboarding_step": onboarding_step,  # 0=未开始, 1-4=进行中, None=已加载
+            "onboarding_payload": onboarding_payload,  # Step 1-4 已填入的字段（续接回填用）
             "seven_artifacts": all_artifacts,  # 兼容旧字段名
             "world_tree": all_artifacts.get("world_tree", {}),
             "chapters": chapters,
@@ -145,6 +158,7 @@ class AsyncProjectManager:
                 "exploration_level": p.exploration_level,  # v0.8
                 "chapter_count": chapter_count,
                 "onboarding_step": onboarding_step,  # v0.8.3: 续接用
+                "cover_image_url": p.cover_image_url,  # v0.9
                 "status": "completed" if chapter_count > 0 else (
                     "in_progress" if onboarding_step else "not_started"
                 ),
@@ -233,6 +247,7 @@ class AsyncProjectManager:
         """
         if not confirm:
             raise ValueError("rollback requires confirm=True")
+        self.log.warning("PM rollback START: project=%s, to_chapter=%d", project_id, to_chapter)
         # DB cascade 删章节 metadata + 关联表
         kept = self._chap_repo.count_chapters(project_id)
         removed = self._chap_repo.rollback_to(project_id, to_chapter)
@@ -254,6 +269,7 @@ class AsyncProjectManager:
                         f.unlink()
                 except (ValueError, IndexError):
                     continue
+        self.log.warning("PM rollback DONE: project=%s, kept=%d, removed=%d", project_id, kept, removed)
         return {
             "project_id": project_id,
             "to_chapter": to_chapter,
@@ -267,6 +283,7 @@ class AsyncProjectManager:
         与 delete() 区别：额外写 projects_deleted 表
         返回 {trash_path, deleted_at}
         """
+        self.log.warning("PM soft_delete START: project=%s", project_id)
         # 软删前先读元数据
         project = await self.load(project_id) or {}
         result = await self.delete(project_id, confirm=confirm)
@@ -278,6 +295,7 @@ class AsyncProjectManager:
             palette=project.get("palette", ""),
             trash_path=result["trash_path"],
         )
+        self.log.warning("PM soft_delete DONE: project=%s, trash=%s", project_id, result.get("trash_path"))
         return result
 
     async def delete(self, project_id: str, confirm: bool = False) -> dict:
@@ -287,6 +305,7 @@ class AsyncProjectManager:
         """
         if not confirm:
             raise ValueError("delete requires confirm=True")
+        self.log.warning("PM delete START: project=%s", project_id)
         project_path = self.projects_root / project_id
         trash_path = ""
         if project_path.exists():

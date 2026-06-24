@@ -123,6 +123,7 @@ async function ensureProject() {
 }
 
 // ============ v0.8.3: 续接逻辑 (从 query 读 projectId + step) ============
+// v0.9: 续接时回填已有 payload 数据（Step1 tags / Step2 palette / Step3-4 fields）
 
 onMounted(() => {
   const qProjectId = route.query.projectId as string | undefined
@@ -130,13 +131,39 @@ onMounted(() => {
   if (qProjectId && qStep) {
     // 续接: 跳到指定 step
     projectId.value = qProjectId
-    currentStep.value = Math.min(Math.max(parseInt(qStep) || 1, 1), 5) as 1 | 2 | 3 | 4 | 5
-    // 加载项目名 (显示用)
+    const targetStep = Math.min(Math.max(parseInt(qStep) || 1, 1), 5) as 1 | 2 | 3 | 4 | 5
+    currentStep.value = targetStep
+    // 加载项目详情（含 onboarding_payload 回填）
     import('@/api/projects').then(m => m.getProject(qProjectId)).then(d => {
       projectName.value = d.name
-      if (currentStep.value === 3 || currentStep.value === 4) {
-        // Step 3+ 是 WS, 要 open chat
-        chat.open(currentStep.value)
+      const payload = d.onboarding_payload || {}
+
+      // 回填 Step 1 数据（无论当前在哪步，都尝试回填，供用户查看）
+      if (payload.genres?.length) genres.value = [...payload.genres]
+      if (payload.styles?.length) styles.value = [...payload.styles]
+      if (payload.tone?.length) tone.value = [...payload.tone]
+
+      // 回填 Step 2 数据
+      if (payload.palette) palette.value = payload.palette
+
+      if (targetStep === 3 || targetStep === 4) {
+        // Step 3/4：提取对应字段，有数据则续接模式（不触发 proposal）
+        const step3Fields: Record<string, string> = {}
+        if (payload.story_core) step3Fields.story_core = payload.story_core
+        if (payload.characters) step3Fields.characters = payload.characters
+        if (payload.opening_scene) step3Fields.opening_scene = payload.opening_scene
+
+        const step4Fields: Record<string, string> = {}
+        if (payload.main_arc) step4Fields.main_arc = payload.main_arc
+        if (payload.sub_plots) step4Fields.sub_plots = payload.sub_plots
+        if (payload.seeds) step4Fields.seeds = payload.seeds
+        if (payload.reader_feeling) step4Fields.reader_feeling = payload.reader_feeling
+
+        // 根据当前 step 决定传哪批初始字段
+        const initialFields = targetStep === 3 ? step3Fields : step4Fields
+        const hasData = Object.keys(initialFields).length > 0
+        // 有已落库数据：续接模式；没有：全新模式（initialFields=undefined → 自动 proposal）
+        chat.open(targetStep, hasData ? initialFields : undefined)
       }
     }).catch(() => {})
   }
@@ -209,10 +236,30 @@ watch(() => chat.stepDone.value, (done) => {
     }, 1500)  // 给用户时间看到 "Step 3 完成" 提示
   } else if (currentStep.value === 4) {
     // Step 4 done → Step 5
+    // 注意：不立即 close WS，因为 project_name_updated 事件在名字生成后才推（异步，几秒延迟）
+    // 等收到名字 或 15s 超时后再关
     setTimeout(() => {
       currentStep.value = 5
-      chat.close()
+      // 延迟关 WS：等 project_name_updated 事件有机会到达
+      const closeTimeout = setTimeout(() => chat.close(), 15000)
+      // 如果已经收到名字，可以提前关
+      const stopWatch = watch(() => chat.generatedProjectName.value, (name) => {
+        if (name) {
+          clearTimeout(closeTimeout)
+          setTimeout(() => {
+            chat.close()
+            stopWatch()
+          }, 500)
+        }
+      })
     }, 1500)
+  }
+})
+
+// 监听 Step 4 LLM 自动生成的世界名称 → 更新显示
+watch(() => chat.generatedProjectName.value, (name) => {
+  if (name) {
+    projectName.value = name
   }
 })
 
@@ -424,10 +471,10 @@ function getStepHint(step: number): string {
           </button>
           <button
             class="btn btn-success btn-large"
-            :disabled="!chat.hasFields.value || chat.thinking.value || chat.stepDone.value"
-            @click="handleConfirm"
-          >
-            {{ chat.stepDone.value ? '✅ 已写入 7 件' : '✅ 确认大纲 → 写 7 件' }}
+:disabled="!chat.hasFields.value || chat.thinking.value || chat.stepDone.value || chat.confirming.value"
+@click="handleConfirm"
+>
+{{ chat.stepDone.value ? '✅ 已写入 7 件' : (chat.confirming.value ? '⏳ 写入中...' : '✅ 确认大纲 → 写 7 件') }}
           </button>
         </div>
       </div>
@@ -437,6 +484,12 @@ function getStepHint(step: number): string {
     <section v-else-if="currentStep === 5" class="step fade-in">
       <div class="generate-card">
         <h2>🎬 准备生成第 1 章</h2>
+        <!-- 世界名称展示（Step 4 LLM 生成后更新） -->
+        <div v-if="projectName" class="world-name-banner">
+          <span class="world-name-label">✨ 你的世界</span>
+          <span class="world-name-value">「{{ projectName }}」</span>
+          <span class="world-name-hint">已准备好</span>
+        </div>
         <p>AI 会读取 Step 1-4 的所有信息（题材 / 风格 / 基调 / 故事大纲），生成第 1 章 + 摘要。</p>
         <p class="time-hint">预计耗时 30-60 秒</p>
         <div v-if="loading" class="generating">
@@ -856,6 +909,32 @@ function getStepHint(step: number): string {
   font-size: var(--text-xl);
   margin-bottom: var(--space-3);
   color: var(--color-accent-1);
+}
+.world-name-banner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  margin: var(--space-3) 0 var(--space-5);
+  padding: var(--space-3) var(--space-5);
+  background: linear-gradient(135deg, rgba(196, 181, 253, 0.12), rgba(167, 243, 208, 0.08));
+  border: 1px solid var(--color-accent-2);
+  border-radius: var(--radius-lg);
+  flex-wrap: wrap;
+}
+.world-name-label {
+  font-size: var(--text-sm);
+  color: var(--color-text-dim);
+}
+.world-name-value {
+  font-size: var(--text-xl);
+  font-weight: 700;
+  color: var(--color-accent-2);
+  letter-spacing: 0.02em;
+}
+.world-name-hint {
+  font-size: var(--text-sm);
+  color: var(--color-accent-3);
 }
 .generate-card p {
   color: var(--color-text-dim);

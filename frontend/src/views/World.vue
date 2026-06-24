@@ -65,6 +65,19 @@ onMounted(load)
 
 <template>
   <div class="world">
+    <!-- v0.9: 世界封面图 banner（始终展示，无图用占位） -->
+    <div
+      v-if="projectsStore.current"
+      class="world-cover-banner"
+      :class="projectsStore.current.cover_image_url ? 'world-cover-has-image' : 'world-cover-placeholder'"
+      :style="projectsStore.current.cover_image_url
+        ? { backgroundImage: `url(${projectsStore.current.cover_image_url})` }
+        : {}"
+    >
+      <div class="world-cover-overlay"></div>
+      <span v-if="!projectsStore.current.cover_image_url" class="world-cover-placeholder-icon">📖</span>
+    </div>
+
     <header class="world-header" v-if="projectsStore.current">
       <h1>{{ projectsStore.current.name }}</h1>
       <span class="palette">{{ projectsStore.current.palette }}</span>
@@ -110,9 +123,11 @@ onMounted(load)
       <section class="ops-panel">
         <h3>⚠️ 危险操作</h3>
         <div class="rollback">
-          <label>回档到章节</label>
-          <input type="number" v-model.number="rollbackTo" :min="1" :max="chaptersStore.count" />
-          <button class="btn btn-danger" @click="doRollback">回档</button>
+          <label class="rollback-label">回档到章节</label>
+          <div class="rollback-row">
+            <input type="number" v-model.number="rollbackTo" :min="1" :max="chaptersStore.count" />
+            <button class="btn btn-danger" @click="doRollback">回档</button>
+          </div>
         </div>
         <button class="btn btn-danger" @click="doDelete">删除项目</button>
       </section>
@@ -123,6 +138,39 @@ onMounted(load)
 <style scoped>
 .world {
   padding: var(--space-4) 0;
+}
+
+/* v0.9: 封面图 banner */
+.world-cover-banner {
+  width: 100%;
+  height: 240px;
+  border-radius: var(--radius-lg);
+  position: relative;
+  overflow: hidden;
+  margin-bottom: var(--space-5);
+}
+.world-cover-has-image {
+  background-size: cover;
+  background-position: center top;
+}
+.world-cover-placeholder {
+  background: linear-gradient(135deg, var(--color-night-2) 0%, var(--color-night-3) 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.world-cover-placeholder-icon {
+  font-size: 72px;
+  opacity: 0.15;
+}
+.world-cover-overlay {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    to bottom,
+    rgba(10, 5, 20, 0) 0%,
+    rgba(10, 5, 20, 0.7) 100%
+  );
 }
 
 .world-header {
@@ -268,16 +316,20 @@ dd {
 }
 
 .rollback {
+  margin-bottom: var(--space-4);
+}
+.rollback-label {
+  display: block;
+  font-size: var(--text-sm);
+  color: var(--color-text-dim);
+  margin-bottom: var(--space-2);
+}
+.rollback-row {
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  margin-bottom: var(--space-4);
 }
-.rollback label {
-  font-size: var(--text-sm);
-  color: var(--color-text-dim);
-}
-.rollback input {
+.rollback-row input {
   width: 80px;
   padding: var(--space-2);
 }

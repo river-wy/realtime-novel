@@ -10,12 +10,14 @@ from typing import Optional, List, Dict, Any
 
 from backend.persistence.models import ChapterRow
 from backend.persistence.sqlite_store import get_store
+from backend.utils.logger import logger
 
 
 def _now() -> datetime:
     return datetime.now()
 
 
+@logger
 class ChapterRepository:
     """chapters 表 + 关联表"""
 
@@ -57,6 +59,8 @@ class ChapterRepository:
                     now, now,
                 ),
             )
+        self.log.info("DB chapter CREATE: project=%s, num=%d, title=%r, word_count=%d",
+                 project_id, chapter_num, title, word_count)
         return ChapterRow(
             project_id=project_id, chapter_num=chapter_num, title=title,
             summary=summary, detailed_summary=detailed_summary, word_count=word_count,
@@ -128,6 +132,7 @@ class ChapterRepository:
                 "DELETE FROM chapters WHERE project_id = ? AND chapter_num = ?",
                 (project_id, chapter_num),
             )
+        self.log.info("DB chapter DELETE: project=%s, num=%d", project_id, chapter_num)
 
     def rollback_to(self, project_id: str, to_chapter: int) -> int:
         """回档到指定章节：删 > to_chapter 的所有章节（cascade 删关联表）。返回删除数"""
@@ -136,7 +141,9 @@ class ChapterRepository:
                 "DELETE FROM chapters WHERE project_id = ? AND chapter_num > ?",
                 (project_id, to_chapter),
             )
-            return cursor.rowcount
+            removed = cursor.rowcount
+        self.log.info("DB chapter ROLLBACK: project=%s, to_chapter=%d, removed=%d", project_id, to_chapter, removed)
+        return removed
 
     def count_chapters(self, project_id: str) -> int:
         with get_store().connection() as conn:

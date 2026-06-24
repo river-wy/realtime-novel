@@ -153,8 +153,8 @@ function statusDesc(status: string, step: number | null): string {
     <section class="projects-section">
       <div class="section-header">
         <h2 class="section-title">我的世界</h2>
-        <button v-if="hasMore" class="btn-text" @click="goToWorldList">
-          全部 ({{ projectsStore.total }}) →
+        <button v-if="projectsStore.projects.length > 0" class="btn-text" @click="goToWorldList">
+          查看全部 ({{ projectsStore.total }}) →
         </button>
       </div>
       <div v-if="projectsStore.loading" class="loading">加载中...</div>
@@ -169,29 +169,40 @@ function statusDesc(status: string, step: number | null): string {
           class="project-card"
           @click="goToProject(p)"
         >
-          <div class="card-bg" :style="{ background: `linear-gradient(135deg, var(--color-night-2), var(--color-night-3))` }"></div>
-          <div class="card-content">
-            <h3 class="card-title">{{ p.name }}</h3>
-            <p class="card-meta">
-              <span class="palette">{{ p.palette }}</span>
-              <span
-                class="exploration-badge"
-                :class="`exploration-${p.exploration_level || 'standard'}`"
-                :title="explorationDesc(p.exploration_level || 'standard')"
-              >
-                {{ explorationIcon(p.exploration_level || 'standard') }}
-                {{ explorationLabel(p.exploration_level || 'standard') }}
-              </span>
-              <span
-                class="status-badge"
-                :class="`status-${p.status || 'not_started'}`"
-                :title="statusDesc(p.status || 'not_started', p.onboarding_step)"
-              >
-                {{ statusIcon(p.status || 'not_started') }}
-                {{ statusLabel(p.status || 'not_started', p.onboarding_step) }}
-              </span>
-              <span class="chapter-count">{{ p.chapter_count }} 章</span>
-            </p>
+          <!-- v0.9: 左图右字布局 -->
+          <div class="card-inner">
+            <!-- 左：封面缩略图 -->
+            <div
+              class="card-thumb"
+              :class="p.cover_image_url ? 'card-thumb-image' : 'card-thumb-placeholder'"
+              :style="p.cover_image_url ? { backgroundImage: `url(${p.cover_image_url})` } : {}"
+            >
+              <span v-if="!p.cover_image_url" class="card-thumb-icon">📖</span>
+            </div>
+            <!-- 右：标题 + 标签 + 章节 -->
+            <div class="card-content">
+              <h3 class="card-title">{{ p.name }}</h3>
+              <div class="card-meta">
+                <span class="palette">{{ p.palette }}</span>
+                <span
+                  class="exploration-badge"
+                  :class="`exploration-${p.exploration_level || 'standard'}`"
+                  :title="explorationDesc(p.exploration_level || 'standard')"
+                >
+                  {{ explorationIcon(p.exploration_level || 'standard') }}
+                  {{ explorationLabel(p.exploration_level || 'standard') }}
+                </span>
+                <span
+                  class="status-badge"
+                  :class="`status-${p.status || 'not_started'}`"
+                  :title="statusDesc(p.status || 'not_started', p.onboarding_step)"
+                >
+                  {{ statusIcon(p.status || 'not_started') }}
+                  {{ statusLabel(p.status || 'not_started', p.onboarding_step) }}
+                </span>
+              </div>
+              <div class="card-chapter-count">{{ p.chapter_count }} 章</div>
+            </div>
           </div>
           <!-- "..." 操作菜单 -->
           <div class="card-menu" @click="toggleMenu($event, p.id)">
@@ -420,51 +431,90 @@ function statusDesc(status: string, step: number | null): string {
 }
 
 .project-card {
-  position: relative;
+  background: var(--color-night-2);
+  border: 1px solid var(--color-night-3);
   border-radius: var(--radius-md);
   overflow: hidden;
   cursor: pointer;
-  transition: transform var(--motion-base) var(--ease-out);
-  min-height: 160px;
+  transition: all var(--motion-base) var(--ease-out);
 }
-
 .project-card:hover {
-  transform: translateY(-4px);
+  transform: translateY(-3px);
+  border-color: var(--color-accent-3);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
 }
 
-.card-bg {
-  position: absolute;
-  inset: 0;
-  opacity: 0.7;
+/* v0.9: 左图右字内层 */
+.card-inner {
+  display: flex;
+  gap: 0;
+  align-items: stretch;
+  min-height: 100px;
 }
 
-.card-content {
+/* 左：封面缩略图 */
+.card-thumb {
+  width: 100px;
+  flex-shrink: 0;
+  background-size: cover;
+  background-position: center;
   position: relative;
-  padding: var(--space-5);
+  overflow: hidden;
+}
+.card-thumb-image {
+  /* 有图直接显示背景图 */
+}
+.card-thumb-placeholder {
+  background: linear-gradient(160deg, var(--color-night-1), var(--color-night-3));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.card-thumb-icon {
+  font-size: 36px;
+  opacity: 0.35;
+}
+
+/* 右：内容区 */
+.card-content {
+  flex: 1;
+  padding: var(--space-4);
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
 }
 
 .card-title {
-  font-size: var(--text-xl);
-  margin-bottom: var(--space-3);
+  font-size: var(--text-base);
+  font-weight: 600;
   color: var(--color-text);
+  margin-bottom: var(--space-2);
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 .card-meta {
   display: flex;
-  gap: var(--space-3);
-  font-size: var(--text-sm);
-  color: var(--color-text-dim);
+  gap: var(--space-2);
   flex-wrap: wrap;
+  margin-bottom: var(--space-2);
 }
 
 .palette {
   background: rgba(139, 92, 246, 0.2);
-  padding: 2px 8px;
+  padding: 2px 6px;
   border-radius: var(--radius-sm);
+  font-size: var(--text-xs);
 }
 
-.chapter-count {
+.card-chapter-count {
+  font-size: var(--text-xs);
   color: var(--color-accent-2);
+  font-weight: 500;
 }
 
 /* v0.8: 探索度徽章 */

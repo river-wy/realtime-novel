@@ -17,15 +17,12 @@ from __future__ import annotations
 import json
 import uuid
 from datetime import datetime
-from pathlib import Path
-from typing import Optional, List, Dict, Any, Literal
+from typing import Optional, List, Dict, Any
 
 from backend.persistence.models import (
-    Project, WorldTreeRow, StyleCharterRow, GenreResonanceRow,
-    MainPlotRow, SubPlotRow, CharacterRow, CharacterRelationshipRow, SeedRow,
-    CharacterRole, SeedStatus, SubplotStatus, SubplotPriority,
-)
+    Project, )
 from backend.persistence.sqlite_store import get_store
+from backend.utils.logger import logger
 
 
 def _now() -> datetime:
@@ -48,6 +45,7 @@ def _from_json(value: Optional[str]) -> Any:
 
 # ============ Project CRUD ============
 
+@logger
 class ProjectRepository:
     """projects 表 CRUD + 7 件基座"""
 
@@ -68,6 +66,7 @@ class ProjectRepository:
                 """,
                 (project_id, name, palette, exploration_level, now, now),
             )
+        self.log.info("DB project CREATE: id=%s, name=%r, exploration_level=%s", project_id, name, exploration_level)
         return Project(
             id=project_id, name=name, palette=palette,
             exploration_level=exploration_level,
@@ -99,6 +98,7 @@ class ProjectRepository:
                 "UPDATE projects SET name = ?, updated_at = ? WHERE id = ?",
                 (new_name, _now(), project_id),
             )
+        self.log.info("DB project UPDATE name: id=%s, name=%r", project_id, new_name)
 
     def update_palette(self, project_id: str, new_palette: str) -> None:
         with get_store().connection() as conn:
@@ -116,6 +116,7 @@ class ProjectRepository:
                 "UPDATE projects SET exploration_level = ?, updated_at = ? WHERE id = ?",
                 (new_level, _now(), project_id),
             )
+        self.log.info("DB project UPDATE exploration_level: id=%s, level=%s", project_id, new_level)
 
     def update_current_pov(self, project_id: str, new_pov: Optional[str]) -> None:
         with get_store().connection() as conn:
@@ -124,17 +125,28 @@ class ProjectRepository:
                 (new_pov, _now(), project_id),
             )
 
+    def update_cover_image_url(self, project_id: str, cover_image_url: Optional[str]) -> None:
+        """v0.9: 更新世界封面图 URL"""
+        with get_store().connection() as conn:
+            conn.execute(
+                "UPDATE projects SET cover_image_url = ?, updated_at = ? WHERE id = ?",
+                (cover_image_url, _now(), project_id),
+            )
+        self.log.info("DB project UPDATE cover_image_url: id=%s, url=%s", project_id, cover_image_url)
+
     def soft_delete(self, project_id: str) -> None:
         with get_store().connection() as conn:
             conn.execute(
                 "UPDATE projects SET deleted_at = ? WHERE id = ?",
                 (_now(), project_id),
             )
+        self.log.info("DB project SOFT DELETE: id=%s", project_id)
 
     def hard_delete(self, project_id: str) -> None:
         """物理删除（cascade 删 7 件基座）"""
         with get_store().connection() as conn:
             conn.execute("DELETE FROM projects WHERE id = ?", (project_id,))
+        self.log.info("DB project HARD DELETE: id=%s", project_id)
 
     # ----- 7 件基座 upsert -----
 
@@ -260,13 +272,13 @@ class ProjectRepository:
             )
 
     def _replace_subplots(self, project_id: str, sub_plots: List[Dict[str, Any]]) -> None:
-        """支线一对多：先删后插（保证一致）"""
-        with get_store().connection() as conn:
+        """支线一对多：先删后插（显式事务，防并发冲突）"""
+        with get_store().transaction() as conn:
             conn.execute("DELETE FROM sub_plot WHERE project_id = ?", (project_id,))
             for sp in sub_plots or []:
                 conn.execute(
                     """
-                    INSERT INTO sub_plot (
+                    INSERT OR REPLACE INTO sub_plot (
                         id, project_id, title, description, parent_beat_id, status, priority,
                         linked_seeds_json, linked_chars_json, beats_json, metadata_json, updated_at
                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -288,15 +300,15 @@ class ProjectRepository:
                 )
 
     def _replace_characters(self, project_id: str, char_card: Dict[str, Any]) -> None:
-        """角色一对多 + 关系一对多：先删角色（cascade 删关系）"""
+        """角色一对多 + 关系一对多：先删角色（cascade 删关系），在显式事务内执行，防止并发冲突"""
         characters = char_card.get("characters", []) or []
         relationships = char_card.get("relationships", []) or []
-        with get_store().connection() as conn:
+        with get_store().transaction() as conn:
             conn.execute("DELETE FROM characters WHERE project_id = ?", (project_id,))
             for c in characters:
                 conn.execute(
                     """
-                    INSERT INTO characters (
+                    INSERT OR REPLACE INTO characters (
                         id, project_id, name, role, traits_json, speech_style,
                         background, arc, internal_state, metadata_json, updated_at
                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -318,7 +330,7 @@ class ProjectRepository:
             for r in relationships:
                 conn.execute(
                     """
-                    INSERT INTO character_relationships (
+                    INSERT OR REPLACE INTO character_relationships (
                         id, project_id, from_char_id, to_char_id, type,
                         description, evolution_json, metadata_json, updated_at
                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -337,8 +349,8 @@ class ProjectRepository:
                 )
 
     def _replace_seeds(self, project_id: str, seeds: List[Dict[str, Any]]) -> None:
-        """种子一对多：先删后插"""
-        with get_store().connection() as conn:
+        """种子一对多：先删后插（显式事务，防并发冲突）"""
+        with get_store().transaction() as conn:
             conn.execute("DELETE FROM seeds WHERE project_id = ?", (project_id,))
             for s in seeds or []:
                 importance = s.get("importance", {}) or {}

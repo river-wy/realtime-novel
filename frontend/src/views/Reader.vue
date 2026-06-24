@@ -19,6 +19,8 @@ const chapterNum = computed(() => parseInt(route.params.chapterNum as string) ||
 
 const intervention = ref('')
 const showDrawer = ref(false)
+// v0.9: 封面图 banner 折叠状态（默认展开，用户可收起）
+const showCoverBanner = ref(true)
 
 async function loadAll() {
   await projectsStore.loadOne(projectId.value)
@@ -90,9 +92,38 @@ watch(() => route.params, loadAll)
       <button class="drawer-toggle" @click="showDrawer = !showDrawer">📚 章节列表</button>
     </header>
 
+    <!-- v0.9: 封面图折叠 banner -->
+    <transition name="banner-fade">
+      <div
+        v-if="projectsStore.current?.cover_image_url && showCoverBanner"
+        class="cover-banner"
+        :style="{ backgroundImage: `url(${projectsStore.current.cover_image_url})` }"
+      >
+        <div class="cover-banner-overlay"></div>
+        <button class="cover-banner-close" @click="showCoverBanner = false" title="收起封面">×</button>
+      </div>
+    </transition>
+    <!-- 无 banner 时的展开按钮 -->
+    <button
+      v-if="projectsStore.current?.cover_image_url && !showCoverBanner"
+      class="cover-banner-toggle"
+      @click="showCoverBanner = true"
+      title="展开封面"
+    >🖼 展开封面</button>
+
     <div class="reader-body">
       <!-- 左：章节导航 -->
       <aside class="left-pane">
+        <!-- v0.9: 封面图缩略图（始终展示，无图用占位） -->
+        <div
+          class="left-cover"
+          :class="projectsStore.current?.cover_image_url ? 'left-cover-image' : 'left-cover-placeholder'"
+          :style="projectsStore.current?.cover_image_url
+            ? { backgroundImage: `url(${projectsStore.current.cover_image_url})` }
+            : {}"
+        >
+          <span v-if="!projectsStore.current?.cover_image_url" class="left-cover-icon">📖</span>
+        </div>
         <div class="chapter-nav">
           <button :disabled="chapterNum <= 1" @click="goToChapter(chapterNum - 1)">← 上一章</button>
           <button @click="goToChapter(chapterNum + 1)" v-if="chapterNum < chaptersStore.count">下一章 →</button>
@@ -269,6 +300,31 @@ watch(() => route.params, loadAll)
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
+}
+
+/* v0.9: 左侧封面缩略图 */
+.left-cover {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  border-radius: var(--radius-md);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  position: relative;
+  overflow: hidden;
+}
+.left-cover-image {
+  background-size: cover;
+  background-position: center;
+}
+.left-cover-placeholder {
+  background: linear-gradient(135deg, var(--color-night-2), var(--color-night-3));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--color-night-3);
+}
+.left-cover-icon {
+  font-size: 48px;
+  opacity: 0.5;
 }
 
 .chapter-nav {
@@ -521,5 +577,73 @@ watch(() => route.params, loadAll)
 }
 .slide-enter-from, .slide-leave-to {
   transform: translateX(100%);
+}
+
+/* v0.9: 封面图折叠 banner */
+.cover-banner {
+  width: 100%;
+  height: 180px;
+  background-size: cover;
+  background-position: center 30%;
+  border-radius: var(--radius-lg);
+  position: relative;
+  overflow: hidden;
+  margin-bottom: var(--space-4);
+}
+.cover-banner-overlay {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    to bottom,
+    rgba(10, 5, 20, 0.1) 0%,
+    rgba(10, 5, 20, 0.6) 100%
+  );
+}
+.cover-banner-close {
+  position: absolute;
+  top: var(--space-2);
+  right: var(--space-2);
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.5);
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 18px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  backdrop-filter: blur(4px);
+  transition: background var(--motion-fast);
+  z-index: 1;
+}
+.cover-banner-close:hover {
+  background: rgba(0, 0, 0, 0.75);
+  color: white;
+}
+.cover-banner-toggle {
+  font-size: var(--text-xs);
+  color: var(--color-text-dim);
+  background: none;
+  border: 1px solid var(--color-night-3);
+  border-radius: var(--radius-sm);
+  padding: 2px var(--space-3);
+  margin-bottom: var(--space-3);
+  cursor: pointer;
+  transition: all var(--motion-fast);
+}
+.cover-banner-toggle:hover {
+  border-color: var(--color-accent-3);
+  color: var(--color-accent-3);
+}
+.banner-fade-enter-active,
+.banner-fade-leave-active {
+  transition: opacity 0.3s, transform 0.3s;
+}
+.banner-fade-enter-from,
+.banner-fade-leave-to {
+  opacity: 0;
+  transform: scaleY(0.85);
+  transform-origin: top;
 }
 </style>
