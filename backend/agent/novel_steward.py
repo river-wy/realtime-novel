@@ -167,34 +167,125 @@ class NovelSteward:
     # ─── 用户级 intent 处理方法（v0.6 s3 实装） ─────
 
     async def _handle_list_projects(self, user_id: str) -> dict:
-        """LIST_PROJECTS: 查 projects 表"""
-        # s3 实装：调 ProjectRepository.list_by_user(user_id)
-        # s2 骨架：返回占位文案
+        """LIST_PROJECTS: 查 projects 表（s3.7 实装）"""
+        from backend.persistence import ProjectRepository
+        repo = ProjectRepository()
+        projects = repo.list_all(limit=50)  # v0.6 简化：列所有（未删）
+        if not projects:
+            return {
+                "intent": Intent.LIST_PROJECTS.value,
+                "confidence": 1.0,
+                "response": "📚 你还没有创建任何小说项目。\n\n试试在首页聊天框告诉我你想写什么，比如：“我想写个赛博朋克爱情故事”。",
+                "structured_data": {"projects": []},
+                "downstream_called": None,
+            }
+        # 按 updated_at 倒序
+        projects.sort(key=lambda p: p.updated_at, reverse=True)
+        project_cards = [
+            {
+                "id": p.id,
+                "name": p.name,
+                "palette": p.palette,
+                "exploration_level": p.exploration_level,
+                "current_pov": p.current_pov,
+                "cover_image_url": p.cover_image_url,
+                "updated_at": p.updated_at.isoformat() if p.updated_at else None,
+            }
+            for p in projects
+            if not p.deleted_at
+        ]
+        names = "、".join(p["name"] for p in project_cards[:5])
+        response = f"📚 你共有 {len(project_cards)} 个小说项目：\n\n" + "\n".join(
+            f"  • 《{p['name']}》 (ID: {p['id'][:8]}...)"
+            for p in project_cards[:10]
+        )
         return {
             "intent": Intent.LIST_PROJECTS.value,
             "confidence": 1.0,
-            "response": "📚 [s2 骨架] 查询项目列表功能待 s3 实装",
-            "structured_data": {},
+            "response": response,
+            "structured_data": {"projects": project_cards},
             "downstream_called": None,
         }
 
     async def _handle_query_projects(self, intent_result: IntentResult, user_id: str) -> dict:
-        """QUERY_PROJECTS: 按类型/状态筛选"""
+        """QUERY_PROJECTS: 按类型/状态筛选（s3.7 实装）
+
+        v0.6 简化：从 style_charter / genre_resonance 表查询 genre/styles/tone
+        """
+        from backend.persistence import ProjectRepository
+        repo = ProjectRepository()
+        all_projects = repo.list_all(limit=50)
+        all_projects = [p for p in all_projects if not p.deleted_at]
+
+        # 筛选逻辑（v0.6 简化：用项目名模糊匹配 + 后续可接 genre_resonance 表）
+        filter_genre = intent_result.args.filter_genre
+        filter_style = intent_result.args.filter_style
+        filter_status = intent_result.args.filter_status
+
+        matched = []
+        if filter_genre or filter_style:
+            # v0.6 简化：匹配项目名（后续可查 genre_resonance 表）
+            keyword = filter_genre or filter_style or ""
+            for p in all_projects:
+                if keyword.lower() in p.name.lower():
+                    matched.append({
+                        "id": p.id,
+                        "name": p.name,
+                        "palette": p.palette,
+                        "updated_at": p.updated_at.isoformat() if p.updated_at else None,
+                    })
+        else:
+            matched = [{"id": p.id, "name": p.name} for p in all_projects]
+
+        if not matched:
+            response = f"🔍 没找到匹配的项目。" + (f"（按 {filter_genre or filter_style} 筛选）" if (filter_genre or filter_style) else "")
+        else:
+            response = f"🔍 找到 {len(matched)} 个项目：\n\n" + "\n".join(
+                f"  • 《{p['name']}》 (ID: {p.get('id', '?')[:8]}...)"
+                for p in matched[:10]
+            )
         return {
             "intent": Intent.QUERY_PROJECTS.value,
             "confidence": intent_result.confidence,
-            "response": f"🔍 [s2 骨架] 筛选项目功能待 s3 实装 (args={intent_result.args.model_dump()})",
-            "structured_data": {},
+            "response": response,
+            "structured_data": {"projects": matched, "filter": {
+                "genre": filter_genre, "style": filter_style, "status": filter_status,
+            }},
             "downstream_called": None,
         }
 
     async def _handle_recommend_projects(self, intent_result: IntentResult, user_id: str) -> dict:
-        """RECOMMEND_PROJECTS: 推荐项目"""
+        """RECOMMEND_PROJECTS: 推荐项目（s3.7 实装）
+
+        v0.6 简化：按 updated_at 倒序列最近的项目，让管家 LLM 拼推荐语
+        """
+        from backend.persistence import ProjectRepository
+        repo = ProjectRepository()
+        projects = [p for p in repo.list_all(limit=10) if not p.deleted_at]
+        projects.sort(key=lambda p: p.updated_at, reverse=True)
+
+        if not projects:
+            return {
+                "intent": Intent.RECOMMEND_PROJECTS.value,
+                "confidence": 1.0,
+                "response": "✨ 你还没有项目可推荐。试试创建一个吧！",
+                "structured_data": {"projects": []},
+                "downstream_called": None,
+            }
+
+        # v0.6 简化：直接列最近的项目（后续可让 LLM 拼推荐理由）
+        response = "✨ 根据你最近的创作，推荐以下项目：\n\n" + "\n".join(
+            f"  • 《{p.name}》 — 最后更新 {p.updated_at.strftime('%Y-%m-%d') if p.updated_at else '?'}"
+            for p in projects[:5]
+        )
         return {
             "intent": Intent.RECOMMEND_PROJECTS.value,
-            "confidence": intent_result.confidence,
-            "response": "✨ [s2 骨架] 推荐项目功能待 s3 实装",
-            "structured_data": {},
+            "confidence": 1.0,
+            "response": response,
+            "structured_data": {"projects": [
+                {"id": p.id, "name": p.name, "updated_at": p.updated_at.isoformat() if p.updated_at else None}
+                for p in projects[:5]
+            ]},
             "downstream_called": None,
         }
 
@@ -227,25 +318,129 @@ class NovelSteward:
         }
 
     async def _handle_open_project(self, intent_result: IntentResult, user_id: str) -> dict:
-        """OPEN_PROJECT: LLM 模糊匹配 + 用户确认（06-24 17:09 拍板）"""
-        hint = intent_result.args.project_name_hint or "（未提供）"
-        return {
-            "intent": Intent.OPEN_PROJECT.value,
-            "confidence": intent_result.confidence,
-            "response": f"📂 [s2 骨架] 匹配项目 '{hint}' 待 s3 实装（LLM 模糊匹配 + 用户确认）",
-            "structured_data": {"project_name_hint": hint},
-            "downstream_called": None,
-        }
+        """OPEN_PROJECT: LLM 模糊匹配 + 用户确认（06-24 17:09 拍板，s3.7 实装）
+
+        规则（spec.md §4.4）：
+        - 1 个匹配 → 展示跳转卡片，用户点确认
+        - 多个匹配 → 列候选清单，用户选择
+        - 0 个匹配 → 推荐创建
+        - 不直接跳转（必须用户主动点确认）
+        """
+        from backend.persistence import ProjectRepository
+        repo = ProjectRepository()
+        hint = intent_result.args.project_name_hint or ""
+
+        if not hint:
+            return {
+                "intent": Intent.OPEN_PROJECT.value,
+                "confidence": intent_result.confidence,
+                "response": "📂 请告诉我你想打开哪个项目？",
+                "structured_data": {"candidates": [], "require_confirm": True},
+                "downstream_called": None,
+            }
+
+        # 查所有未删项目，做模糊匹配
+        all_projects = [p for p in repo.list_all(limit=100) if not p.deleted_at]
+        candidates = []
+        hint_lower = hint.lower()
+        for p in all_projects:
+            if hint_lower in p.name.lower() or hint_lower in p.id.lower():
+                candidates.append({
+                    "id": p.id,
+                    "name": p.name,
+                    "updated_at": p.updated_at.isoformat() if p.updated_at else None,
+                })
+
+        if len(candidates) == 1:
+            p = candidates[0]
+            response = f"📂 找到 1 个项目：\n\n  • 《{p['name']}》\n\n点击确认跳转。"
+            return {
+                "intent": Intent.OPEN_PROJECT.value,
+                "confidence": intent_result.confidence,
+                "response": response,
+                "structured_data": {
+                    "candidates": candidates,
+                    "require_confirm": True,  # 即使 1 个也要确认
+                    "jump_url": f"/reader/{p['id']}",
+                },
+                "downstream_called": None,
+            }
+        elif len(candidates) > 1:
+            response = f"📂 找到 {len(candidates)} 个匹配项目：\n\n" + "\n".join(
+                f"  {i+1}. 《{c['name']}》 (ID: {c['id'][:8]}...)"
+                for i, c in enumerate(candidates[:10])
+            ) + "\n\n请告诉我你想打开哪一个。"
+            return {
+                "intent": Intent.OPEN_PROJECT.value,
+                "confidence": intent_result.confidence,
+                "response": response,
+                "structured_data": {"candidates": candidates, "require_confirm": True},
+                "downstream_called": None,
+            }
+        else:
+            response = f"📂 没找到叫《{hint}》的项目。\n\n要不要创建一个？试试说“我想写个 {hint}”"
+            return {
+                "intent": Intent.OPEN_PROJECT.value,
+                "confidence": intent_result.confidence,
+                "response": response,
+                "structured_data": {"candidates": [], "suggest_create": True, "hint": hint},
+                "downstream_called": None,
+            }
 
     async def _handle_adjust_global_pref(self, intent_result: IntentResult, user_id: str) -> dict:
-        """ADJUST_GLOBAL_PREFERENCE: 调整全局偏好（最小可用集：default_exploration_level）"""
+        """ADJUST_GLOBAL_PREFERENCE: 调整全局偏好（s3.7 实装，最小可用集）
+
+        支持的偏好（v0.6 最小可用集）：
+        - default_exploration_level: conservative / standard / wild
+        """
+        from backend.persistence import UserPreferenceRepository
+
         key = intent_result.args.preference_key
         value = intent_result.args.preference_value
+
+        if not key or not value:
+            return {
+                "intent": Intent.ADJUST_GLOBAL_PREFERENCE.value,
+                "confidence": intent_result.confidence,
+                "response": "⚙️ 没能识别你的偏好名和值。试试说：“以后默认探索度用 standard”",
+                "structured_data": {},
+                "downstream_called": None,
+            }
+
+        # 最小可用集校验
+        SUPPORTED_KEYS = {"default_exploration_level"}
+        SUPPORTED_VALUES = {
+            "default_exploration_level": {"conservative", "standard", "wild"},
+        }
+
+        if key not in SUPPORTED_KEYS:
+            return {
+                "intent": Intent.ADJUST_GLOBAL_PREFERENCE.value,
+                "confidence": intent_result.confidence,
+                "response": f"⚙️ 偏好 '{key}' 暂未支持。\n\n目前支持：{', '.join(SUPPORTED_KEYS)}",
+                "structured_data": {"supported": list(SUPPORTED_KEYS)},
+                "downstream_called": None,
+            }
+
+        if value not in SUPPORTED_VALUES[key]:
+            valid = "/".join(SUPPORTED_VALUES[key])
+            return {
+                "intent": Intent.ADJUST_GLOBAL_PREFERENCE.value,
+                "confidence": intent_result.confidence,
+                "response": f"⚙️ 值 '{value}' 无效。'{key}' 需是: {valid}",
+                "structured_data": {},
+                "downstream_called": None,
+            }
+
+        # 写 user_preferences 表
+        repo = UserPreferenceRepository()
+        await repo.set(user_id=user_id, key=key, value=value)
+
         return {
             "intent": Intent.ADJUST_GLOBAL_PREFERENCE.value,
             "confidence": intent_result.confidence,
-            "response": f"⚙️ [s2 骨架] 全局偏好调整 ({key}={value}) 待 s3 实装",
-            "structured_data": {"key": key, "value": value},
+            "response": f"✅ 已设置全局偏好：{key} = {value}\n\n以后创建项目默认使用该值。",
+            "structured_data": {"key": key, "value": value, "updated": True},
             "downstream_called": None,
         }
 
