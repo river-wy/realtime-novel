@@ -14,6 +14,7 @@ from typing import Any, Dict, List, Optional
 from backend.agent.context._helpers import (
     load_history_messages,
     _load_project_data,
+    _load_project_history,
     _format_chapter_summaries_short,
     _format_chapter_summaries_graded,
     _format_world_tree_compact,

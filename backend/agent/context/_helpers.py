@@ -385,3 +385,47 @@ def json_dumps(obj: Any) -> str:
     return json.dumps(obj, ensure_ascii=False, indent=2, default=str)
 
 
+
+
+def _load_project_history(project_id: str, max_history: int = 5) -> list[dict[str, Any] | None]:
+    """按 project_id 取历史（per-project 维度），经 ConversationRepository 查询
+
+    v0.6.1: 从 onboarding_builders.py 移到 _helpers.py (通用能力)
+    - 之前在 onboarding_builders 内部用, 但 build_messages_for_chapter_generator
+      (在 builders.py) 也调它, 引发 NameError
+    - 修法: 移到通用 helper, onboarding_builders 改为 import
+    """
+    import asyncio
+    import concurrent.futures
+
+    repo = ConversationRepository()
+
+    async def _fetch():
+        return await repo.get_messages_by_project(project_id, limit=max_history)
+
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            with concurrent.futures.ThreadPoolExecutor() as ex:
+                msg_list = ex.submit(asyncio.run, _fetch()).result()
+        else:
+            msg_list = asyncio.run(_fetch())
+    except RuntimeError:
+        msg_list = asyncio.run(_fetch())
+
+    # get_messages_by_project 返回 DESC，翻转为 ASC
+    msg_list = [m for m in reversed(msg_list)
+                if m.role.value in ('user', 'assistant')]
+    result = []
+    for msg_obj in msg_list:
+        d = {
+            "id": msg_obj.id,
+            "role": msg_obj.role.value if hasattr(msg_obj.role, 'value') else msg_obj.role,
+            "content": msg_obj.content,
+            "tool_calls": msg_obj.tool_calls,
+            "tool_results": msg_obj.tool_results,
+        }
+        m = _row_to_message(d)
+        if m:
+            result.append(m)
+    return result

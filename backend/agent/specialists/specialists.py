@@ -13,6 +13,7 @@ v0.5: 3 个真实实现 + image_generator 仍 stub
 from __future__ import annotations
 
 import json
+import logging
 from abc import ABC, abstractmethod
 
 from backend.adapters.llm_adapter import get_llm_adapter
@@ -35,6 +36,10 @@ from backend.agent.prompts import (
     CHAPTER_GENERATOR_PROMPT,
     MEMORY_KEEPER_PROMPT,
 )
+
+
+# v0.6.1 P5: logger 在顶部定义 (state_graph_stub 原本有, 搬入时漏)
+logger = logging.getLogger(__name__)
 
 
 class SpecialistAgent(ABC):

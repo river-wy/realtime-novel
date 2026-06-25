@@ -52,10 +52,8 @@
     }
   },
   "agents": {
-    "OnboardingAgent": {
-      "model": "friday/deepseek-v4-pro-tencent"
-    },
-    "StewardChatAgent": {
+    "_comment": "v0.6.1: StewardChatAgent 改为 NovelSteward (实际类名), 删 OnboardingAgent (类已删, controller 走 specialist 模型)",
+    "NovelSteward": {
       "model": "friday/deepseek-v4-pro-tencent"
     },
     "ChapterGeneratorSpecialist": {
@@ -67,7 +65,7 @@
     "MemoryKeeperSpecialist": {
       "model": "friday/deepseek-v4-pro-tencent"
     },
-    "ImageGeneratorAgent": {
+    "ImageGeneratorStub": {
       "model": "friday/gemini-3.1-flash-image-preview"
     }
   }

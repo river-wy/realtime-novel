@@ -12,6 +12,7 @@ from typing import Any, Dict, List, Optional
 
 from backend.agent.context._helpers import (
     _load_project_data,
+    _load_project_history,
     _format_style_charter,
     _format_world_tree_compact,
     _row_to_message,
@@ -125,42 +126,3 @@ def build_messages_for_onboarding_step4(
     # 4. current
     messages.append({"role": "user", "content": current_user_message or "请提议 4 个故事路径字段"})
     return messages
-
-
-def _load_project_history(project_id: str, max_history: int = 5) -> list[dict[str, Any] | None]:
-    """按 project_id 取历史（per-project 维度），经 ConversationRepository 查询"""
-    import asyncio
-    import concurrent.futures
-
-    repo = ConversationRepository()
-
-    async def _fetch():
-        return await repo.get_messages_by_project(project_id, limit=max_history)
-
-    try:
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            with concurrent.futures.ThreadPoolExecutor() as ex:
-                msg_list = ex.submit(asyncio.run, _fetch()).result()
-        else:
-            msg_list = asyncio.run(_fetch())
-    except RuntimeError:
-        msg_list = asyncio.run(_fetch())
-
-    # get_messages_by_project 返回 DESC，翻转为 ASC
-    msg_list = [m for m in reversed(msg_list)
-                if m.role.value in ('user', 'assistant')]
-    result = []
-    for msg_obj in msg_list:
-        d = {
-            "id": msg_obj.id,
-            "role": msg_obj.role.value if hasattr(msg_obj.role, 'value') else msg_obj.role,
-            "content": msg_obj.content,
-            "tool_calls": msg_obj.tool_calls,
-            "tool_results": msg_obj.tool_results,
-        }
-        m = _row_to_message(d)
-        if m:
-            result.append(m)
-    return result
-
