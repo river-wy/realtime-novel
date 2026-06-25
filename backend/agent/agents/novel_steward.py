@@ -17,21 +17,18 @@
 """
 from __future__ import annotations
 
-import logging
+from pydantic import BaseModel
 from typing import Optional
 
-from pydantic import BaseModel
-
+from backend.agent.agents.novel_writer import NovelWriter, get_novel_writer
+from backend.agent.agents.world_tree_manager import WorldTreeManager, get_world_tree_manager
 from backend.agent.runtime.intent_recognizer import (
     IntentRecognizer,
     IntentResult,
     get_intent_recognizer,
 )
-from backend.agent.agents.novel_writer import NovelWriter, get_novel_writer
-from backend.agent.agents.world_tree_manager import WorldTreeManager, get_world_tree_manager
-from backend.agent.runtime.state import Intent, AgentState
-
-log = logging.getLogger(__name__)
+from backend.agent.runtime.state import Intent
+from backend.utils.logger import logger as logger_decorator
 
 
 # ============ 管家响应结构 ============
@@ -47,6 +44,7 @@ class StewardResponse(BaseModel):
 
 # ============ NovelSteward 主类 ============
 
+@logger_decorator
 class NovelSteward:
     """小说管家（v0.6 顶层 Agent）
 
@@ -103,6 +101,13 @@ class NovelSteward:
                 "downstream_called": str | None,  # 调用的下游 Agent
             }
         """
+        self.log.info(
+            "NovelSteward.receive START: user_id=%s, project_id=%s, "
+            "in_onboarding=%s, msg_len=%d, conv_id=%s",
+            user_id, project_id, in_onboarding,
+            len(user_message or ""), conversation_id,
+        )
+
         # 1. 意图识别
         intent_result = await self.intent_recognizer.classify(
             user_message=user_message,
@@ -111,14 +116,22 @@ class NovelSteward:
             in_onboarding=in_onboarding,
         )
 
-        log.info(
-            f"novel_steward: intent={intent_result.intent.value} "
-            f"confidence={intent_result.confidence:.2f} "
-            f"project_id={project_id}"
+        self.log.info(
+            "NovelSteward.receive INTENT: intent=%s, confidence=%.2f, project_id=%s",
+            intent_result.intent.value, intent_result.confidence, project_id,
         )
 
         # 2. 路由分发
-        return await self._route(intent_result, project_id, user_id, user_message)
+        result = await self._route(intent_result, project_id, user_id, user_message)
+
+        self.log.info(
+            "NovelSteward.receive DONE: intent=%s, downstream=%s, "
+            "response_len=%d, user_id=%s",
+            result.get("intent"), result.get("downstream_called"),
+            len(result.get("response", "")), user_id,
+        )
+
+        return result
 
     async def _route(
         self,
@@ -127,12 +140,13 @@ class NovelSteward:
         user_id: str,
         user_message: str,
     ) -> dict:
-        """根据 intent 路由到对应处理路径
-
-        v0.6 s2 阶段：只搭骨架，返回固定文案。
-        s3 阶段会实装真实逻辑（调下游 Agent / 写库等）。
-        """
+        """根据 intent 路由到对应处理路径"""
         intent = intent_result.intent
+
+        self.log.debug(
+            "NovelSteward._route: intent=%s, project_id=%s, user_id=%s",
+            intent.value, project_id, user_id,
+        )
 
         # ─── 用户级 intent（管家大厅，无 project_id）──
         if intent == Intent.LIST_PROJECTS:
@@ -168,14 +182,16 @@ class NovelSteward:
 
     async def _handle_list_projects(self, user_id: str) -> dict:
         """LIST_PROJECTS: 查 projects 表（s3.7 实装）"""
+        self.log.info("NovelSteward._handle_list_projects: user_id=%s", user_id)
         from backend.persistence import ProjectRepository
         repo = ProjectRepository()
         projects = repo.list_all(limit=50)  # v0.6 简化：列所有（未删）
         if not projects:
+            self.log.info("NovelSteward._handle_list_projects: no projects found, user_id=%s", user_id)
             return {
                 "intent": Intent.LIST_PROJECTS.value,
                 "confidence": 1.0,
-                "response": "📚 你还没有创建任何小说项目。\n\n试试在首页聊天框告诉我你想写什么，比如：“我想写个赛博朋克爱情故事”。",
+                "response": "📚 你还没有创建任何小说项目。\n\n试试在首页聊天框告诉我你想写什么，比如：\"我想写个赛博朋克爱情故事\"。",
                 "structured_data": {"projects": []},
                 "downstream_called": None,
             }
@@ -194,7 +210,10 @@ class NovelSteward:
             for p in projects
             if not p.deleted_at
         ]
-        names = "、".join(p["name"] for p in project_cards[:5])
+        self.log.info(
+            "NovelSteward._handle_list_projects: found=%d, user_id=%s",
+            len(project_cards), user_id,
+        )
         response = f"📚 你共有 {len(project_cards)} 个小说项目：\n\n" + "\n".join(
             f"  • 《{p['name']}》 (ID: {p['id'][:8]}...)"
             for p in project_cards[:10]
@@ -208,23 +227,22 @@ class NovelSteward:
         }
 
     async def _handle_query_projects(self, intent_result: IntentResult, user_id: str) -> dict:
-        """QUERY_PROJECTS: 按类型/状态筛选（s3.7 实装）
+        """QUERY_PROJECTS: 按类型/状态筛选（s3.7 实装）"""
+        filter_genre = intent_result.args.filter_genre
+        filter_style = intent_result.args.filter_style
+        filter_status = intent_result.args.filter_status
+        self.log.info(
+            "NovelSteward._handle_query_projects: user_id=%s, genre=%s, style=%s, status=%s",
+            user_id, filter_genre, filter_style, filter_status,
+        )
 
-        v0.6 简化：从 style_charter / genre_resonance 表查询 genre/styles/tone
-        """
         from backend.persistence import ProjectRepository
         repo = ProjectRepository()
         all_projects = repo.list_all(limit=50)
         all_projects = [p for p in all_projects if not p.deleted_at]
 
-        # 筛选逻辑（v0.6 简化：用项目名模糊匹配 + 后续可接 genre_resonance 表）
-        filter_genre = intent_result.args.filter_genre
-        filter_style = intent_result.args.filter_style
-        filter_status = intent_result.args.filter_status
-
         matched = []
         if filter_genre or filter_style:
-            # v0.6 简化：匹配项目名（后续可查 genre_resonance 表）
             keyword = filter_genre or filter_style or ""
             for p in all_projects:
                 if keyword.lower() in p.name.lower():
@@ -236,6 +254,11 @@ class NovelSteward:
                     })
         else:
             matched = [{"id": p.id, "name": p.name} for p in all_projects]
+
+        self.log.info(
+            "NovelSteward._handle_query_projects: matched=%d, user_id=%s",
+            len(matched), user_id,
+        )
 
         if not matched:
             response = f"🔍 没找到匹配的项目。" + (f"（按 {filter_genre or filter_style} 筛选）" if (filter_genre or filter_style) else "")
@@ -255,10 +278,8 @@ class NovelSteward:
         }
 
     async def _handle_recommend_projects(self, intent_result: IntentResult, user_id: str) -> dict:
-        """RECOMMEND_PROJECTS: 推荐项目（s3.7 实装）
-
-        v0.6 简化：按 updated_at 倒序列最近的项目，让管家 LLM 拼推荐语
-        """
+        """RECOMMEND_PROJECTS: 推荐项目（s3.7 实装）"""
+        self.log.info("NovelSteward._handle_recommend_projects: user_id=%s", user_id)
         from backend.persistence import ProjectRepository
         repo = ProjectRepository()
         projects = [p for p in repo.list_all(limit=10) if not p.deleted_at]
@@ -273,7 +294,10 @@ class NovelSteward:
                 "downstream_called": None,
             }
 
-        # v0.6 简化：直接列最近的项目（后续可让 LLM 拼推荐理由）
+        self.log.info(
+            "NovelSteward._handle_recommend_projects: recommending top=%d, user_id=%s",
+            min(5, len(projects)), user_id,
+        )
         response = "✨ 根据你最近的创作，推荐以下项目：\n\n" + "\n".join(
             f"  • 《{p.name}》 — 最后更新 {p.updated_at.strftime('%Y-%m-%d') if p.updated_at else '?'}"
             for p in projects[:5]
@@ -292,7 +316,10 @@ class NovelSteward:
     async def _handle_create_project(self, intent_result: IntentResult, user_id: str) -> dict:
         """CREATE_PROJECT: 启动 Onboarding（s3 实装）"""
         initial_idea = intent_result.args.initial_idea or "（未提供初始想法）"
-        # 启动 Onboarding Step 3（Step 1-2 走按钮式入口）
+        self.log.info(
+            "NovelSteward._handle_create_project: user_id=%s, idea_len=%d",
+            user_id, len(initial_idea),
+        )
         from backend.agent.onboarding.controller import (
             get_onboarding_controller, OnboardingState, OnboardingStep,
         )
@@ -304,6 +331,12 @@ class NovelSteward:
         result = await controller.run_step_3_or_4(
             user_message=initial_idea,
             state=state,
+        )
+        self.log.info(
+            "NovelSteward._handle_create_project DONE: user_id=%s, "
+            "new_step=%s, should_generate=%s",
+            user_id, result.new_state.current_step.value,
+            result.should_generate_chapter,
         )
         return {
             "intent": Intent.CREATE_PROJECT.value,
@@ -329,6 +362,10 @@ class NovelSteward:
         from backend.persistence import ProjectRepository
         repo = ProjectRepository()
         hint = intent_result.args.project_name_hint or ""
+        self.log.info(
+            "NovelSteward._handle_open_project: user_id=%s, hint=%r",
+            user_id, hint,
+        )
 
         if not hint:
             return {
@@ -351,6 +388,11 @@ class NovelSteward:
                     "updated_at": p.updated_at.isoformat() if p.updated_at else None,
                 })
 
+        self.log.info(
+            "NovelSteward._handle_open_project: hint=%r, candidates=%d",
+            hint, len(candidates),
+        )
+
         if len(candidates) == 1:
             p = candidates[0]
             response = f"📂 找到 1 个项目：\n\n  • 《{p['name']}》\n\n点击确认跳转。"
@@ -360,7 +402,7 @@ class NovelSteward:
                 "response": response,
                 "structured_data": {
                     "candidates": candidates,
-                    "require_confirm": True,  # 即使 1 个也要确认
+                    "require_confirm": True,
                     "jump_url": f"/reader/{p['id']}",
                 },
                 "downstream_called": None,
@@ -378,7 +420,7 @@ class NovelSteward:
                 "downstream_called": None,
             }
         else:
-            response = f"📂 没找到叫《{hint}》的项目。\n\n要不要创建一个？试试说“我想写个 {hint}”"
+            response = f"📂 没找到叫《{hint}》的项目。\n\n要不要创建一个？试试说\"我想写个 {hint}\""
             return {
                 "intent": Intent.OPEN_PROJECT.value,
                 "confidence": intent_result.confidence,
@@ -388,21 +430,20 @@ class NovelSteward:
             }
 
     async def _handle_adjust_global_pref(self, intent_result: IntentResult, user_id: str) -> dict:
-        """ADJUST_GLOBAL_PREFERENCE: 调整全局偏好（s3.7 实装，最小可用集）
-
-        支持的偏好（v0.6 最小可用集）：
-        - default_exploration_level: conservative / standard / wild
-        """
-        from backend.persistence import UserPreferenceRepository
+        """ADJUST_GLOBAL_PREFERENCE: 调整全局偏好（s3.7 实装，最小可用集）"""
 
         key = intent_result.args.preference_key
         value = intent_result.args.preference_value
+        self.log.info(
+            "NovelSteward._handle_adjust_global_pref: user_id=%s, key=%s, value=%s",
+            user_id, key, value,
+        )
 
         if not key or not value:
             return {
                 "intent": Intent.ADJUST_GLOBAL_PREFERENCE.value,
                 "confidence": intent_result.confidence,
-                "response": "⚙️ 没能识别你的偏好名和值。试试说：“以后默认探索度用 standard”",
+                "response": "⚙️ 没能识别你的偏好名和值。试试说：\"以后默认探索度用 standard\"",
                 "structured_data": {},
                 "downstream_called": None,
             }
@@ -414,6 +455,10 @@ class NovelSteward:
         }
 
         if key not in SUPPORTED_KEYS:
+            self.log.warning(
+                "NovelSteward._handle_adjust_global_pref: unsupported key=%s, user_id=%s",
+                key, user_id,
+            )
             return {
                 "intent": Intent.ADJUST_GLOBAL_PREFERENCE.value,
                 "confidence": intent_result.confidence,
@@ -424,6 +469,10 @@ class NovelSteward:
 
         if value not in SUPPORTED_VALUES[key]:
             valid = "/".join(SUPPORTED_VALUES[key])
+            self.log.warning(
+                "NovelSteward._handle_adjust_global_pref: invalid value=%s for key=%s, user_id=%s",
+                value, key, user_id,
+            )
             return {
                 "intent": Intent.ADJUST_GLOBAL_PREFERENCE.value,
                 "confidence": intent_result.confidence,
@@ -436,6 +485,10 @@ class NovelSteward:
         repo = UserPreferenceRepository()
         await repo.set(user_id=user_id, key=key, value=value)
 
+        self.log.info(
+            "NovelSteward._handle_adjust_global_pref DONE: user_id=%s, key=%s, value=%s",
+            user_id, key, value,
+        )
         return {
             "intent": Intent.ADJUST_GLOBAL_PREFERENCE.value,
             "confidence": intent_result.confidence,
@@ -448,11 +501,19 @@ class NovelSteward:
 
     async def _handle_generate(self, project_id: str, user_message: str, intent_result: IntentResult) -> dict:
         """GENERATE: 转发到小说文笔家（s3 实装）"""
+        self.log.info(
+            "NovelSteward._handle_generate: project_id=%s, msg_len=%d",
+            project_id, len(user_message),
+        )
         chapter_output = await self.novel_writer.generate_chapter(
             project_id=project_id,
             user_message=user_message,
         )
         if chapter_output.error:
+            self.log.error(
+                "NovelSteward._handle_generate ERROR: project_id=%s, error=%s",
+                project_id, chapter_output.error,
+            )
             return {
                 "intent": Intent.GENERATE.value,
                 "confidence": intent_result.confidence,
@@ -460,6 +521,12 @@ class NovelSteward:
                 "structured_data": {"project_id": project_id, "error": chapter_output.error},
                 "downstream_called": "novel_writer",
             }
+        self.log.info(
+            "NovelSteward._handle_generate DONE: project_id=%s, "
+            "content_len=%d, iterations=%d",
+            project_id, len(chapter_output.chapter_content),
+            chapter_output.iterations,
+        )
         return {
             "intent": Intent.GENERATE.value,
             "confidence": intent_result.confidence,
@@ -476,11 +543,19 @@ class NovelSteward:
     async def _handle_intervene(self, project_id: str, user_message: str, intent_result: IntentResult) -> dict:
         """INTERVENE: 转发到世界树管理（s3 实装）"""
         intervention = intent_result.args.intervention_text or user_message
+        self.log.info(
+            "NovelSteward._handle_intervene: project_id=%s, intervention_len=%d",
+            project_id, len(intervention),
+        )
         diff = await self.world_tree_manager.analyze_intervention(
             project_id=project_id,
             intervention_text=intervention,
         )
-        # 转成对话文本
+        self.log.info(
+            "NovelSteward._handle_intervene DONE: project_id=%s, "
+            "risk=%s, require_confirm=%s",
+            project_id, diff.risk_level, diff.requires_double_confirm,
+        )
         response_text = self._format_diff_response(diff)
         return {
             "intent": Intent.INTERVENE.value,
@@ -498,9 +573,17 @@ class NovelSteward:
     async def _handle_adjust_base(self, project_id: str, user_message: str, intent_result: IntentResult) -> dict:
         """ADJUST_BASE: 转发到世界树管理（s3 实装）"""
         adjustment = intent_result.args.intervention_text or user_message
+        self.log.info(
+            "NovelSteward._handle_adjust_base: project_id=%s, adjustment_len=%d",
+            project_id, len(adjustment),
+        )
         diff = await self.world_tree_manager.analyze_base_adjustment(
             project_id=project_id,
             adjustment_text=adjustment,
+        )
+        self.log.info(
+            "NovelSteward._handle_adjust_base DONE: project_id=%s, risk=%s",
+            project_id, diff.risk_level,
         )
         response_text = self._format_diff_response(diff)
         return {
@@ -518,6 +601,10 @@ class NovelSteward:
 
     async def _handle_rollback(self, project_id: str) -> dict:
         """ROLLBACK: 回档（危险操作，管家直接处理 + 弹确认）"""
+        self.log.info(
+            "NovelSteward._handle_rollback: project_id=%s (stub, require_confirm=True)",
+            project_id,
+        )
         return {
             "intent": Intent.ROLLBACK.value,
             "confidence": 1.0,
@@ -528,6 +615,10 @@ class NovelSteward:
 
     async def _handle_onboarding_continue(self, project_id: str, user_message: str, intent_result: IntentResult) -> dict:
         """ONBOARDING_CONTINUE: 启动 OnboardingController（s3.5 实装）"""
+        self.log.info(
+            "NovelSteward._handle_onboarding_continue: project_id=%s, msg_len=%d",
+            project_id, len(user_message),
+        )
         from backend.agent.onboarding.controller import (
             get_onboarding_controller, OnboardingState, OnboardingStep,
         )
@@ -540,11 +631,27 @@ class NovelSteward:
             user_message=user_message,
             state=state,
         )
+        self.log.info(
+            "NovelSteward._handle_onboarding_continue: project_id=%s, "
+            "new_step=%s, should_generate=%s",
+            project_id, result.new_state.current_step.value,
+            result.should_generate_chapter,
+        )
         # 如果触发 Step 5，调 NovelWriter 生成
         if result.should_generate_chapter:
             if project_id:
+                self.log.info(
+                    "NovelSteward._handle_onboarding_continue: triggering step5 generate, project_id=%s",
+                    project_id,
+                )
                 chapter_result = await controller.run_step_5_generate_chapter(project_id=project_id)
                 if chapter_result.chapter_content:
+                    self.log.info(
+                        "NovelSteward._handle_onboarding_continue step5 DONE: project_id=%s, "
+                        "content_len=%d, iterations=%d",
+                        project_id, len(chapter_result.chapter_content),
+                        chapter_result.iterations,
+                    )
                     return {
                         "intent": Intent.ONBOARDING_CONTINUE.value,
                         "confidence": intent_result.confidence,
@@ -590,6 +697,10 @@ class NovelSteward:
 
     async def _handle_chat(self, user_message: str, project_id: Optional[str], user_id: str) -> dict:
         """CHAT: 兜底闲聊（管家直接调 LLM）"""
+        self.log.info(
+            "NovelSteward._handle_chat: user_id=%s, project_id=%s, msg_len=%d",
+            user_id, project_id, len(user_message),
+        )
         return {
             "intent": Intent.CHAT.value,
             "confidence": 1.0,

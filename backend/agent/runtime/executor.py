@@ -14,22 +14,19 @@
 from __future__ import annotations
 
 import json
-import logging
 import time
+from pydantic import BaseModel, Field
 from typing import Optional, List, Any
 
-from pydantic import BaseModel, Field
-
 from backend.adapters.llm_adapter import get_llm_adapter
-from backend.adapters.types import LLMRequest, LLMResponse, ToolCall, ModelRole
+from backend.adapters.types import LLMRequest, ModelRole
 from backend.agent.tools.base import BaseTool, ToolError
 from backend.agent.tools.registry import (
     get_tool_registry,
     make_tool_message,
     ToolRegistry,
 )
-
-log = logging.getLogger(__name__)
+from backend.utils.logger import logger as logger_decorator
 
 
 # ============ Agent 配置 ============
@@ -57,6 +54,7 @@ class AgentOutput(BaseModel):
 
 # ============ Agent Executor ============
 
+@logger_decorator
 class AgentExecutor:
     """Agent ReAct loop 执行器（s3.3）
 
@@ -99,6 +97,12 @@ class AgentExecutor:
         """
         start = time.time()
 
+        self.log.info(
+            "AgentExecutor.execute START: agent=%s, project_id=%s, "
+            "max_iterations=%d, msg_len=%d",
+            agent.agent_name, project_id, max_iterations, len(user_message or ""),
+        )
+
         # 1. 加载工具集（基础 + 临时扩展）
         tool_instances = self.registry.get_agent_tools(agent.agent_name)
         if agent.extra_tools:
@@ -107,7 +111,10 @@ class AgentExecutor:
                 try:
                     tool_instances.append(get_tool(name))
                 except KeyError:
-                    log.warning(f"agent_executor: extra_tool '{name}' 未注册")
+                    self.log.warning(
+                        "AgentExecutor.execute: extra_tool '%s' 未注册, agent=%s",
+                        name, agent.agent_name,
+                    )
 
         openai_tools = self.registry.to_openai_tools(agent.agent_name)
         if agent.extra_tools:
@@ -120,6 +127,11 @@ class AgentExecutor:
                     openai_tools.append(_base_tool_to_openai(inst))
                 except KeyError:
                     pass
+
+        self.log.debug(
+            "AgentExecutor.execute: agent=%s, tools=%s",
+            agent.agent_name, [t.name for t in tool_instances],
+        )
 
         # 2. 拼 system_prompt（含工具清单 + context）
         system_prompt = self._build_system_prompt(
@@ -143,9 +155,9 @@ class AgentExecutor:
         total_output_tokens = 0
 
         for iteration in range(1, max_iterations + 1):
-            log.info(
-                f"agent_executor[{agent.agent_name}]: iteration {iteration}/{max_iterations} "
-                f"messages={len(messages)}"
+            self.log.info(
+                "AgentExecutor[%s]: iteration %d/%d, messages=%d",
+                agent.agent_name, iteration, max_iterations, len(messages),
             )
 
             try:
@@ -162,15 +174,21 @@ class AgentExecutor:
                 total_input_tokens += llm_response.input_tokens
                 total_output_tokens += llm_response.output_tokens
             except Exception as e:
-                log.error(f"agent_executor[{agent.agent_name}]: LLM 调用失败: {e}")
+                self.log.error(
+                    "AgentExecutor[%s]: LLM 调用失败 iteration=%d: %s",
+                    agent.agent_name, iteration, e,
+                )
                 last_error = f"LLM 调用失败: {e}"
                 break
 
             # 5. 解析 LLM 响应
             if llm_response.tool_calls:
                 # ── LLM 决定调工具 ─────────────────────
-                log.info(
-                    f"agent_executor[{agent.agent_name}]: LLM 输出 {len(llm_response.tool_calls)} 个 tool_calls"
+                self.log.info(
+                    "AgentExecutor[%s]: iteration=%d, LLM 输出 %d 个 tool_calls: %s",
+                    agent.agent_name, iteration,
+                    len(llm_response.tool_calls),
+                    [tc.function.name for tc in llm_response.tool_calls],
                 )
 
                 # 把 assistant 的 tool_calls 消息追加
@@ -201,8 +219,9 @@ class AgentExecutor:
                         if agent.extra_tools and tool_name in agent.extra_tools:
                             pass  # 临时扩展的 tool 允许
                         else:
-                            log.warning(
-                                f"agent_executor[{agent.agent_name}]: LLM 调用了不可用工具 '{tool_name}'"
+                            self.log.warning(
+                                "AgentExecutor[%s]: LLM 调用了不可用工具 '%s' iteration=%d",
+                                agent.agent_name, tool_name, iteration,
                             )
                             tool_msg = make_tool_message(
                                 tool_call_id=tool_call_id,
@@ -223,7 +242,10 @@ class AgentExecutor:
                     try:
                         args_dict = json.loads(tc.function.arguments)
                     except json.JSONDecodeError as e:
-                        log.warning(f"agent_executor: arguments 不是合法 JSON: {e}")
+                        self.log.warning(
+                            "AgentExecutor[%s]: tool '%s' arguments 不是合法 JSON: %s",
+                            agent.agent_name, tool_name, e,
+                        )
                         tool_msg = make_tool_message(
                             tool_call_id=tool_call_id,
                             tool_name=tool_name,
@@ -244,14 +266,20 @@ class AgentExecutor:
                         (t for t in tool_instances if t.name == tool_name), None
                     )
                     if not tool_instance:
-                        log.error(f"agent_executor: 找不到 tool '{tool_name}' 实例")
+                        self.log.error(
+                            "AgentExecutor[%s]: 找不到 tool '%s' 实例",
+                            agent.agent_name, tool_name,
+                        )
                         continue
 
                     # Pydantic validate input
                     try:
                         input_obj = tool_instance.input_schema(**args_dict)
                     except Exception as e:
-                        log.warning(f"agent_executor: tool '{tool_name}' 参数验证失败: {e}")
+                        self.log.warning(
+                            "AgentExecutor[%s]: tool '%s' 参数验证失败: %s",
+                            agent.agent_name, tool_name, e,
+                        )
                         tool_msg = make_tool_message(
                             tool_call_id=tool_call_id,
                             tool_name=tool_name,
@@ -268,11 +296,15 @@ class AgentExecutor:
                         continue
 
                     # 执行 tool
-                    log.info(
-                        f"agent_executor[{agent.agent_name}]: 执行 tool '{tool_name}' args={args_dict}"
+                    self.log.info(
+                        "AgentExecutor[%s]: 执行 tool '%s', iteration=%d, args=%s",
+                        agent.agent_name, tool_name, iteration,
+                        str(args_dict)[:200],
                     )
+                    t_tool = time.time()
                     try:
                         tool_output = await tool_instance.run(input_obj)
+                        tool_duration_ms = int((time.time() - t_tool) * 1000)
                         # 检查是否是 ToolError
                         if isinstance(tool_output, ToolError):
                             tool_result = {
@@ -281,11 +313,24 @@ class AgentExecutor:
                                 "details": tool_output.details,
                             }
                             status = "tool_error"
+                            self.log.warning(
+                                "AgentExecutor[%s]: tool '%s' 返回 ToolError: %s (%dms)",
+                                agent.agent_name, tool_name,
+                                tool_output.code, tool_duration_ms,
+                            )
                         else:
                             tool_result = tool_output.model_dump() if hasattr(tool_output, "model_dump") else tool_output
                             status = "success"
+                            self.log.info(
+                                "AgentExecutor[%s]: tool '%s' SUCCESS (%dms)",
+                                agent.agent_name, tool_name, tool_duration_ms,
+                            )
                     except Exception as e:
-                        log.error(f"agent_executor: tool '{tool_name}' 执行异常: {e}")
+                        tool_duration_ms = int((time.time() - t_tool) * 1000)
+                        self.log.error(
+                            "AgentExecutor[%s]: tool '%s' 执行异常 (%dms): %s",
+                            agent.agent_name, tool_name, tool_duration_ms, e,
+                        )
                         tool_result = {"error": str(e)}
                         status = "exception"
 
@@ -310,9 +355,14 @@ class AgentExecutor:
             else:
                 # ── LLM 输出 final_response，退出 ──
                 last_response_text = llm_response.content or ""
-                log.info(
-                    f"agent_executor[{agent.agent_name}]: LLM 输出 final_response "
-                    f"(iter={iteration}, content_len={len(last_response_text)})"
+                duration_ms = int((time.time() - start) * 1000)
+                self.log.info(
+                    "AgentExecutor[%s]: final_response at iteration=%d, "
+                    "content_len=%d, tool_calls_total=%d, "
+                    "tokens(in=%d, out=%d), duration=%dms",
+                    agent.agent_name, iteration,
+                    len(last_response_text), len(tool_calls_history),
+                    total_input_tokens, total_output_tokens, duration_ms,
                 )
                 return AgentOutput(
                     final_response=last_response_text,
@@ -320,12 +370,16 @@ class AgentExecutor:
                     iterations=iteration,
                     input_tokens=total_input_tokens,
                     output_tokens=total_output_tokens,
-                    duration_ms=int((time.time() - start) * 1000),
+                    duration_ms=duration_ms,
                 )
 
         # 达到 max_iterations 仍未退出
-        log.warning(
-            f"agent_executor[{agent.agent_name}]: 达到 max_iterations={max_iterations} 仍未输出 final_response"
+        duration_ms = int((time.time() - start) * 1000)
+        self.log.warning(
+            "AgentExecutor[%s]: 达到 max_iterations=%d 仍未输出 final_response, "
+            "tool_calls_total=%d, duration=%dms",
+            agent.agent_name, max_iterations,
+            len(tool_calls_history), duration_ms,
         )
         return AgentOutput(
             final_response=last_response_text or "（达到最大循环轮次，未输出最终回复）",
@@ -333,7 +387,7 @@ class AgentExecutor:
             iterations=max_iterations,
             input_tokens=total_input_tokens,
             output_tokens=total_output_tokens,
-            duration_ms=int((time.time() - start) * 1000),
+            duration_ms=duration_ms,
             error=last_error or "max_iterations_reached",
         )
 

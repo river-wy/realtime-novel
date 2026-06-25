@@ -14,14 +14,11 @@
 """
 from __future__ import annotations
 
-import logging
+from pydantic import BaseModel, Field
 from typing import Optional
 
-from pydantic import BaseModel, Field
-
-from backend.agent.runtime.executor import AgentExecutor, AgentConfig, AgentOutput, get_agent_executor
-
-log = logging.getLogger(__name__)
+from backend.agent.runtime.executor import AgentExecutor, AgentConfig, get_agent_executor
+from backend.utils.logger import logger as logger_decorator
 
 
 # ============ Writer 响应结构 ============
@@ -69,6 +66,7 @@ SUMMARY: <一句话总结本章>
 
 # ============ NovelWriter 主类 ============
 
+@logger_decorator
 class NovelWriter:
     """小说文笔家（v0.6 s3.4：AgentExecutor 接入）
 
@@ -99,6 +97,11 @@ class NovelWriter:
         Returns:
             ChapterOutput
         """
+        self.log.info(
+            "NovelWriter.generate_chapter START: project_id=%s, user_msg_len=%d, max_iterations=%d",
+            project_id, len(user_message), max_iterations,
+        )
+
         cfg = AgentConfig(
             agent_name="novel_writer",
             system_prompt=NOVEL_WRITER_SYSTEM_PROMPT,
@@ -118,6 +121,19 @@ class NovelWriter:
             parts = chapter_content.split("SUMMARY:", 1)
             chapter_content = parts[0].strip()
             chapter_summary = parts[1].strip() if len(parts) > 1 else ""
+
+        if executor_output.error:
+            self.log.error(
+                "NovelWriter.generate_chapter ERROR: project_id=%s, error=%s, iterations=%d",
+                project_id, executor_output.error, executor_output.iterations,
+            )
+        else:
+            self.log.info(
+                "NovelWriter.generate_chapter DONE: project_id=%s, content_len=%d, "
+                "summary_len=%d, iterations=%d, tool_calls=%d",
+                project_id, len(chapter_content), len(chapter_summary),
+                executor_output.iterations, len(executor_output.tool_calls_history),
+            )
 
         return ChapterOutput(
             chapter_content=chapter_content,

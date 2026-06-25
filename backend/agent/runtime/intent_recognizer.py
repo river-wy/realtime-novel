@@ -15,17 +15,14 @@
 from __future__ import annotations
 
 import json
-import logging
+from pydantic import BaseModel, Field
 from string import Template
 from typing import Optional
 
-from pydantic import BaseModel, Field
-
-from backend.agent.runtime.state import Intent
 from backend.adapters.llm_adapter import get_llm_adapter
 from backend.adapters.types import ModelRole
-
-log = logging.getLogger(__name__)
+from backend.agent.runtime.state import Intent
+from backend.utils.logger import logger as logger_decorator
 
 
 # ============ IntentArgs Pydantic Schema ============
@@ -64,6 +61,7 @@ class IntentResult(BaseModel):
 
 # ============ IntentRecognizer 主类 ============
 
+@logger_decorator
 class IntentRecognizer:
     """意图识别器（管家内部组件）
 
@@ -134,7 +132,7 @@ class IntentRecognizer:
   - 例: "AI 创作有什么技巧"、"你好"、"随便聊聊"
 
 【上下文】
-{context_block}
+${context_block}
 
 【注意】
 1. 意图分类要保守，不确定时选 CHAT
@@ -143,7 +141,7 @@ class IntentRecognizer:
 4. confidence < 0.6 时也选 CHAT，让管家兜底追问
 
 【用户消息】
-{user_message}
+${user_message}
 
 只输出 JSON，不要其他内容。
 """
@@ -166,6 +164,12 @@ class IntentRecognizer:
         Returns:
             IntentResult（含 intent + args + confidence）
         """
+        self.log.info(
+            "IntentRecognizer.classify START: has_project=%s, project_id=%s, "
+            "in_onboarding=%s, msg_len=%d",
+            has_project, project_id, in_onboarding, len(user_message or ""),
+        )
+
         # 拼上下文
         context_parts = []
         if in_onboarding:
@@ -193,6 +197,10 @@ class IntentRecognizer:
 
         try:
             adapter = get_llm_adapter()
+            self.log.debug(
+                "IntentRecognizer.classify LLM CALL: context=%s",
+                context_parts[1] if len(context_parts) > 1 else context_parts[0],
+            )
             response = await adapter.complete_with_messages(
                 messages=[{"role": "user", "content": user_message}],
                 system_prompt=sys_prompt,
@@ -203,6 +211,11 @@ class IntentRecognizer:
 
             # 解析 LLM 输出
             raw = response.content.strip()
+            self.log.debug(
+                "IntentRecognizer.classify LLM RESPONSE: raw_len=%d, preview=%s",
+                len(raw), raw[:100].replace("\n", " "),
+            )
+
             # 处理可能的 markdown 包裹
             if raw.startswith("```"):
                 raw = raw.split("```")[1]
@@ -220,7 +233,10 @@ class IntentRecognizer:
             try:
                 intent = Intent(intent_str)
             except ValueError:
-                log.warning(f"intent_recognizer: 未知 intent '{parsed.get('intent')}', 兜底为 CHAT")
+                self.log.warning(
+                    "IntentRecognizer.classify: 未知 intent '%s', 兜底为 CHAT",
+                    parsed.get("intent"),
+                )
                 intent = Intent.CHAT
 
             args_data = parsed.get("args", {}) or {}
@@ -229,29 +245,47 @@ class IntentRecognizer:
             confidence = float(parsed.get("confidence", 0.5))
             reasoning = parsed.get("reasoning", "")
 
-            # 🔴 LLM 有时 intent 填错，但 args 填对。用 args 反推 intent 兑底
-            # （避免 LLM 在 JSON intent 字段写错导致路由错误）
+            # 🔴 LLM 有时 intent 填错，但 args 填对。用 args 反推 intent 兜底
+            original_intent = intent
             if intent == Intent.CHAT:
                 if args.intervention_text:
                     intent = Intent.INTERVENE
-                    log.info("intent_recognizer: intent=CHAT 但 args 有 intervention_text → 兑底为 INTERVENE")
+                    self.log.info(
+                        "IntentRecognizer.classify: intent=CHAT 但 args 有 intervention_text → 兜底为 INTERVENE",
+                    )
                 elif args.preference_key:
                     intent = Intent.ADJUST_GLOBAL_PREFERENCE
-                    log.info("intent_recognizer: intent=CHAT 但 args 有 preference_key → 兑底为 ADJUST_GLOBAL_PREFERENCE")
+                    self.log.info(
+                        "IntentRecognizer.classify: intent=CHAT 但 args 有 preference_key → 兜底为 ADJUST_GLOBAL_PREFERENCE",
+                    )
                 elif args.project_name_hint:
                     intent = Intent.OPEN_PROJECT
-                    log.info("intent_recognizer: intent=CHAT 但 args 有 project_name_hint → 兑底为 OPEN_PROJECT")
+                    self.log.info(
+                        "IntentRecognizer.classify: intent=CHAT 但 args 有 project_name_hint → 兜底为 OPEN_PROJECT",
+                    )
                 elif args.filter_genre or args.filter_style or args.filter_status:
                     intent = Intent.QUERY_PROJECTS
-                    log.info("intent_recognizer: intent=CHAT 但 args 有 filter_* → 兑底为 QUERY_PROJECTS")
+                    self.log.info(
+                        "IntentRecognizer.classify: intent=CHAT 但 args 有 filter_* → 兜底为 QUERY_PROJECTS",
+                    )
                 elif args.initial_idea:
                     intent = Intent.CREATE_PROJECT
-                    log.info("intent_recognizer: intent=CHAT 但 args 有 initial_idea → 兑底为 CREATE_PROJECT")
+                    self.log.info(
+                        "IntentRecognizer.classify: intent=CHAT 但 args 有 initial_idea → 兜底为 CREATE_PROJECT",
+                    )
 
-            # 保守兑底：confidence < 0.6 → CHAT（但上面 args 反推后不兑底）
+            # 保守兜底：confidence < 0.6 → CHAT（但上面 args 反推后不兜底）
             if confidence < 0.6 and intent == Intent.CHAT:
                 # confidence 低且 args 无任何线索 → 保持 CHAT
                 pass
+
+            self.log.info(
+                "IntentRecognizer.classify DONE: intent=%s, confidence=%.2f, "
+                "args_keys=%s, reasoning=%s",
+                intent.value, confidence,
+                [k for k, v in args.model_dump().items() if v is not None],
+                reasoning[:80] if reasoning else "",
+            )
 
             return IntentResult(
                 intent=intent,
@@ -261,7 +295,10 @@ class IntentRecognizer:
             )
 
         except Exception as e:
-            log.error(f"intent_recognizer: LLM 调用失败: {e}, 兜底为 CHAT")
+            self.log.error(
+                "IntentRecognizer.classify FAILED: error=%s, 兜底为 CHAT", e,
+                exc_info=True,
+            )
             return IntentResult(
                 intent=Intent.CHAT,
                 confidence=0.0,

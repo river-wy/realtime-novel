@@ -10,12 +10,10 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 
 from backend.core.event_bus import event_bus
 from backend.adapters.types import LLMRequest, ModelRole
-
-log = logging.getLogger(__name__)
+from backend.utils.logger import logger as logger_decorator
 
 
 # ============ 项目名自动生成 (v0.6.1: 从原 onboarding_agent 移入 hooks) ============
@@ -42,6 +40,7 @@ GENERATE_NAME_PROMPT = """你是「小说命名师」。根据下面的故事核
 """
 
 
+@logger_decorator
 async def _generate_project_name(story_core: str, characters: str, tone: list[str] | str) -> str:
     """Step 4 完成后 LLM 自动生成项目名
 
@@ -75,18 +74,19 @@ async def _generate_project_name(story_core: str, characters: str, tone: list[st
         name = raw.split("\n")[0].strip().strip("'\"`'「」《》")
         name = name[:50]
         if not name or len(name) < 2:
-            log.warning("auto-name: too short, raw=%s", raw[:100])
+            _generate_project_name.log.warning("auto-name: too short, raw=%s", raw[:100])
             return ""
-        log.info("auto-name generated: %s", name)
+        _generate_project_name.log.info("auto-name generated: %s", name)
         return name
     except Exception as e:
-        log.error("auto-name failed: %s", str(e))
+        _generate_project_name.log.error("auto-name failed: %s", str(e))
         return ""
 
 
 # ============ Event Handlers ============
 
 @event_bus.on("onboarding.step4_confirmed")
+@logger_decorator
 async def handle_step4_confirmed(
     project_id: str,
     payload: dict,
@@ -108,7 +108,7 @@ async def handle_step4_confirmed(
     projects_root: Path = PROJECT_ROOT / "data" / "projects"
     proj_repo = ProjectRepository()
 
-    log.info("onboarding_hooks: step4_confirmed START project_id=%s", project_id)
+    handle_step4_confirmed.log.info("onboarding_hooks: step4_confirmed START project_id=%s", project_id)
 
     name_task = _generate_project_name(
         story_core=payload.get("story_core", ""),
@@ -127,12 +127,12 @@ async def handle_step4_confirmed(
 
     # ── 处理名称 ──────────────────────────────────────────
     if isinstance(new_name, Exception):
-        log.warning("onboarding_hooks: name generation failed: %s", new_name)
+        handle_step4_confirmed.log.warning("onboarding_hooks: name generation failed: %s", new_name)
         new_name = None
     if new_name:
         proj_repo.update_name(project_id, new_name)
         OnboardingFlow().update_project_name_in_state(project_id, new_name)
-        log.info("onboarding_hooks: name saved project_id=%s name=%r", project_id, new_name)
+        handle_step4_confirmed.log.info("onboarding_hooks: name saved project_id=%s name=%r", project_id, new_name)
         if ws is not None:
             try:
                 await ws.send_json({
@@ -145,11 +145,11 @@ async def handle_step4_confirmed(
 
     # ── 处理封面图 ────────────────────────────────────────
     if isinstance(cover_image_url, Exception):
-        log.warning("onboarding_hooks: cover generation failed: %s", cover_image_url)
+        handle_step4_confirmed.log.warning("onboarding_hooks: cover generation failed: %s", cover_image_url)
         cover_image_url = None
     if cover_image_url:
         proj_repo.update_cover_image_url(project_id, cover_image_url)
-        log.info("onboarding_hooks: cover saved project_id=%s url=%s", project_id, cover_image_url)
+        handle_step4_confirmed.log.info("onboarding_hooks: cover saved project_id=%s url=%s", project_id, cover_image_url)
         if ws is not None:
             try:
                 await ws.send_json({
@@ -160,5 +160,5 @@ async def handle_step4_confirmed(
             except Exception:
                 pass  # WS 已断开，忽略
 
-    log.info("onboarding_hooks: step4_confirmed DONE project_id=%s name=%r cover=%s",
+    handle_step4_confirmed.log.info("onboarding_hooks: step4_confirmed DONE project_id=%s name=%r cover=%s",
              project_id, new_name, cover_image_url)

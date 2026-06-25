@@ -22,13 +22,11 @@
 from __future__ import annotations
 
 import json
-import logging
-from typing import Optional, Any, List
 from pydantic import BaseModel, Field
+from typing import Optional, Any, List
 
 from backend.agent.runtime.executor import AgentExecutor, AgentConfig, AgentOutput, get_agent_executor
-
-log = logging.getLogger(__name__)
+from backend.utils.logger import logger as logger_decorator
 
 
 # ============ Diff 结构 ============
@@ -149,6 +147,7 @@ WORLD_TREE_MANAGER_SYSTEM_PROMPT = """你是「世界树管理」。
 
 # ============ WorldTreeManager 主类 ============
 
+@logger_decorator
 class WorldTreeManager:
     """世界树管理（v0.6 s3.4：AgentExecutor 接入）"""
 
@@ -162,6 +161,11 @@ class WorldTreeManager:
         max_iterations: int = 7,
     ) -> WorldTreeDiff:
         """分析干预影响，返回结构化 diff（含一致性检查）"""
+        self.log.info(
+            "WorldTreeManager.analyze_intervention START: project_id=%s, text_len=%d",
+            project_id, len(intervention_text),
+        )
+
         cfg = AgentConfig(
             agent_name="world_tree_manager",
             system_prompt=WORLD_TREE_MANAGER_SYSTEM_PROMPT,
@@ -172,6 +176,13 @@ class WorldTreeManager:
             user_message=f"用户干预：{intervention_text}",
             project_id=project_id,
             max_iterations=max_iterations,
+        )
+
+        self.log.info(
+            "WorldTreeManager.analyze_intervention EXECUTOR DONE: project_id=%s, "
+            "iterations=%d, tool_calls=%d, error=%s",
+            project_id, executor_output.iterations,
+            len(executor_output.tool_calls_history), executor_output.error,
         )
 
         # 解析 final_response 为 WorldTreeDiff
@@ -192,6 +203,14 @@ class WorldTreeManager:
             diff.risk_level = "blocked"
             diff.requires_double_confirm = True
 
+        self.log.info(
+            "WorldTreeManager.analyze_intervention DONE: project_id=%s, "
+            "risk=%s, base_updates=%d, plot_adj=%d, new_seeds=%d, consistency=%s",
+            project_id, diff.risk_level,
+            len(diff.base_updates), len(diff.plot_adjustments), len(diff.new_seeds),
+            diff.consistency.status,
+        )
+
         return diff
 
     async def analyze_base_adjustment(
@@ -201,6 +220,11 @@ class WorldTreeManager:
         max_iterations: int = 7,
     ) -> WorldTreeDiff:
         """分析基座调整（与干预类似，但 intent 不同）"""
+        self.log.info(
+            "WorldTreeManager.analyze_base_adjustment START: project_id=%s, text_len=%d",
+            project_id, len(adjustment_text),
+        )
+
         cfg = AgentConfig(
             agent_name="world_tree_manager",
             system_prompt=WORLD_TREE_MANAGER_SYSTEM_PROMPT,
@@ -211,6 +235,13 @@ class WorldTreeManager:
             user_message=f"用户基座调整：{adjustment_text}",
             project_id=project_id,
             max_iterations=max_iterations,
+        )
+
+        self.log.info(
+            "WorldTreeManager.analyze_base_adjustment EXECUTOR DONE: project_id=%s, "
+            "iterations=%d, tool_calls=%d, error=%s",
+            project_id, executor_output.iterations,
+            len(executor_output.tool_calls_history), executor_output.error,
         )
 
         diff = self._parse_diff(executor_output, intent="adjust_base")
@@ -228,6 +259,13 @@ class WorldTreeManager:
             diff.risk_level = "blocked"
             diff.requires_double_confirm = True
 
+        self.log.info(
+            "WorldTreeManager.analyze_base_adjustment DONE: project_id=%s, "
+            "risk=%s, base_updates=%d, consistency=%s",
+            project_id, diff.risk_level,
+            len(diff.base_updates), diff.consistency.status,
+        )
+
         return diff
 
     async def _run_consistency_check(
@@ -243,6 +281,11 @@ class WorldTreeManager:
         2. 应用 proposed_updates 得到"应用后"快照
         3. 调用 checker.check() 验证
         """
+        self.log.debug(
+            "WorldTreeManager._run_consistency_check: project_id=%s, "
+            "proposed_updates=%d, proposed_seeds=%d",
+            project_id, len(proposed_updates), len(proposed_seeds),
+        )
         try:
             from backend.services.consistency_checker import (
                 ConsistencyChecker, BaseSnapshot,
@@ -259,14 +302,23 @@ class WorldTreeManager:
             # 后续 s4+ 可实装真正的 apply 逻辑
             after = before
 
-            return checker.check(
+            result = checker.check(
                 before=before,
                 after=after,
                 proposed_updates=proposed_updates,
                 proposed_seeds=proposed_seeds,
             )
+            self.log.info(
+                "WorldTreeManager._run_consistency_check: project_id=%s, status=%s, "
+                "conflicts=%d, warnings=%d",
+                project_id, result.status, len(result.conflicts), len(result.warnings),
+            )
+            return result
         except Exception as e:
-            log.warning(f"world_tree_manager: consistency check failed: {e}")
+            self.log.warning(
+                "WorldTreeManager._run_consistency_check FAILED: project_id=%s, error=%s",
+                project_id, e,
+            )
             return ConsistencyCheckResult(
                 status="WARN",
                 warnings=[f"一致性检查执行失败: {e}"],
@@ -317,7 +369,10 @@ class WorldTreeManager:
                                 continue
 
         if parsed is None:
-            log.warning(f"world_tree_manager: LLM 输出无法提取 JSON: {final[:200]}")
+            self.log.warning(
+                "WorldTreeManager._parse_diff: 无法提取 JSON: intent=%s, preview=%s",
+                intent, final[:200],
+            )
             return WorldTreeDiff(
                 intent=intent,
                 summary=final[:200] or "LLM 输出无法解析",
@@ -326,15 +381,13 @@ class WorldTreeManager:
                 requires_double_confirm=True,
             )
 
-        return WorldTreeDiff(
-            intent=parsed.get("intent", intent),
-            summary=parsed.get("summary", ""),
-            base_updates=[BaseUpdate(**u) for u in parsed.get("base_updates", []) or []],
-            plot_adjustments=[PlotAdjustment(**a) for a in parsed.get("plot_adjustments", []) or []],
-            new_seeds=[NewSeed(**s) for s in parsed.get("new_seeds", []) or []],
-            consistency=ConsistencyCheckResult(**(parsed.get("consistency") or {"status": "PASS"})),
-            risk_level=parsed.get("risk_level", "low"),
-            requires_double_confirm=parsed.get("requires_double_confirm", False),
+        self.log.debug(
+            "WorldTreeManager._parse_diff OK: intent=%s, base_updates=%d, "
+            "plot_adj=%d, seeds=%d",
+            intent,
+            len(parsed.get("base_updates") or []),
+            len(parsed.get("plot_adjustments") or []),
+            len(parsed.get("new_seeds") or []),
         )
 
         return WorldTreeDiff(

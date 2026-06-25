@@ -18,24 +18,21 @@ v0.6.1 重构（合并原 OnboardingAgent 能力）:
 from __future__ import annotations
 
 import json
-import logging
 import re
 import time
 from enum import Enum
-from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field, ValidationError
+from typing import Any, Dict, List, Optional
 
 from backend.adapters import get_llm_adapter
 from backend.adapters.types import LLMRequest, ModelRole
-from backend.agent.runtime.executor import AgentExecutor, get_agent_executor
 from backend.agent.agents.novel_writer import get_novel_writer
 from backend.agent.prompts import (
     ONBOARDING_STEP3_PROMPT,
     ONBOARDING_STEP4_PROMPT,
 )
-from backend.utils.logger import get_logger
-
-log = get_logger(__name__)
+from backend.agent.runtime.executor import AgentExecutor, get_agent_executor
+from backend.utils.logger import logger as logger_decorator
 
 
 # ============ Onboarding Step 枚举 ============
@@ -144,6 +141,7 @@ _REGENERATE_KEYWORDS = [
 ]
 
 
+@logger_decorator
 def _is_regenerate_request(user_message: str) -> bool:
     """检测「重新提议」信号
 
@@ -153,7 +151,10 @@ def _is_regenerate_request(user_message: str) -> bool:
     if not user_message:
         return False
     msg = user_message.lower()
-    return any(kw in msg for kw in _REGENERATE_KEYWORDS)
+    is_regen = any(kw in msg for kw in _REGENERATE_KEYWORDS)
+    if is_regen:
+        _is_regenerate_request.log.info("_is_regenerate_request: 检测到重新提议信号: user_message_len=%d", len(user_message))
+    return is_regen
 
 
 # ============ JSON 解析（三层 fallback + 清洗） ============
@@ -239,6 +240,7 @@ def _sanitize_json_string(text: str) -> str:
 
 # ============ OnboardingController 主类 ============
 
+@logger_decorator
 class OnboardingController:
     """Onboarding 流程控制器 (v0.6.1 完整重构)
 
@@ -289,6 +291,11 @@ class OnboardingController:
         Returns:
             OnboardingResult: 包含 fields / raw / error / assistant_response
         """
+        # v0.6.1: 入口 log (关键多轮交互边界)
+        self.log.info(
+            "OnboardingController.consult START: project_id=%s, step=%d, user_msg_len=%d, current_fields_keys=%s",
+            project_id, step, len(user_message or ""), list((current_fields or {}).keys()),
+        )
         current_fields = current_fields or {}
 
         # 1. 读 onboarding_state DB 拿 Step 1+2 已有数据
@@ -300,7 +307,7 @@ class OnboardingController:
                     (project_id,),
                 ).fetchone()
         except Exception as e:
-            log.error("consult: failed to read onboarding_state: %s", str(e), exc_info=True)
+            self.log.error("consult: failed to read onboarding_state: %s", str(e), exc_info=True)
             return OnboardingResult(
                 new_state=OnboardingState(project_id=project_id, current_step=OnboardingStep.STEP_3 if step == 3 else OnboardingStep.STEP_4),
                 error=f"读取 onboarding 状态失败: {e}",
@@ -356,7 +363,7 @@ class OnboardingController:
                 role=ModelRole.TEXT,
             )
         except Exception as e:
-            log.error("consult: failed to build LLM request: %s", str(e), exc_info=True)
+            self.log.error("consult: failed to build LLM request: %s", str(e), exc_info=True)
             return OnboardingResult(
                 new_state=OnboardingState(project_id=project_id, current_step=OnboardingStep.STEP_3 if step == 3 else OnboardingStep.STEP_4),
                 error=f"构造 LLM 请求失败: {e}",
@@ -367,7 +374,7 @@ class OnboardingController:
         msg_count = len(messages)
         total_chars = sum(len(m.get("content", "") or "") for m in messages)
         est_tokens = int(total_chars * 0.7)
-        log.info(
+        self.log.info(
             "LLM CALL: project_id=%s, step=%d, model=%s, temp=%.2f, max_tokens=%d, freq_penalty=%.2f, msg_count=%d, est_input_tokens=%d",
             project_id, step, type(adapter).__name__,
             llm_params["temperature"], llm_params["max_tokens"],
@@ -376,13 +383,13 @@ class OnboardingController:
         try:
             response = await adapter.complete(request)
             raw = response.content
-            log.info(
+            self.log.info(
                 "LLM RESPONSE: project_id=%s, step=%d, raw_len=%d, raw_preview=%s, elapsed=%.2fs",
                 project_id, step, len(raw or ""),
                 (raw or "")[:80].replace("\n", " "), time.monotonic() - t_llm,
             )
         except Exception as e:
-            log.error(
+            self.log.error(
                 "LLM EXCEPTION: project_id=%s, step=%d, error=%s, elapsed=%.2fs",
                 project_id, step, str(e), time.monotonic() - t_llm, exc_info=True,
             )
@@ -401,13 +408,13 @@ class OnboardingController:
                 fields_obj = Step3Fields.model_validate(data)
             else:
                 fields_obj = Step4Fields.model_validate(data)
-            log.info(
+            self.log.info(
                 "LLM PARSE OK: project_id=%s, step=%d, fields_keys=%s, used_fallback=%s",
                 project_id, step, list(fields_obj.model_dump().keys()),
                 raw_clean != (raw or ""),
             )
         except (json.JSONDecodeError, ValidationError) as e:
-            log.error(
+            self.log.error(
                 "LLM PARSE FAIL: project_id=%s, step=%d, error=%s, raw_preview=%s",
                 project_id, step, str(e), (raw or "")[:200].replace("\n", " "),
             )
@@ -418,12 +425,18 @@ class OnboardingController:
                 raw=raw,
             )
 
-        return OnboardingResult(
+        result = OnboardingResult(
             new_state=OnboardingState(project_id=project_id, current_step=OnboardingStep.STEP_3 if step == 3 else OnboardingStep.STEP_4),
             assistant_response=f"已为 Step {step} 生成字段: {list(fields_obj.model_dump().keys())}",
             fields=fields_obj.model_dump(),
             raw=raw,
         )
+        # v0.6.1: END log (成功路径)
+        self.log.info(
+            "OnboardingController.consult END: project_id=%s, step=%d, fields_keys=%s, raw_len=%d",
+            project_id, step, list(result.fields.keys()) if result.fields else [], len(result.raw or ""),
+        )
+        return result
 
     def _get_system_prompt(self, step: int, p: dict, current_fields: Dict[str, str]) -> str:
         """拼 system prompt: 用户已有输入 + 当前字段 + LLM 提议"""
@@ -463,6 +476,12 @@ class OnboardingController:
         这是 v0.6 s3.5 的 state-driven 版本，主要给 novel_steward 用。
         HTTP/WS 走 consult() (DB-driven)。
         """
+        self.log.info(
+            "OnboardingController.run_step_3_or_4 START: project_id=%s, step=%s, "
+            "history_len=%d, msg_len=%d",
+            state.project_id, state.current_step.value,
+            len(state.history), len(user_message or ""),
+        )
         messages = [
             {"role": "system", "content": ONBOARDING_SYSTEM_PROMPT},
             {"role": "system", "content": f"【当前 Step】{state.current_step.value}\n【project_id】{state.project_id or '尚未创建'}"},
@@ -497,6 +516,12 @@ class OnboardingController:
         if should_generate:
             new_state.current_step = OnboardingStep.STEP_5
 
+        self.log.info(
+            "OnboardingController.run_step_3_or_4 DONE: project_id=%s, "
+            "new_step=%s, should_generate=%s, response_len=%d",
+            state.project_id, new_state.current_step.value,
+            should_generate, len(assistant_response),
+        )
         return OnboardingResult(
             new_state=new_state,
             assistant_response=assistant_response,
@@ -511,11 +536,28 @@ class OnboardingController:
         user_message: str = "生成第 1 章",
     ) -> ChapterGenResult:
         """Step 5: 调 NovelWriter 生成第 1 章"""
+        self.log.info(
+            "OnboardingController.run_step_5_generate_chapter START: project_id=%s",
+            project_id,
+        )
         writer = get_novel_writer()
         chapter_output = await writer.generate_chapter(
             project_id=project_id,
             user_message=user_message,
         )
+        if chapter_output.error:
+            self.log.error(
+                "OnboardingController.run_step_5_generate_chapter ERROR: "
+                "project_id=%s, error=%s",
+                project_id, chapter_output.error,
+            )
+        else:
+            self.log.info(
+                "OnboardingController.run_step_5_generate_chapter DONE: "
+                "project_id=%s, content_len=%d, iterations=%d",
+                project_id, len(chapter_output.chapter_content),
+                chapter_output.iterations,
+            )
         return ChapterGenResult(
             chapter_content=chapter_output.chapter_content,
             chapter_summary=chapter_output.chapter_summary,

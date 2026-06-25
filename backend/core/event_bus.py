@@ -42,11 +42,13 @@ class EventBus:
         @event_bus.on("onboarding.step4_confirmed")
         async def handler(project_id: str, **kwargs): ...
         """
+
         def decorator(fn: AsyncHandler) -> AsyncHandler:
             self._handlers[event].append(fn)
             log.debug("EventBus: registered handler %s.%s for '%s'",
                       fn.__module__, fn.__qualname__, event)
             return fn
+
         return decorator
 
     def register(self, event: str, handler: AsyncHandler) -> None:
@@ -91,4 +93,3 @@ class EventBus:
 
 # 全局单例
 event_bus = EventBus()
-
