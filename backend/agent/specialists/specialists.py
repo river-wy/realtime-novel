@@ -21,7 +21,7 @@ from backend.agent.specialists.chapter_summarizer import (
     extract_summary_from_llm_output,
     parse_chapter_summary,
 )
-from backend.agent.context.context_builder import (
+from backend.agent.context import (
     build_messages_for_worldtree_keeper,
     build_messages_for_chapter_generator,
 )

@@ -321,7 +321,7 @@ class OnboardingController:
             sys_prompt += "\n\n【重要】用户表示「重新提议」, 请**重新构思**一套不同的方案, 不要直接复制上一轮提议."
 
         # 3. 拼 messages (用 context_builder)
-        from backend.agent.context.context_builder import (
+        from backend.agent.context import (
             build_messages_for_onboarding_step3,
             build_messages_for_onboarding_step4,
         )
