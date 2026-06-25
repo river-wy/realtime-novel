@@ -30,7 +30,7 @@ from backend.agent.specialists.exploration import (
     get_llm_params_for_project,
     fill_chapter_prompt_placeholders,
 )
-from backend.agent.prompts.prompts import (
+from backend.agent.prompts import (
     WORLDTREE_KEEPER_PROMPT,
     CHAPTER_GENERATOR_PROMPT,
     MEMORY_KEEPER_PROMPT,

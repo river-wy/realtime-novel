@@ -29,7 +29,7 @@ from backend.adapters import get_llm_adapter
 from backend.adapters.types import LLMRequest, ModelRole
 from backend.agent.runtime.executor import AgentExecutor, get_agent_executor
 from backend.agent.agents.novel_writer import get_novel_writer
-from backend.agent.prompts.prompts import (
+from backend.agent.prompts import (
     ONBOARDING_STEP3_PROMPT,
     ONBOARDING_STEP4_PROMPT,
 )
