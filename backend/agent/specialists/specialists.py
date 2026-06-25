@@ -17,20 +17,20 @@ from abc import ABC, abstractmethod
 
 from backend.adapters.llm_adapter import get_llm_adapter
 from backend.adapters.types import ModelRole
-from backend.agent.chapter_summarizer import (
+from backend.agent.specialists.chapter_summarizer import (
     extract_summary_from_llm_output,
     parse_chapter_summary,
 )
-from backend.agent.context_builder import (
+from backend.agent.context.context_builder import (
     build_messages_for_worldtree_keeper,
     build_messages_for_chapter_generator,
 )
 # 探索度工具函数：职责分离后统一在 agent.exploration
-from backend.agent.exploration import (
+from backend.agent.specialists.exploration import (
     get_llm_params_for_project,
     fill_chapter_prompt_placeholders,
 )
-from backend.agent.prompts import (
+from backend.agent.prompts.prompts import (
     WORLDTREE_KEEPER_PROMPT,
     CHAPTER_GENERATOR_PROMPT,
     MEMORY_KEEPER_PROMPT,

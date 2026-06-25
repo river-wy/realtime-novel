@@ -20,7 +20,7 @@ import logging
 from typing import List, Optional
 from pydantic import BaseModel, Field
 
-from backend.agent.world_tree_manager import (
+from backend.agent.agents.world_tree_manager import (
     BaseUpdate, PlotAdjustment, NewSeed, ConsistencyCheckResult,
 )
 from backend.persistence import ProjectRepository

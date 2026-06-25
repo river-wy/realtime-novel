@@ -22,14 +22,14 @@ from typing import Optional
 
 from pydantic import BaseModel
 
-from backend.agent.intent_recognizer import (
+from backend.agent.runtime.intent_recognizer import (
     IntentRecognizer,
     IntentResult,
     get_intent_recognizer,
 )
-from backend.agent.novel_writer import NovelWriter, get_novel_writer
-from backend.agent.world_tree_manager import WorldTreeManager, get_world_tree_manager
-from backend.agent.state import Intent, AgentState
+from backend.agent.agents.novel_writer import NovelWriter, get_novel_writer
+from backend.agent.agents.world_tree_manager import WorldTreeManager, get_world_tree_manager
+from backend.agent.runtime.state import Intent, AgentState
 
 log = logging.getLogger(__name__)
 
@@ -293,7 +293,7 @@ class NovelSteward:
         """CREATE_PROJECT: 启动 Onboarding（s3 实装）"""
         initial_idea = intent_result.args.initial_idea or "（未提供初始想法）"
         # 启动 Onboarding Step 3（Step 1-2 走按钮式入口）
-        from backend.agent.onboarding_controller import (
+        from backend.agent.onboarding.controller import (
             get_onboarding_controller, OnboardingState, OnboardingStep,
         )
         controller = get_onboarding_controller()
@@ -528,7 +528,7 @@ class NovelSteward:
 
     async def _handle_onboarding_continue(self, project_id: str, user_message: str, intent_result: IntentResult) -> dict:
         """ONBOARDING_CONTINUE: 启动 OnboardingController（s3.5 实装）"""
-        from backend.agent.onboarding_controller import (
+        from backend.agent.onboarding.controller import (
             get_onboarding_controller, OnboardingState, OnboardingStep,
         )
         controller = get_onboarding_controller()

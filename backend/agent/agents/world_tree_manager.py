@@ -26,7 +26,7 @@ import logging
 from typing import Optional, Any, List
 from pydantic import BaseModel, Field
 
-from backend.agent.executor import AgentExecutor, AgentConfig, AgentOutput, get_agent_executor
+from backend.agent.runtime.executor import AgentExecutor, AgentConfig, AgentOutput, get_agent_executor
 
 log = logging.getLogger(__name__)
 

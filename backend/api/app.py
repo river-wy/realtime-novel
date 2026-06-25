@@ -24,7 +24,7 @@ from backend.api.action_routes import router as action_router
 from backend.api.onboarding_routes import router as onboarding_router
 
 # 触发领域事件 handler 注册（import 即注册，无需显式调用）
-import backend.agent.onboarding_hooks  # noqa: F401
+import backend.agent.onboarding.hooks  # noqa: F401
 
 # === FastAPI app ===
 

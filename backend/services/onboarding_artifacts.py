@@ -99,7 +99,7 @@ def assemble_7_artifacts(project_id: str, payload: Dict[str, Any]) -> List[str]:
         notes_list.append(f"开篇场景: {opening_scene}")
 
     # style_charter: 由 Agent 推断完整笔法 (散文/句式/段落/心理活动 密度)
-    from backend.agent.style_inference import infer_style_charter
+    from backend.agent.context.style_inference import infer_style_charter
     inferred_style_charter = infer_style_charter(
         genres=genres,
         styles=styles,

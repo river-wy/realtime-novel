@@ -67,7 +67,7 @@ class OnboardingFlow:
         if step == "5":
             try:
                 # v0.6.1: state_graph_stub 归一到 specialists.py
-                from backend.agent.specialists import generate_chapter_via_specialist
+                from backend.agent.specialists.specialists import generate_chapter_via_specialist
                 # 调 LLM 生成第 1 章（specialist 会从 DB 读 7 件）
                 chapter_result = await generate_chapter_via_specialist(
                     project_id=project_id,

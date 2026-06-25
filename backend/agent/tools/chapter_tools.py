@@ -52,7 +52,7 @@ class GenerateChapterTool(BaseTool):
                 # v0.4 简化版：不调真实 v0.3 ChapterGenerator（避免依赖 WorldTree/Project 复杂初始化）
                 # 直接生成 placeholder 章节（Phase 4 接入真实 v0.3 时替换）
                 # v0.6.1: state_graph_stub 归一到 specialists.py
-                from backend.agent.specialists import generate_chapter_via_specialist
+                from backend.agent.specialists.specialists import generate_chapter_via_specialist
                 chapter = await generate_chapter_via_specialist(
                     project_id=input.project_id,
                     intervention=input.intervention,

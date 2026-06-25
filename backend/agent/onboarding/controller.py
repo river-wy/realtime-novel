@@ -27,9 +27,9 @@ from pydantic import BaseModel, Field, ValidationError
 
 from backend.adapters import get_llm_adapter
 from backend.adapters.types import LLMRequest, ModelRole
-from backend.agent.executor import AgentExecutor, get_agent_executor
-from backend.agent.novel_writer import get_novel_writer
-from backend.agent.prompts import (
+from backend.agent.runtime.executor import AgentExecutor, get_agent_executor
+from backend.agent.agents.novel_writer import get_novel_writer
+from backend.agent.prompts.prompts import (
     ONBOARDING_STEP3_PROMPT,
     ONBOARDING_STEP4_PROMPT,
 )
@@ -321,11 +321,11 @@ class OnboardingController:
             sys_prompt += "\n\n【重要】用户表示「重新提议」, 请**重新构思**一套不同的方案, 不要直接复制上一轮提议."
 
         # 3. 拼 messages (用 context_builder)
-        from backend.agent.context_builder import (
+        from backend.agent.context.context_builder import (
             build_messages_for_onboarding_step3,
             build_messages_for_onboarding_step4,
         )
-        from backend.agent.specialists import get_llm_params_for_project
+        from backend.agent.specialists.specialists import get_llm_params_for_project
 
         if step == 3:
             messages = build_messages_for_onboarding_step3(

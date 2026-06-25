@@ -21,7 +21,7 @@ from typing import Optional
 
 from pydantic import BaseModel, Field
 
-from backend.agent.state import Intent
+from backend.agent.runtime.state import Intent
 from backend.adapters.llm_adapter import get_llm_adapter
 from backend.adapters.types import ModelRole
 

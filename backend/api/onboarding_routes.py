@@ -107,7 +107,7 @@ async def handle_onboarding_request_proposal(ws: WebSocket, user_id: str, data: 
             current_fields?: dict,  # 当前已有字段
         }
     """
-    from backend.agent.onboarding_controller import get_onboarding_controller
+    from backend.agent.onboarding.controller import get_onboarding_controller
 
     t0 = time.monotonic()
 

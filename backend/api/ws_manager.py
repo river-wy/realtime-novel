@@ -179,7 +179,7 @@ async def handle_user_message(ws: WebSocket, user_id: str, data: dict):
     - 推 tool_calling + tool_result（每个 tool 调用前后）
     - 推 agent_thinking（每轮 LLM 调用前）
     """
-    from backend.agent.novel_steward import get_novel_steward
+    from backend.agent.agents.novel_steward import get_novel_steward
     from backend.persistence import ConversationRepository, MessageRole
 
     conv_repo = ConversationRepository()
