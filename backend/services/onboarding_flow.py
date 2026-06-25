@@ -57,6 +57,17 @@ class OnboardingFlow:
                 )
                 payload_full = load_payload(project_id)
                 assemble_7_artifacts(project_id, payload_full)
+
+                # v0.6.1: Step 4 完成后 emit 事件, 触发项目名 + 封面图生成
+                # 与 WS 路径 handle_onboarding_confirm 保持一致 (ws=None 走 HTTP 路径)
+                # 之前漏写导致 HTTP Step 4 完成后名称+封面未联动生成
+                from backend.core.event_bus import event_bus
+                await event_bus.emit(
+                    "onboarding.step4_confirmed",
+                    project_id=project_id,
+                    payload=payload_full,
+                    ws=None,
+                )
             except Exception as e:
                 import traceback
                 print(f"Onboarding Step 4 失败: {e}\n{traceback.format_exc()}")
