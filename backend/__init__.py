@@ -11,7 +11,7 @@ v0.4+ 架构：
 - S1 AsyncProjectManager: 项目管理 (services/async_wrappers.py, 走 DB)
 - S2 WorldTree: 7 件产物内存模型 + 序列化 (core/world_tree.py, 纯内存)
 - S3 AsyncOnboardingFlow: 5 步启动链路 (services/async_wrappers.py)
-- S4 state_graph_stub: 章节生成（v0.5 真实 LLM）
+- S4 章节生成: 迁到 backend.agent.specialists.generate_chapter_via_specialist（v0.6.1 从 state_graph_stub 归一）
 - S5 AsyncInterventionParser + AsyncRollbackManager (services/async_wrappers.py)
 
 schemas/: 7 件 Pydantic Schema（v0.5 全部走 DB）

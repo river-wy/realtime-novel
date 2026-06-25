@@ -66,9 +66,10 @@ class OnboardingFlow:
         # Step 5 触发生成第 1 章
         if step == "5":
             try:
-                from backend.agent.state_graph_stub import generate_chapter_via_state_graph
-                # 调 LLM 生成第 1 章（state_graph_stub 会从 DB 读 7 件）
-                chapter_result = await generate_chapter_via_state_graph(
+                # v0.6.1: state_graph_stub 归一到 specialists.py
+                from backend.agent.specialists import generate_chapter_via_specialist
+                # 调 LLM 生成第 1 章（specialist 会从 DB 读 7 件）
+                chapter_result = await generate_chapter_via_specialist(
                     project_id=project_id,
                     intervention=None,  # 第一章无需干预
                 )
