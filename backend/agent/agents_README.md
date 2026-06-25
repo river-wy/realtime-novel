@@ -147,15 +147,41 @@ async def analyze_intervention(
 
 | 文件 | 职责 |
 |---|------|
-| `executor.py` | ReAct loop 引擎，max_iterations=7（18:02 拍板） |
-| `intent_recognizer.py` | Intent 分类（用户级 / 项目级两套） |
+| `executor.py` | ReAct loop 引擎 + Middleware 后置节点插槽 |
+| `intent_recognizer.py` | Intent 分类（v0.6.1 后管家已不调用，保留备用） |
 | `state.py` | Intent 枚举 + AgentState 数据类 |
 
 **ReAct loop 工作流**：
 1. 调 LLM（带 tools 列表）
 2. LLM 决定调工具 / 输出 final_response
 3. 调工具 → 结果回传 LLM → 下一轮
-4. 退出条件：① final_response ② max_iterations=7 ③ 死循环检测
+4. 退出条件：① final_response ② max_iterations ③ 死循环检测
+5. 退出后依次执行后置 Middleware 节点
+
+**AgentOutput 标准化（v0.6.2）**：
+```python
+class AgentOutput(BaseModel):
+    final_response: str           # LLM 自然语言回复
+    structured_data: dict         # 工具产生的结构化数据（由 tool/middleware 写入）
+    tool_calls_history: List[dict]
+    iterations: int
+    error: Optional[str]
+    needs_review: bool            # 后置节点可标记需人工审核
+    skip_response: bool           # 后置节点可拦截回复
+```
+
+**Middleware 后置节点插槽（v0.6.2）**：
+```python
+executor = get_agent_executor()
+
+@executor.middleware()                        # 全局（所有 Agent）
+async def safety_check(output, ctx): ...
+
+@executor.middleware(agent_name="novel_writer")  # 仅对文笔家生效
+async def quality_check(output, ctx): ...
+
+executor.add_middleware(fn, agent_name=None)  # 编程式注册
+```
 
 ---
 
@@ -264,25 +290,39 @@ load_history_messages
 
 ## 8. 工具（tools/）
 
-13 个工具，由 `ToolRegistry` 统一管理：
+15 个工具，由 `ToolRegistry` 统一管理（v0.6.2 新增 2 个委托工具）：
 
-| 类别 | 文件 |
-|---|---|
-| 基础 | `base.py` / `base_edit_tools.py` |
-| 章节 | `chapter_tools.py` |
-| 角色 | `character_tools.py` |
-| 情节 | `plot_tools.py` |
-| 视角 | `pov_tools.py` |
-| 项目 | `project_tools.py` |
-| 风格 | `style_tools.py` |
-| 记忆 | `memory_tools.py` |
-| 图片 | `image_tools.py` |
-| 通用 | `edit_artifact_tool.py` |
-| Schema | `schemas.py` |
-| Registry | `registry.py` |
-| Locks | `locks.py` |
+| 类别 | 文件 | 工具名 |
+|---|---|---|
+| 基础 | `base.py` / `base_edit_tools.py` | — / `update_base` `rollback_base` |
+| 章节 | `chapter_tools.py` | `generate_chapter` `read_chapter` |
+| 角色 | `character_tools.py` | `introspect_character` |
+| 情节 | `plot_tools.py` | `weave_plot` |
+| 视角 | `pov_tools.py` | `switch_pov` |
+| 项目 | `project_tools.py` | `load_project` `create_project` `delete_project` |
+| 风格 | `style_tools.py` | `adjust_style` |
+| 记忆 | `memory_tools.py` | `search_memory` |
+| 图片 | `image_tools.py` | `generate_image` |
+| 通用 | `edit_artifact_tool.py` | `edit_artifact` |
+| Onboarding | `onboarding_tools.py` | `onboarding_propose_step` `onboarding_user_confirm` `onboarding_generate_chapter` |
+| **委托** | **`delegation_tools.py`** | **`delegate_to_agent`** `dispatch_background_task` |
+| Schema | `schemas.py` | — |
+| Registry | `registry.py` | — |
+| Locks | `locks.py` | — |
 
-v0.6.1 工具模块**未动**（目录结构已合理）。
+**v0.6.2 新增：委托工具**
+
+| 工具 | 语义 | 适用场景 |
+|---|---|---|
+| `delegate_to_agent` | **同步**委托，管家等待专家结果 | 用户明确等待：生成章节、干预基座 |
+| `dispatch_background_task` | **异步**派发，立即返回 task_id | 管家自主识别：更新 summary、生成封面 |
+
+判断原则（写在 STEWARD_SYSTEM_PROMPT）：「用户在等这个结果吗？」→ 是用同步，否用异步。
+
+**ToolRegistry v0.6.2 改进**：
+- 新增 `register_agent_tools(agent_name, tools, replace=False)` —— 运行时动态授权（测试/插件）
+- 新增 `reset_overrides()` —— 清除运行时覆盖
+- 新增 `list_agents()` —— 列出所有已配置 Agent
 
 ---
 
@@ -325,7 +365,9 @@ NovelSteward.receive(message, project_id=None/str)
 
 ---
 
-## 11. v0.6.1 重塑历程（参考）
+## 11. 版本历程（参考）
+
+### v0.6.1 重塑（2026-06-25）
 
 | Phase | 任务 | commit |
 |---|---|---|
@@ -336,10 +378,18 @@ NovelSteward.receive(message, project_id=None/str)
 | P4-1 | 拆 context_builder.py 745 行 → 3 文件 | `9720b63` |
 | P4-2 | 拆 prompts.py 386 行 → 2 文件 + 删 9 个死 prompt | `003b3a7` |
 | P5 | state_graph_stub 归一到 specialists | `e9c7033` |
-| P6 | agents_README 重写（本文档） | (本 commit) |
+| P6 | agents_README 重写 | (本 commit) |
 
-**重构原则**（欧尼酱 11:40 拍板）：
-- 完整重构，不向前兼容
-- 目录 = 抽象边界
-- 死代码立刻删
-- 文件大小失控就拆
+**重构原则**（欧尼酱 11:40 拍板）：完整重构不向前兼容 / 目录=抽象边界 / 死代码立刻删 / 文件大小失控就拆
+
+### v0.6.2 架构扩展（2026-06-25）
+
+| 改动 | 文件 | 说明 |
+|---|---|---|
+| 新增 | `tools/delegation_tools.py` | `delegate_to_agent`（同步）+ `dispatch_background_task`（异步） |
+| 改 | `tools/registry.py` | 运行时动态授权 `register_agent_tools()` + `list_agents()` |
+| 改 | `tools/__init__.py` | 加入 `delegation_tools` 自动注册 |
+| 改 | `agents/novel_steward.py` | STEWARD_SYSTEM_PROMPT 补充专家委托规则 |
+| 改 | `runtime/executor.py` | AgentOutput 标准化（`structured_data` / `needs_review` / `skip_response`）+ Middleware 后置节点插槽 |
+
+**架构变化**：管家从"预分类路由"→ 纯 ReAct，通过 `delegate_to_agent` 工具将专家 Agent 纳入 ReAct loop（专家返回结果注入 messages，管家继续推演后回复用户）。`dispatch_background_task` 则通过 EventBus fire-and-forget 触发后台任务，结果由 WS push 推送前端。

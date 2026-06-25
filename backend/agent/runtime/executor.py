@@ -1,22 +1,38 @@
-"""agent_executor — Agent ReAct loop 执行器（s3.3）
+"""agent_executor — Agent ReAct loop 执行器
 
-职责（spec.md §9.3）：
+职责：
 1. 加载 Agent 的可用工具集
-2. 拼 system_prompt（含可用工具列表 + 职责）
+2. 拼 system_prompt（含可用工具列表 + 职责 + 上下文）
 3. 调 LLM（注入 tools 参数）
 4. 解析 LLM 输出：
    - 有 tool_calls → 执行 tool → 把结果拼回 messages → 继续循环
    - 无 tool_calls → LLM 输出 final_response → 退出
-5. 退出条件：final_response / max_iterations=7 / 死循环检测
+5. 退出条件：final_response / max_iterations / 死循环检测
+6. 后置节点插槽：execute() 完成后依次运行注册的 middleware
 
-对应 spec.md §9.3 AgentExecutor
+后置节点（Middleware）机制：
+    executor = get_agent_executor()
+
+    # 注册全局后置节点（对所有 Agent 生效）
+    @executor.middleware()
+    async def safety_check(output: AgentOutput, context: dict) -> AgentOutput:
+        if contains_sensitive(output.final_response):
+            output.final_response = "[已过滤]"
+        return output
+
+    # 注册 Agent 专属后置节点
+    @executor.middleware(agent_name="novel_writer")
+    async def word_count_check(output: AgentOutput, context: dict) -> AgentOutput:
+        if len(output.final_response) < 500:
+            output.structured_data["quality_warn"] = "章节字数不足"
+        return output
 """
 from __future__ import annotations
 
 import json
 import time
 from pydantic import BaseModel, Field
-from typing import Optional, List, Any
+from typing import Optional, List, Any, Callable, Awaitable
 
 from backend.adapters.llm_adapter import get_llm_adapter
 from backend.adapters.types import LLMRequest, ModelRole
@@ -42,21 +58,38 @@ class AgentConfig(BaseModel):
 # ============ 执行结果 ============
 
 class AgentOutput(BaseModel):
-    """Agent 执行结果"""
+    """Agent 执行结果（标准化 NodeResult）
+
+    final_response：LLM 输出的自然语言回复
+    structured_data：工具调用产生的结构化数据（由 tool / middleware 写入）
+    tool_calls_history：完整 tool 调用链路（含 iteration / args / result / status）
+    """
     final_response: str = ""
-    tool_calls_history: List[dict] = Field(default_factory=list)  # 所有调过的 tool_calls
+    structured_data: dict = Field(
+        default_factory=dict,
+        description="结构化数据（章节内容 / WorldTreeDiff / 项目列表等），由 tool 或后置 middleware 写入",
+    )
+    tool_calls_history: List[dict] = Field(default_factory=list)
     iterations: int = 0
     input_tokens: int = 0
     output_tokens: int = 0
     duration_ms: int = 0
     error: Optional[str] = None
+    # 流程控制（后置节点可写入）
+    needs_review: bool = False          # 需要人工审核
+    skip_response: bool = False         # 后置节点决定拦截（不回复用户）
+
+
+# Middleware 类型：async fn(output: AgentOutput, context: dict) -> AgentOutput
+# 用 Any 避免部分 linter 对 Callable + Awaitable 组合类型的误报
+MiddlewareFn = Any  # Callable[[AgentOutput, dict], Awaitable[AgentOutput]]
 
 
 # ============ Agent Executor ============
 
 @logger_decorator
 class AgentExecutor:
-    """Agent ReAct loop 执行器（s3.3）
+    """Agent ReAct loop 执行器
 
     使用方式：
         executor = AgentExecutor()
@@ -69,11 +102,94 @@ class AgentExecutor:
             project_id="proj-123",
         )
         # output.final_response = "我理解你想..."
+
+    注册后置节点（Middleware）：
+        @executor.middleware()                         # 对所有 Agent 生效
+        async def safety(output, ctx): ...
+
+        @executor.middleware(agent_name="novel_writer")  # 仅对文笔家生效
+        async def quality(output, ctx): ...
     """
 
     def __init__(self, llm_adapter=None, tool_registry: Optional[ToolRegistry] = None):
         self.llm = llm_adapter or get_llm_adapter()
         self.registry = tool_registry or get_tool_registry()
+        # 后置节点表：None key = 全局（对所有 Agent 生效）
+        self._middlewares: Dict[Optional[str], List[MiddlewareFn]] = {}
+
+    # ── 后置节点注册 ─────────────────────────────────
+
+    def middleware(
+        self,
+        agent_name: Optional[str] = None,
+    ) -> Callable[[MiddlewareFn], MiddlewareFn]:  # type: ignore[type-arg]
+        """装饰器：注册后置节点（Middleware）
+
+        Args:
+            agent_name: 指定 Agent 名时只对该 Agent 生效；None = 全局生效
+
+        用法：
+            @executor.middleware()
+            async def safety_check(output: AgentOutput, context: dict) -> AgentOutput:
+                ...
+                return output
+
+            @executor.middleware(agent_name="novel_writer")
+            async def word_count(output: AgentOutput, context: dict) -> AgentOutput:
+                ...
+                return output
+        """
+        def decorator(fn: MiddlewareFn) -> MiddlewareFn:
+            key = agent_name  # None = 全局
+            if key not in self._middlewares:
+                self._middlewares[key] = []
+            self._middlewares[key].append(fn)
+            self.log.debug(
+                "AgentExecutor: registered middleware '%s.%s' for agent=%s",
+                fn.__module__, fn.__qualname__, agent_name or "*",
+            )
+            return fn
+        return decorator
+
+    def add_middleware(
+        self,
+        fn: MiddlewareFn,
+        agent_name: Optional[str] = None,
+    ) -> None:
+        """编程式注册 middleware（非装饰器场景）"""
+        key = agent_name
+        if key not in self._middlewares:
+            self._middlewares[key] = []
+        self._middlewares[key].append(fn)
+        self.log.debug(
+            "AgentExecutor: added middleware '%s.%s' for agent=%s",
+            fn.__module__, fn.__qualname__, agent_name or "*",
+        )
+
+    async def _run_middlewares(
+        self,
+        agent_name: str,
+        output: AgentOutput,
+        context: dict,
+    ) -> AgentOutput:
+        """依次执行全局 middleware + agent 专属 middleware
+
+        顺序：全局（注册顺序）→ agent 专属（注册顺序）
+        单个 middleware 抛异常时打 WARNING 并跳过，不中断后续
+        """
+        mw_global = self._middlewares.get(None, [])
+        mw_agent = self._middlewares.get(agent_name, [])
+
+        for mw in mw_global + mw_agent:
+            try:
+                output = await mw(output, context)
+            except Exception as e:
+                self.log.warning(
+                    "AgentExecutor._run_middlewares: middleware '%s.%s' 失败 (跳过): %s",
+                    mw.__module__, mw.__qualname__, e,
+                    exc_info=True,
+                )
+        return output
 
     async def execute(
         self,
@@ -364,13 +480,24 @@ class AgentExecutor:
                     len(last_response_text), len(tool_calls_history),
                     total_input_tokens, total_output_tokens, duration_ms,
                 )
-                return AgentOutput(
+                raw_output = AgentOutput(
                     final_response=last_response_text,
                     tool_calls_history=tool_calls_history,
                     iterations=iteration,
                     input_tokens=total_input_tokens,
                     output_tokens=total_output_tokens,
                     duration_ms=duration_ms,
+                )
+                # ── 后置节点 ──────────────────────────────
+                mw_context = {
+                    "agent_name": agent.agent_name,
+                    "project_id": project_id,
+                    **(context or {}),
+                }
+                return await self._run_middlewares(
+                    agent_name=agent.agent_name,
+                    output=raw_output,
+                    context=mw_context,
                 )
 
         # 达到 max_iterations 仍未退出
@@ -381,7 +508,7 @@ class AgentExecutor:
             agent.agent_name, max_iterations,
             len(tool_calls_history), duration_ms,
         )
-        return AgentOutput(
+        raw_output = AgentOutput(
             final_response=last_response_text or "（达到最大循环轮次，未输出最终回复）",
             tool_calls_history=tool_calls_history,
             iterations=max_iterations,
@@ -389,6 +516,16 @@ class AgentExecutor:
             output_tokens=total_output_tokens,
             duration_ms=duration_ms,
             error=last_error or "max_iterations_reached",
+        )
+        mw_context = {
+            "agent_name": agent.agent_name,
+            "project_id": project_id,
+            **(context or {}),
+        }
+        return await self._run_middlewares(
+            agent_name=agent.agent_name,
+            output=raw_output,
+            context=mw_context,
         )
 
     def _build_system_prompt(
