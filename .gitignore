@@ -37,3 +37,6 @@ tmp/
 data/projects/
 data/novel.db
 data/novel.db-*
+
+# v0.6.1 refactor backup (P0)
+data.backup-2026*.tar.gz
