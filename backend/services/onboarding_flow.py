@@ -22,6 +22,16 @@ class OnboardingFlow:
     def __init__(self, workspace_root: Path | str = "data"):
         self.workspace_root = Path(workspace_root)
 
+    async def load_state(self, project_id: str) -> Optional[dict]:
+        """v0.6.1: 加载项目当前 onboarding_state 完整 state_data (含 payload)
+
+        Returns:
+            state_data dict (含 current_step, payload, updated_at), 不存在返 None
+        """
+        from backend.persistence import OnboardingRepository
+        repo = OnboardingRepository()
+        return repo.get_state_json(project_id)
+
     async def step(self, project_id: str, step: str, payload: dict) -> dict:
         """执行 onboarding 单步（onboarding_state 表）"""
         next_step_map = {

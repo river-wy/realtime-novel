@@ -24,13 +24,16 @@ log = logging.getLogger(__name__)
 
 # 18:02 拍板
 AGENT_TOOLS: Dict[str, List[str]] = {
-    # 管家（不调 generate_chapter，按 18:02 拍板）
+    # 管家（v0.6.1: 统一 chat 模式, ReAct loop, 包含 Onboarding 推进工具）
     "novel_steward": [
         "load_project",
         "search_memory",
-        "generate_image",
-        "edit_artifact",
         "create_project",
+        "edit_artifact",
+        "generate_image",
+        "onboarding_propose_step",
+        "onboarding_user_confirm",
+        "onboarding_generate_chapter",
     ],
     # 文笔家（只读 tool，不改基座）
     "novel_writer": [

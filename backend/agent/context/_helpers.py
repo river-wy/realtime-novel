@@ -429,3 +429,81 @@ def _load_project_history(project_id: str, max_history: int = 5) -> list[dict[st
         if m:
             result.append(m)
     return result
+
+
+async def load_chat_history(
+    user_id: str,
+    base_rounds: int = 7,
+    session_rounds: int = 15,
+) -> List[Dict[str, Any]]:
+    """v0.6.1: 管家 CHAT 路径 history 加载 (7+15 滑动窗口)
+
+    设计:
+    - base_rounds: 来自历史已 invalidated 的 conv (取最近 1 个的最近 base_rounds 条)
+    - session_rounds: 来自当前 active conv (滑动窗口, 最多 session_rounds 条)
+    - 组合: base + session (base 在前是「历史基底」, session 在后是「本轮叠加」)
+    - 总数 ≤ 22 条 (7+15)
+
+    用途: 管家 ReAct loop 调 LLM 时作为 messages 的一部分
+
+    Args:
+        user_id: 用户 ID
+        base_rounds: 历史基底轮次 (默认 7)
+        session_rounds: 本轮叠加轮次 (默认 15)
+
+    Returns:
+        list[dict]: OpenAI 格式 messages (含 role/content)
+    """
+    from backend.persistence.conversation_repository import ConversationRepository
+
+    conv_repo = ConversationRepository()
+    result: List[Dict[str, Any]] = []
+
+    # 1. 历史基底: 最近 1 个 invalidated conv
+    try:
+        invalid_list = await conv_repo.list_conversations(
+            user_id=user_id, status="invalidated", limit=1
+        )
+        if invalid_list:
+            last_invalid = invalid_list[0]
+            base_msgs = await conv_repo.get_messages(last_invalid.id, limit=base_rounds)
+            # DESC → ASC 翻转
+            base_msgs = list(reversed(base_msgs))
+            for m in base_msgs:
+                d = {
+                    "id": m.id,
+                    "role": m.role.value if hasattr(m.role, "value") else m.role,
+                    "content": m.content,
+                    "tool_calls": m.tool_calls,
+                    "tool_results": m.tool_results,
+                }
+                msg = _row_to_message(d)
+                if msg:
+                    result.append(msg)
+    except Exception as e:
+        import logging
+        logging.warning(f"load_chat_history: base 加载失败: {e}", exc_info=True)
+
+    # 2. 本轮叠加: 当前 active conv (滑动窗口)
+    try:
+        active = await conv_repo.get_active_conversation(user_id)
+        if active:
+            session_msgs = await conv_repo.get_messages(active.id, limit=session_rounds)
+            # DESC → ASC 翻转
+            session_msgs = list(reversed(session_msgs))
+            for m in session_msgs:
+                d = {
+                    "id": m.id,
+                    "role": m.role.value if hasattr(m.role, "value") else m.role,
+                    "content": m.content,
+                    "tool_calls": m.tool_calls,
+                    "tool_results": m.tool_results,
+                }
+                msg = _row_to_message(d)
+                if msg:
+                    result.append(msg)
+    except Exception as e:
+        import logging
+        logging.warning(f"load_chat_history: session 加载失败: {e}", exc_info=True)
+
+    return result

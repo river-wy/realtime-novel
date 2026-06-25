@@ -22,6 +22,7 @@ from backend.agent.tools import (
     image_tools, memory_tools,
     style_tools, pov_tools, character_tools, plot_tools,
     edit_artifact_tool,
+    onboarding_tools,  # v0.6.1: 管家 ReAct loop 用
 )
 from backend.agent.tools.base import (
     BaseTool, ToolError, register_tool, get_tool, list_tools, reset_tools,

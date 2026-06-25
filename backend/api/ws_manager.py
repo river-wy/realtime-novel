@@ -186,10 +186,10 @@ async def handle_user_message(ws: WebSocket, user_id: str, data: dict):
     steward = get_novel_steward()
 
     try:
-        # 1. 创建对话 + 落 user message
+        # 1. 24h 滑窗的 conversation 管理 (v0.6.1: 替换 create_conversation)
         project_id = data.get("project_id")
 
-        conversation = await conv_repo.create_conversation(user_id=user_id)
+        conversation = await conv_repo.get_or_refresh_active_conversation(user_id=user_id)
         user_msg = await conv_repo.add_message(
             conversation_id=conversation.id,
             role=MessageRole.USER,

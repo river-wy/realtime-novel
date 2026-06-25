@@ -193,3 +193,41 @@ class WeavePlotInput(BaseModel):
 
 class WeavePlotResult(BaseModel):
     next_chapter_plan: dict[str, Any]
+
+
+# ============ v0.6.1: Onboarding 推进工具 (管家 ReAct 用) ============
+
+class OnboardingProposeStepInput(BaseModel):
+    project_id: str = Field(..., min_length=1)
+    step: int = Field(..., ge=1, le=5)
+    user_response: Optional[str] = Field(default="")
+
+
+class OnboardingProposeStepOutput(BaseModel):
+    step: int
+    proposed_fields: dict[str, Any] = Field(default_factory=dict)
+    expected_user_input_hint: str = ""
+
+
+class OnboardingUserConfirmInput(BaseModel):
+    project_id: str = Field(..., min_length=1)
+    step: int = Field(..., ge=1, le=5)
+    user_response: str = Field(..., min_length=1)
+
+
+class OnboardingUserConfirmOutput(BaseModel):
+    step: int
+    recorded: bool
+    next_step: Optional[int] = None
+
+
+class OnboardingGenerateChapterInput(BaseModel):
+    project_id: str = Field(..., min_length=1)
+
+
+class OnboardingGenerateChapterOutput(BaseModel):
+    chapter_num: int
+    title: str
+    word_count: int
+    summary: str = ""
+    project_name: str = ""

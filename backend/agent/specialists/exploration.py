@@ -113,3 +113,74 @@ def fill_chapter_prompt_placeholders(template: str, project_id: str) -> str:
         style_directive=style_directive,
     )
 
+
+
+# ============ v0.6.1: 三级覆盖 exploration_level ============
+
+def _resolve_exploration_level(
+    project_id: Optional[str] = None,
+    user_id: Optional[str] = None,
+) -> str:
+    """三级覆盖 (v0.6.1):
+    1. projects.exploration_level (项目级, 最高优先级)
+    2. user_preferences.default_exploration_level (用户级, 中间)
+    3. agents.json exploration_levels.standard (硬默认, 最低)
+
+    Args:
+        project_id: 项目 ID (可能 None)
+        user_id: 用户 ID (可能 None)
+    """
+    level: Optional[str] = None
+
+    # 1. 项目级
+    if project_id:
+        try:
+            from backend.persistence.project_repository import ProjectRepository
+            project = ProjectRepository().get(project_id)
+            if project and project.exploration_level:
+                level = project.exploration_level
+        except Exception:
+            pass
+
+    # 2. 用户级
+    if not level and user_id:
+        try:
+            from backend.persistence.user_preference_repository import UserPreferenceRepository
+            user_level = UserPreferenceRepository().get(user_id, "default_exploration_level")
+            if user_level:
+                level = user_level
+        except Exception:
+            pass
+
+    # 3. 硬默认
+    if not level:
+        level = "standard"
+
+    return level
+
+
+def get_llm_params_for_chat(
+    user_id: str,
+    project_id: Optional[str] = None,
+    role: str = "chat",
+) -> dict:
+    """v0.6.1: 管家 CHAT/ReAct 路径获取 LLM 参数
+
+    按三级覆盖解析 exploration_level, 调 LLM 时统一参数。
+
+    Args:
+        user_id: 用户 ID (必填, 用于查 user_preferences)
+        project_id: 项目 ID (可选, 用于查项目级 exploration_level)
+        role: "chat" (管家对话) | "chapter" (章节生成) | ...
+
+    Returns:
+        {"temperature", "max_tokens", "frequency_penalty"}
+    """
+    from backend.config import get_exploration_level_config
+    level = _resolve_exploration_level(project_id=project_id, user_id=user_id)
+    cfg = get_exploration_level_config(level)
+    return {
+        "temperature": cfg["temperature"],
+        "max_tokens": cfg["max_tokens"],
+        "frequency_penalty": cfg.get("frequency_penalty", 0.0),
+    }

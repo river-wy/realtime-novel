@@ -20,14 +20,6 @@ from __future__ import annotations
 from pydantic import BaseModel
 from typing import Optional
 
-from backend.agent.agents.novel_writer import NovelWriter, get_novel_writer
-from backend.agent.agents.world_tree_manager import WorldTreeManager, get_world_tree_manager
-from backend.agent.runtime.intent_recognizer import (
-    IntentRecognizer,
-    IntentResult,
-    get_intent_recognizer,
-)
-from backend.agent.runtime.state import Intent
 from backend.utils.logger import logger as logger_decorator
 
 
@@ -40,6 +32,56 @@ class StewardResponse(BaseModel):
     response: str
     structured_data: dict = {}
     downstream_called: Optional[str] = None
+
+
+# ============ 管家系统提示 (v0.6.1 ReAct loop) ============
+
+STEWARD_SYSTEM_PROMPT = """你是「小说管家」NovelSteward，霁月系统唯一对外接口。
+
+【身份】
+所有用户消息都由你接——首页聊天、项目内聊天、创建项目、修改偏好、闲聊问答都是你。
+你不在调用其他 Agent；你使用【可用工具】自主决定行动。
+
+【路由职责】
+你的任务不是 "猜意图调下游 Agent"，而是 **使用工具自主推演**：
+- 查项目数据：调 load_project / search_memory
+- 创建项目：调 onboarding_start，启动 5 步引导，逐步调用 onboarding_propose_step + onboarding_user_confirm
+- 生成第 1 章：在 Onboarding 5 步走完后调 onboarding_generate_chapter
+- 调整项目内基座：调 edit_artifact（会走一致性检查）
+- 调整全局偏好：调 adjust_global_preference（写入 user_preferences）
+- 生成封面/插图：调 generate_image
+
+【重要：不要越权】
+- 你不直接修改世界树 7 件以外的表（会让一致性检查错乱）
+- 你不调可能影响其他 Agent 决策的 internal_* 工具
+- 如果用户问的能力你没有工具，说出来「这个需要创建项目后才能操作」
+
+【Onboarding 5 步 (你自己推)】
+当用户表达「想写」「创建项目」「我有设定」这类意图时：
+1. 调 onboarding_start(project_name, idea) — 内部创建项目骨架，返回 project_id
+2. 调 onboarding_propose_step(project_id, step=1) — LLM 从用户 idea 抽题材/风格/基调
+3. 调 onboarding_propose_step(project_id, step=2) — LLM 选 palette
+4. 调 onboarding_propose_step(project_id, step=3) — LLM 提议故事核心；调完后告诉用户预期：「这一步会定主角是谁、要面对什么冲突」，调 onboarding_user_confirm(user_response) 记录用户反馈
+5. 调 onboarding_propose_step(project_id, step=4) — LLM 提议大纲；同样调 onboarding_user_confirm
+6. 调 onboarding_generate_chapter(project_id) — 生成第 1 章
+
+【闲聊】
+如果用户只是闲聊、问创作技巧、问系统能力等：
+- 直接用语言回答，不要乱调工具
+- 不知道就说不知道
+- 提示用户可以做什么（创建项目、调整偏好等）
+
+【记忆上下文】
+你会看到历史对话（7 轮基底 + 本轮 15 轮叠加）：
+- 识别用户是否在继续上一个话题
+- 如果是，参考历史补充上下文
+- 如果不是，按新话题处理
+
+【输出风格】
+- 简洁、有温度
+- 不要重复「我是什么 AI」这类 metadata
+- 调完工具后最终回一句话告诉用户结果
+"""
 
 
 # ============ NovelSteward 主类 ============
@@ -65,13 +107,11 @@ class NovelSteward:
 
     def __init__(
         self,
-        intent_recognizer: Optional[IntentRecognizer] = None,
-        novel_writer: Optional[NovelWriter] = None,
-        world_tree_manager: Optional[WorldTreeManager] = None,
+        executor=None,
     ):
-        self.intent_recognizer = intent_recognizer or get_intent_recognizer()
-        self.novel_writer = novel_writer or get_novel_writer()
-        self.world_tree_manager = world_tree_manager or get_world_tree_manager()
+        # v0.6.1: 管家是单一 ReAct agent, 只依赖 executor
+        from backend.agent.runtime.executor import get_agent_executor
+        self.executor = executor or get_agent_executor()
 
     # ─── 入口方法 ──────────────────────────────────
 
@@ -83,22 +123,28 @@ class NovelSteward:
         in_onboarding: bool = False,
         conversation_id: Optional[str] = None,
     ) -> dict:
-        """管家接收用户消息的主入口
+        """管家接收用户消息的主入口 (v0.6.1 ReAct loop)
+
+        v0.6.1 重写: 走 executor.execute() ReAct loop, 不再调 intent_recognizer 预分类
+        - 单一身份: 所有用户消息 (首页 chat / 项目内 chat / 闲聊 / 创建项目) 都进 ReAct
+        - 管家在 loop 里自主调 LLM + tools 决定行动
+        - tools 包含 5 个原 AGENT_TOOLS + 3 个 onboarding 推进工具
 
         Args:
             user_message: 用户消息文本
-            project_id: 项目 ID（None = 管家大厅模式）
+            project_id: 项目 ID (None = 管家大厅模式, 闲聊/创建项目)
             user_id: 用户 ID
-            in_onboarding: 是否在 onboarding 流程中
-            conversation_id: 对话 ID（用于 messages 表落库）
+            in_onboarding: 是否在 onboarding 流程中 (v0.6.1 保留参数, 但走 ReAct 后语义弱化)
+            conversation_id: 对话 ID (历史 messages 落库时用, 当前未读取)
 
         Returns:
             {
-                "intent": Intent,
-                "confidence": float,
-                "response": str,         # 对用户的最终回复
-                "structured_data": dict,  # 结构化数据（项目列表/跳转 URL/确认卡片等）
-                "downstream_called": str | None,  # 调用的下游 Agent
+                "intent": "chat",  # 永远是 chat, 因为管家不分模式
+                "confidence": 1.0,
+                "response": str,  # 管家给用户的最终回复
+                "structured_data": dict,  # 工具调用结果 (项目列表/生成章节详情等)
+                "downstream_called": str | None,  # 调过哪些 tool
+                "tool_calls_history": list,  # 详细 tool_calls 记录
             }
         """
         self.log.info(
@@ -108,605 +154,50 @@ class NovelSteward:
             len(user_message or ""), conversation_id,
         )
 
-        # 1. 意图识别
-        intent_result = await self.intent_recognizer.classify(
+        # 1. 拿 history (7+15 滑动窗口)
+        from backend.agent.context._helpers import load_chat_history
+        try:
+            history = await load_chat_history(
+                user_id=user_id,
+                base_rounds=7,
+                session_rounds=15,
+            )
+        except Exception as e:
+            self.log.warning("load_chat_history 失败, 用空 history: %s", e, exc_info=True)
+            history = []
+
+        # 2. 调 executor.execute() 走 ReAct loop
+        from backend.agent.runtime.executor import AgentConfig
+        cfg = AgentConfig(
+            agent_name="novel_steward",
+            system_prompt=STEWARD_SYSTEM_PROMPT,
+        )
+        executor_output = await self.executor.execute(
+            agent=cfg,
             user_message=user_message,
-            has_project=project_id is not None,
             project_id=project_id,
-            in_onboarding=in_onboarding,
+            max_iterations=10,  # 管家调用工具多 (Onboarding 5 步), 给足轮次
+            context={"conversation_id": conversation_id} if conversation_id else None,
         )
 
         self.log.info(
-            "NovelSteward.receive INTENT: intent=%s, confidence=%.2f, project_id=%s",
-            intent_result.intent.value, intent_result.confidence, project_id,
-        )
-
-        # 2. 路由分发
-        result = await self._route(intent_result, project_id, user_id, user_message)
-
-        self.log.info(
-            "NovelSteward.receive DONE: intent=%s, downstream=%s, "
+            "NovelSteward.receive DONE: iterations=%d, tool_calls=%d, "
             "response_len=%d, user_id=%s",
-            result.get("intent"), result.get("downstream_called"),
-            len(result.get("response", "")), user_id,
+            executor_output.iterations, len(executor_output.tool_calls_history),
+            len(executor_output.final_response or ""), user_id,
         )
 
-        return result
-
-    async def _route(
-        self,
-        intent_result: IntentResult,
-        project_id: Optional[str],
-        user_id: str,
-        user_message: str,
-    ) -> dict:
-        """根据 intent 路由到对应处理路径"""
-        intent = intent_result.intent
-
-        self.log.debug(
-            "NovelSteward._route: intent=%s, project_id=%s, user_id=%s",
-            intent.value, project_id, user_id,
-        )
-
-        # ─── 用户级 intent（管家大厅，无 project_id）──
-        if intent == Intent.LIST_PROJECTS:
-            return await self._handle_list_projects(user_id)
-        elif intent == Intent.QUERY_PROJECTS:
-            return await self._handle_query_projects(intent_result, user_id)
-        elif intent == Intent.RECOMMEND_PROJECTS:
-            return await self._handle_recommend_projects(intent_result, user_id)
-        elif intent == Intent.CREATE_PROJECT:
-            return await self._handle_create_project(intent_result, user_id)
-        elif intent == Intent.OPEN_PROJECT:
-            return await self._handle_open_project(intent_result, user_id)
-        elif intent == Intent.ADJUST_GLOBAL_PREFERENCE:
-            return await self._handle_adjust_global_pref(intent_result, user_id)
-
-        # ─── 项目级 intent（项目管家，有 project_id）──
-        elif intent == Intent.GENERATE:
-            return await self._handle_generate(project_id, user_message, intent_result)
-        elif intent == Intent.INTERVENE:
-            return await self._handle_intervene(project_id, user_message, intent_result)
-        elif intent == Intent.ADJUST_BASE:
-            return await self._handle_adjust_base(project_id, user_message, intent_result)
-        elif intent == Intent.ROLLBACK:
-            return await self._handle_rollback(project_id)
-        elif intent == Intent.ONBOARDING_CONTINUE:
-            return await self._handle_onboarding_continue(project_id, user_message, intent_result)
-
-        # ─── 兜底 ─────────────────────────────────
-        else:  # CHAT
-            return await self._handle_chat(user_message, project_id, user_id)
-
-    # ─── 用户级 intent 处理方法（v0.6 s3 实装） ─────
-
-    async def _handle_list_projects(self, user_id: str) -> dict:
-        """LIST_PROJECTS: 查 projects 表（s3.7 实装）"""
-        self.log.info("NovelSteward._handle_list_projects: user_id=%s", user_id)
-        from backend.persistence import ProjectRepository
-        repo = ProjectRepository()
-        projects = repo.list_all(limit=50)  # v0.6 简化：列所有（未删）
-        if not projects:
-            self.log.info("NovelSteward._handle_list_projects: no projects found, user_id=%s", user_id)
-            return {
-                "intent": Intent.LIST_PROJECTS.value,
-                "confidence": 1.0,
-                "response": "📚 你还没有创建任何小说项目。\n\n试试在首页聊天框告诉我你想写什么，比如：\"我想写个赛博朋克爱情故事\"。",
-                "structured_data": {"projects": []},
-                "downstream_called": None,
-            }
-        # 按 updated_at 倒序
-        projects.sort(key=lambda p: p.updated_at, reverse=True)
-        project_cards = [
-            {
-                "id": p.id,
-                "name": p.name,
-                "palette": p.palette,
-                "exploration_level": p.exploration_level,
-                "current_pov": p.current_pov,
-                "cover_image_url": p.cover_image_url,
-                "updated_at": p.updated_at.isoformat() if p.updated_at else None,
-            }
-            for p in projects
-            if not p.deleted_at
-        ]
-        self.log.info(
-            "NovelSteward._handle_list_projects: found=%d, user_id=%s",
-            len(project_cards), user_id,
-        )
-        response = f"📚 你共有 {len(project_cards)} 个小说项目：\n\n" + "\n".join(
-            f"  • 《{p['name']}》 (ID: {p['id'][:8]}...)"
-            for p in project_cards[:10]
-        )
+        # 3. 包装返回 (前端 ws_manager 期望的 schema)
         return {
-            "intent": Intent.LIST_PROJECTS.value,
+            "intent": "chat",
             "confidence": 1.0,
-            "response": response,
-            "structured_data": {"projects": project_cards},
-            "downstream_called": None,
-        }
-
-    async def _handle_query_projects(self, intent_result: IntentResult, user_id: str) -> dict:
-        """QUERY_PROJECTS: 按类型/状态筛选（s3.7 实装）"""
-        filter_genre = intent_result.args.filter_genre
-        filter_style = intent_result.args.filter_style
-        filter_status = intent_result.args.filter_status
-        self.log.info(
-            "NovelSteward._handle_query_projects: user_id=%s, genre=%s, style=%s, status=%s",
-            user_id, filter_genre, filter_style, filter_status,
-        )
-
-        from backend.persistence import ProjectRepository
-        repo = ProjectRepository()
-        all_projects = repo.list_all(limit=50)
-        all_projects = [p for p in all_projects if not p.deleted_at]
-
-        matched = []
-        if filter_genre or filter_style:
-            keyword = filter_genre or filter_style or ""
-            for p in all_projects:
-                if keyword.lower() in p.name.lower():
-                    matched.append({
-                        "id": p.id,
-                        "name": p.name,
-                        "palette": p.palette,
-                        "updated_at": p.updated_at.isoformat() if p.updated_at else None,
-                    })
-        else:
-            matched = [{"id": p.id, "name": p.name} for p in all_projects]
-
-        self.log.info(
-            "NovelSteward._handle_query_projects: matched=%d, user_id=%s",
-            len(matched), user_id,
-        )
-
-        if not matched:
-            response = f"🔍 没找到匹配的项目。" + (f"（按 {filter_genre or filter_style} 筛选）" if (filter_genre or filter_style) else "")
-        else:
-            response = f"🔍 找到 {len(matched)} 个项目：\n\n" + "\n".join(
-                f"  • 《{p['name']}》 (ID: {p.get('id', '?')[:8]}...)"
-                for p in matched[:10]
-            )
-        return {
-            "intent": Intent.QUERY_PROJECTS.value,
-            "confidence": intent_result.confidence,
-            "response": response,
-            "structured_data": {"projects": matched, "filter": {
-                "genre": filter_genre, "style": filter_style, "status": filter_status,
-            }},
-            "downstream_called": None,
-        }
-
-    async def _handle_recommend_projects(self, intent_result: IntentResult, user_id: str) -> dict:
-        """RECOMMEND_PROJECTS: 推荐项目（s3.7 实装）"""
-        self.log.info("NovelSteward._handle_recommend_projects: user_id=%s", user_id)
-        from backend.persistence import ProjectRepository
-        repo = ProjectRepository()
-        projects = [p for p in repo.list_all(limit=10) if not p.deleted_at]
-        projects.sort(key=lambda p: p.updated_at, reverse=True)
-
-        if not projects:
-            return {
-                "intent": Intent.RECOMMEND_PROJECTS.value,
-                "confidence": 1.0,
-                "response": "✨ 你还没有项目可推荐。试试创建一个吧！",
-                "structured_data": {"projects": []},
-                "downstream_called": None,
-            }
-
-        self.log.info(
-            "NovelSteward._handle_recommend_projects: recommending top=%d, user_id=%s",
-            min(5, len(projects)), user_id,
-        )
-        response = "✨ 根据你最近的创作，推荐以下项目：\n\n" + "\n".join(
-            f"  • 《{p.name}》 — 最后更新 {p.updated_at.strftime('%Y-%m-%d') if p.updated_at else '?'}"
-            for p in projects[:5]
-        )
-        return {
-            "intent": Intent.RECOMMEND_PROJECTS.value,
-            "confidence": 1.0,
-            "response": response,
-            "structured_data": {"projects": [
-                {"id": p.id, "name": p.name, "updated_at": p.updated_at.isoformat() if p.updated_at else None}
-                for p in projects[:5]
-            ]},
-            "downstream_called": None,
-        }
-
-    async def _handle_create_project(self, intent_result: IntentResult, user_id: str) -> dict:
-        """CREATE_PROJECT: 启动 Onboarding（s3 实装）"""
-        initial_idea = intent_result.args.initial_idea or "（未提供初始想法）"
-        self.log.info(
-            "NovelSteward._handle_create_project: user_id=%s, idea_len=%d",
-            user_id, len(initial_idea),
-        )
-        from backend.agent.onboarding.controller import (
-            get_onboarding_controller, OnboardingState, OnboardingStep,
-        )
-        controller = get_onboarding_controller()
-        state = OnboardingState(
-            project_id=None,
-            current_step=OnboardingStep.STEP_3,
-        )
-        result = await controller.run_step_3_or_4(
-            user_message=initial_idea,
-            state=state,
-        )
-        self.log.info(
-            "NovelSteward._handle_create_project DONE: user_id=%s, "
-            "new_step=%s, should_generate=%s",
-            user_id, result.new_state.current_step.value,
-            result.should_generate_chapter,
-        )
-        return {
-            "intent": Intent.CREATE_PROJECT.value,
-            "confidence": intent_result.confidence,
-            "response": result.assistant_response or f"好的！'{initial_idea}' 听起来很有意思～ 我们开始一步步搭建这个世界吧。",
-            "structured_data": {
-                "initial_idea": initial_idea,
-                "onboarding_step": result.new_state.current_step.value,
-                "onboarding_history": result.new_state.history,
-            },
-            "downstream_called": "onboarding_controller",
-        }
-
-    async def _handle_open_project(self, intent_result: IntentResult, user_id: str) -> dict:
-        """OPEN_PROJECT: LLM 模糊匹配 + 用户确认（06-24 17:09 拍板，s3.7 实装）
-
-        规则（spec.md §4.4）：
-        - 1 个匹配 → 展示跳转卡片，用户点确认
-        - 多个匹配 → 列候选清单，用户选择
-        - 0 个匹配 → 推荐创建
-        - 不直接跳转（必须用户主动点确认）
-        """
-        from backend.persistence import ProjectRepository
-        repo = ProjectRepository()
-        hint = intent_result.args.project_name_hint or ""
-        self.log.info(
-            "NovelSteward._handle_open_project: user_id=%s, hint=%r",
-            user_id, hint,
-        )
-
-        if not hint:
-            return {
-                "intent": Intent.OPEN_PROJECT.value,
-                "confidence": intent_result.confidence,
-                "response": "📂 请告诉我你想打开哪个项目？",
-                "structured_data": {"candidates": [], "require_confirm": True},
-                "downstream_called": None,
-            }
-
-        # 查所有未删项目，做模糊匹配
-        all_projects = [p for p in repo.list_all(limit=100) if not p.deleted_at]
-        candidates = []
-        hint_lower = hint.lower()
-        for p in all_projects:
-            if hint_lower in p.name.lower() or hint_lower in p.id.lower():
-                candidates.append({
-                    "id": p.id,
-                    "name": p.name,
-                    "updated_at": p.updated_at.isoformat() if p.updated_at else None,
-                })
-
-        self.log.info(
-            "NovelSteward._handle_open_project: hint=%r, candidates=%d",
-            hint, len(candidates),
-        )
-
-        if len(candidates) == 1:
-            p = candidates[0]
-            response = f"📂 找到 1 个项目：\n\n  • 《{p['name']}》\n\n点击确认跳转。"
-            return {
-                "intent": Intent.OPEN_PROJECT.value,
-                "confidence": intent_result.confidence,
-                "response": response,
-                "structured_data": {
-                    "candidates": candidates,
-                    "require_confirm": True,
-                    "jump_url": f"/reader/{p['id']}",
-                },
-                "downstream_called": None,
-            }
-        elif len(candidates) > 1:
-            response = f"📂 找到 {len(candidates)} 个匹配项目：\n\n" + "\n".join(
-                f"  {i+1}. 《{c['name']}》 (ID: {c['id'][:8]}...)"
-                for i, c in enumerate(candidates[:10])
-            ) + "\n\n请告诉我你想打开哪一个。"
-            return {
-                "intent": Intent.OPEN_PROJECT.value,
-                "confidence": intent_result.confidence,
-                "response": response,
-                "structured_data": {"candidates": candidates, "require_confirm": True},
-                "downstream_called": None,
-            }
-        else:
-            response = f"📂 没找到叫《{hint}》的项目。\n\n要不要创建一个？试试说\"我想写个 {hint}\""
-            return {
-                "intent": Intent.OPEN_PROJECT.value,
-                "confidence": intent_result.confidence,
-                "response": response,
-                "structured_data": {"candidates": [], "suggest_create": True, "hint": hint},
-                "downstream_called": None,
-            }
-
-    async def _handle_adjust_global_pref(self, intent_result: IntentResult, user_id: str) -> dict:
-        """ADJUST_GLOBAL_PREFERENCE: 调整全局偏好（s3.7 实装，最小可用集）"""
-
-        key = intent_result.args.preference_key
-        value = intent_result.args.preference_value
-        self.log.info(
-            "NovelSteward._handle_adjust_global_pref: user_id=%s, key=%s, value=%s",
-            user_id, key, value,
-        )
-
-        if not key or not value:
-            return {
-                "intent": Intent.ADJUST_GLOBAL_PREFERENCE.value,
-                "confidence": intent_result.confidence,
-                "response": "⚙️ 没能识别你的偏好名和值。试试说：\"以后默认探索度用 standard\"",
-                "structured_data": {},
-                "downstream_called": None,
-            }
-
-        # 最小可用集校验
-        SUPPORTED_KEYS = {"default_exploration_level"}
-        SUPPORTED_VALUES = {
-            "default_exploration_level": {"conservative", "standard", "wild"},
-        }
-
-        if key not in SUPPORTED_KEYS:
-            self.log.warning(
-                "NovelSteward._handle_adjust_global_pref: unsupported key=%s, user_id=%s",
-                key, user_id,
-            )
-            return {
-                "intent": Intent.ADJUST_GLOBAL_PREFERENCE.value,
-                "confidence": intent_result.confidence,
-                "response": f"⚙️ 偏好 '{key}' 暂未支持。\n\n目前支持：{', '.join(SUPPORTED_KEYS)}",
-                "structured_data": {"supported": list(SUPPORTED_KEYS)},
-                "downstream_called": None,
-            }
-
-        if value not in SUPPORTED_VALUES[key]:
-            valid = "/".join(SUPPORTED_VALUES[key])
-            self.log.warning(
-                "NovelSteward._handle_adjust_global_pref: invalid value=%s for key=%s, user_id=%s",
-                value, key, user_id,
-            )
-            return {
-                "intent": Intent.ADJUST_GLOBAL_PREFERENCE.value,
-                "confidence": intent_result.confidence,
-                "response": f"⚙️ 值 '{value}' 无效。'{key}' 需是: {valid}",
-                "structured_data": {},
-                "downstream_called": None,
-            }
-
-        # 写 user_preferences 表
-        repo = UserPreferenceRepository()
-        await repo.set(user_id=user_id, key=key, value=value)
-
-        self.log.info(
-            "NovelSteward._handle_adjust_global_pref DONE: user_id=%s, key=%s, value=%s",
-            user_id, key, value,
-        )
-        return {
-            "intent": Intent.ADJUST_GLOBAL_PREFERENCE.value,
-            "confidence": intent_result.confidence,
-            "response": f"✅ 已设置全局偏好：{key} = {value}\n\n以后创建项目默认使用该值。",
-            "structured_data": {"key": key, "value": value, "updated": True},
-            "downstream_called": None,
-        }
-
-    # ─── 项目级 intent 处理方法（v0.6 s3/s4 实装） ─────
-
-    async def _handle_generate(self, project_id: str, user_message: str, intent_result: IntentResult) -> dict:
-        """GENERATE: 转发到小说文笔家（s3 实装）"""
-        self.log.info(
-            "NovelSteward._handle_generate: project_id=%s, msg_len=%d",
-            project_id, len(user_message),
-        )
-        chapter_output = await self.novel_writer.generate_chapter(
-            project_id=project_id,
-            user_message=user_message,
-        )
-        if chapter_output.error:
-            self.log.error(
-                "NovelSteward._handle_generate ERROR: project_id=%s, error=%s",
-                project_id, chapter_output.error,
-            )
-            return {
-                "intent": Intent.GENERATE.value,
-                "confidence": intent_result.confidence,
-                "response": f"❌ 章节生成失败：{chapter_output.error}",
-                "structured_data": {"project_id": project_id, "error": chapter_output.error},
-                "downstream_called": "novel_writer",
-            }
-        self.log.info(
-            "NovelSteward._handle_generate DONE: project_id=%s, "
-            "content_len=%d, iterations=%d",
-            project_id, len(chapter_output.chapter_content),
-            chapter_output.iterations,
-        )
-        return {
-            "intent": Intent.GENERATE.value,
-            "confidence": intent_result.confidence,
-            "response": f"📖 已生成下一章（{chapter_output.iterations} 轮推演、{chapter_output.tool_calls_count} 个 tool）\n\n{chapter_output.chapter_content[:500]}...",
-            "structured_data": {
-                "project_id": project_id,
-                "chapter_content": chapter_output.chapter_content,
-                "chapter_summary": chapter_output.chapter_summary,
-                "iterations": chapter_output.iterations,
-            },
-            "downstream_called": "novel_writer",
-        }
-
-    async def _handle_intervene(self, project_id: str, user_message: str, intent_result: IntentResult) -> dict:
-        """INTERVENE: 转发到世界树管理（s3 实装）"""
-        intervention = intent_result.args.intervention_text or user_message
-        self.log.info(
-            "NovelSteward._handle_intervene: project_id=%s, intervention_len=%d",
-            project_id, len(intervention),
-        )
-        diff = await self.world_tree_manager.analyze_intervention(
-            project_id=project_id,
-            intervention_text=intervention,
-        )
-        self.log.info(
-            "NovelSteward._handle_intervene DONE: project_id=%s, "
-            "risk=%s, require_confirm=%s",
-            project_id, diff.risk_level, diff.requires_double_confirm,
-        )
-        response_text = self._format_diff_response(diff)
-        return {
-            "intent": Intent.INTERVENE.value,
-            "confidence": intent_result.confidence,
-            "response": response_text,
-            "structured_data": {
-                "project_id": project_id,
-                "intervention_text": intervention,
-                "diff": diff.model_dump(),
-                "require_confirm": diff.requires_double_confirm,
-            },
-            "downstream_called": "world_tree_manager",
-        }
-
-    async def _handle_adjust_base(self, project_id: str, user_message: str, intent_result: IntentResult) -> dict:
-        """ADJUST_BASE: 转发到世界树管理（s3 实装）"""
-        adjustment = intent_result.args.intervention_text or user_message
-        self.log.info(
-            "NovelSteward._handle_adjust_base: project_id=%s, adjustment_len=%d",
-            project_id, len(adjustment),
-        )
-        diff = await self.world_tree_manager.analyze_base_adjustment(
-            project_id=project_id,
-            adjustment_text=adjustment,
-        )
-        self.log.info(
-            "NovelSteward._handle_adjust_base DONE: project_id=%s, risk=%s",
-            project_id, diff.risk_level,
-        )
-        response_text = self._format_diff_response(diff)
-        return {
-            "intent": Intent.ADJUST_BASE.value,
-            "confidence": intent_result.confidence,
-            "response": response_text,
-            "structured_data": {
-                "project_id": project_id,
-                "adjustment_text": adjustment,
-                "diff": diff.model_dump(),
-                "require_confirm": diff.requires_double_confirm,
-            },
-            "downstream_called": "world_tree_manager",
-        }
-
-    async def _handle_rollback(self, project_id: str) -> dict:
-        """ROLLBACK: 回档（危险操作，管家直接处理 + 弹确认）"""
-        self.log.info(
-            "NovelSteward._handle_rollback: project_id=%s (stub, require_confirm=True)",
-            project_id,
-        )
-        return {
-            "intent": Intent.ROLLBACK.value,
-            "confidence": 1.0,
-            "response": "⏪ [s3 骨架] 回档待后续实装（需用户二次确认）",
-            "structured_data": {"project_id": project_id, "require_confirm": True},
-            "downstream_called": None,
-        }
-
-    async def _handle_onboarding_continue(self, project_id: str, user_message: str, intent_result: IntentResult) -> dict:
-        """ONBOARDING_CONTINUE: 启动 OnboardingController（s3.5 实装）"""
-        self.log.info(
-            "NovelSteward._handle_onboarding_continue: project_id=%s, msg_len=%d",
-            project_id, len(user_message),
-        )
-        from backend.agent.onboarding.controller import (
-            get_onboarding_controller, OnboardingState, OnboardingStep,
-        )
-        controller = get_onboarding_controller()
-        state = OnboardingState(
-            project_id=project_id,
-            current_step=OnboardingStep.STEP_3,
-        )
-        result = await controller.run_step_3_or_4(
-            user_message=user_message,
-            state=state,
-        )
-        self.log.info(
-            "NovelSteward._handle_onboarding_continue: project_id=%s, "
-            "new_step=%s, should_generate=%s",
-            project_id, result.new_state.current_step.value,
-            result.should_generate_chapter,
-        )
-        # 如果触发 Step 5，调 NovelWriter 生成
-        if result.should_generate_chapter:
-            if project_id:
-                self.log.info(
-                    "NovelSteward._handle_onboarding_continue: triggering step5 generate, project_id=%s",
-                    project_id,
-                )
-                chapter_result = await controller.run_step_5_generate_chapter(project_id=project_id)
-                if chapter_result.chapter_content:
-                    self.log.info(
-                        "NovelSteward._handle_onboarding_continue step5 DONE: project_id=%s, "
-                        "content_len=%d, iterations=%d",
-                        project_id, len(chapter_result.chapter_content),
-                        chapter_result.iterations,
-                    )
-                    return {
-                        "intent": Intent.ONBOARDING_CONTINUE.value,
-                        "confidence": intent_result.confidence,
-                        "response": f"✅ Onboarding 完成！第 1 章已生成（{chapter_result.iterations} 轮推演）\n\n{chapter_result.chapter_content[:300]}...",
-                        "structured_data": {
-                            "project_id": project_id,
-                            "chapter_content": chapter_result.chapter_content,
-                            "chapter_summary": chapter_result.chapter_summary,
-                            "step": "step_5_done",
-                        },
-                        "downstream_called": "novel_writer",
-                    }
-        return {
-            "intent": Intent.ONBOARDING_CONTINUE.value,
-            "confidence": intent_result.confidence,
-            "response": result.assistant_response,
-            "structured_data": {
-                "project_id": project_id,
-                "step": result.new_state.current_step.value,
-                "should_generate_chapter": result.should_generate_chapter,
-            },
-            "downstream_called": None,
-        }
-
-    def _format_diff_response(self, diff) -> str:
-        """把 WorldTreeDiff 转成对话文本"""
-        lines = [
-            f"🌿 {diff.summary}",
-            f"\n风险等级：{diff.risk_level}" + ("（需二次确认）" if diff.requires_double_confirm else ""),
-        ]
-        if diff.base_updates:
-            lines.append(f"\n基座变更：{len(diff.base_updates)} 条")
-            for u in diff.base_updates[:3]:
-                lines.append(f"  • {u.artifact}.{u.field}: {u.old_value} → {u.new_value}")
-        if diff.plot_adjustments:
-            lines.append(f"\n走向调整：{len(diff.plot_adjustments)} 条")
-        if diff.new_seeds:
-            lines.append(f"\n新埋伏笔：{len(diff.new_seeds)} 条")
-        if diff.consistency.status != "PASS":
-            lines.append(f"\n一致性：{diff.consistency.status} - {diff.consistency.conflicts[:1]}")
-        lines.append(f"\n（经过 {diff.iterations} 轮推演、{diff.tool_calls_count} 个 tool 调用）")
-        return "\n".join(lines)
-
-    async def _handle_chat(self, user_message: str, project_id: Optional[str], user_id: str) -> dict:
-        """CHAT: 兜底闲聊（管家直接调 LLM）"""
-        self.log.info(
-            "NovelSteward._handle_chat: user_id=%s, project_id=%s, msg_len=%d",
-            user_id, project_id, len(user_message),
-        )
-        return {
-            "intent": Intent.CHAT.value,
-            "confidence": 1.0,
-            "response": f"💬 [s2 骨架] 闲聊模式待 s3 实装（直接调 LLM）",
+            "response": executor_output.final_response or "(无响应)",
             "structured_data": {},
-            "downstream_called": None,
+            "downstream_called": None,  # v0.6.1: 实际调过的 tool 见 tool_calls_history
+            "tool_calls_history": executor_output.tool_calls_history,
+            "iterations": executor_output.iterations,
+            "duration_ms": executor_output.duration_ms,
+            "error": executor_output.error,
         }
 
 

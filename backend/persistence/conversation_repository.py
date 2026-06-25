@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional, List
 
 from backend.persistence.models import (
@@ -44,6 +44,27 @@ class ConversationRepository:
         conv = await self.get_active_conversation(user_id)
         if conv:
             return conv
+        return await self.create_conversation(user_id)
+
+    async def get_or_refresh_active_conversation(
+        self, user_id: str, session_window_hours: int = 24
+    ) -> Conversation:
+        """v0.6.1: 24h 滑窗的 active conversation 管理
+
+        - 查 user 当前 active conv + 看 created_at
+        - 距今 < session_window_hours → 复用 (返回)
+        - 距今 >= session_window_hours → invalidate 旧 active (reason='stale_24h') + 新建
+
+        用途: ws_manager 每次新连接时调, 实现「用户刷新页面 = 新一次进入动作」。
+        """
+        active = await self.get_active_conversation(user_id)
+        if active:
+            age = datetime.now() - active.created_at
+            if age < timedelta(hours=session_window_hours):
+                return active
+            # 超过窗口, invalidate 旧 active
+            await self.invalidate_conversation(active.id, reason="stale_24h")
+        # 新建
         return await self.create_conversation(user_id)
 
     async def create_conversation(self, user_id: str) -> Conversation:
