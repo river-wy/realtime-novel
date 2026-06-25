@@ -94,7 +94,9 @@ def _format_fields_as_text(fields: dict, step: int) -> str:
 
 
 async def handle_onboarding_request_proposal(ws: WebSocket, user_id: str, data: dict):
-    """处理 onboarding_request_proposal: 调 OnboardingAgent 生成 4 字段
+    """处理 onboarding_request_proposal: 调 OnboardingController 生成 4 字段
+
+    v0.6.1: WS 路径统一走 OnboardingController (吸收原 OnboardingAgent 能力)
 
     Args:
         data: {
@@ -105,7 +107,7 @@ async def handle_onboarding_request_proposal(ws: WebSocket, user_id: str, data: 
             current_fields?: dict,  # 当前已有字段
         }
     """
-    from backend.agent.onboarding_agent import OnboardingAgent
+    from backend.agent.onboarding_controller import get_onboarding_controller
 
     t0 = time.monotonic()
 
@@ -146,10 +148,10 @@ async def handle_onboarding_request_proposal(ws: WebSocket, user_id: str, data: 
         "content": f"正在为 Step {step} 提议字段...",
     })
 
-    # 调 OnboardingAgent
-    agent = OnboardingAgent()
+    # 调 OnboardingController (v0.6.1: 统一入口, 吸收原 OnboardingAgent 能力)
+    controller = get_onboarding_controller()
     try:
-        result = await agent.consult(
+        result = await controller.consult(
             project_id=project_id,
             step=step,
             user_message=user_message_with_current,
@@ -167,27 +169,27 @@ async def handle_onboarding_request_proposal(ws: WebSocket, user_id: str, data: 
         })
         return
 
-    if "error" in result:
+    if result.error:
         log.error(
             "onboarding_request_proposal LLM ERROR: project_id=%s, step=%d, error=%s, elapsed=%.2fs",
-            project_id, step, result["error"], time.monotonic() - t0,
+            project_id, step, result.error, time.monotonic() - t0,
         )
         await ws.send_json({
             "type": "error",
             "code": "AGENT_CONSULT_ERROR",
-            "message": result["error"],
+            "message": result.error,
         })
         return
 
     # 写 agent 消息 (content 存纯文本, thinking 存 JSON 结构供调试/UI 用)
-    fields = result.get("fields", {})
+    fields = result.fields or {}
     fields_text = _format_fields_as_text(fields, step)
     fields_json = json.dumps(fields, ensure_ascii=False)
     await conv_repo.add_message(
         conversation_id=conversation.id,
         role=MessageRole.ASSISTANT,
         content=fields_text,
-        thinking={"raw": result.get("raw", ""), "step": step, "fields_json": fields_json},
+        thinking={"raw": result.raw or "", "step": step, "fields_json": fields_json},
         project_id=project_id,
     )
 
@@ -195,14 +197,14 @@ async def handle_onboarding_request_proposal(ws: WebSocket, user_id: str, data: 
     await ws.send_json({
         "type": "onboarding_proposal",
         "step": step,
-        "fields": result["fields"],
+        "fields": result.fields,
     })
 
     log.info(
         "onboarding_request_proposal END: project_id=%s, step=%d, fields_keys=%s, raw_len=%d, elapsed=%.2fs",
         project_id, step,
         list(fields.keys()) if isinstance(fields, dict) else "N/A",
-        len(result.get("raw", "") or ""),
+        len(result.raw or ""),
         time.monotonic() - t0,
     )
 

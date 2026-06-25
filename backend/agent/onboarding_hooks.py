@@ -13,9 +13,78 @@ import asyncio
 import logging
 
 from backend.core.event_bus import event_bus
+from backend.adapters.types import LLMRequest, ModelRole
 
 log = logging.getLogger(__name__)
 
+
+# ============ 项目名自动生成 (v0.6.1: 从原 onboarding_agent 移入 hooks) ============
+
+GENERATE_NAME_PROMPT = """你是「小说命名师」。根据下面的故事核心, 生成 1 个项目名。
+
+要求:
+- 中文 (1-15 字, 鼓励), 也可英文
+- 携带故事核心悬念/冲突的关键词
+- 避免「小说/世界/世界线」等泛词
+- 不用冒号/书名号
+- 1 个, 不要列表
+
+示例 (看格式不抄内容):
+- 白小楼借仙界一季还雪国万灯
+- 杀妻者自赎录
+- The Last Letter from Mars
+
+故事核心: {story_core}
+主角/对手/盟友: {characters}
+题材: {tone}
+
+只返名字, 不要说明, 不要引号. 严格返一个 string.
+"""
+
+
+async def _generate_project_name(story_core: str, characters: str, tone: list[str] | str) -> str:
+    """Step 4 完成后 LLM 自动生成项目名
+
+    v0.6.1: 从原 OnboardingAgent 模块移入 hooks（与 cover_image 并发触发）
+    """
+    from backend.adapters import get_llm_adapter
+
+    if isinstance(tone, str):
+        tone = [tone] if tone else []
+    tone_str = ", ".join(tone) or "(未选)"
+
+    try:
+        adapter = get_llm_adapter()
+        request = LLMRequest(
+            prompt="",
+            messages=[{
+                "role": "user",
+                "content": GENERATE_NAME_PROMPT.format(
+                    story_core=story_core[:300],
+                    characters=characters[:300],
+                    tone=tone_str,
+                ),
+            }],
+            max_tokens=200,
+            temperature=0.7,
+            role=ModelRole.TEXT,
+            enable_thinking=False,
+        )
+        response = await adapter.complete(request)
+        raw = (response.content or "").strip()
+        name = raw.split("\n")[0].strip().strip("'\"`'「」《》")
+        name = name[:50]
+        if not name or len(name) < 2:
+            log.warning("auto-name: too short, raw=%s", raw[:100])
+            return ""
+        log.info("auto-name generated: %s", name)
+        return name
+    except Exception as e:
+        log.error("auto-name failed: %s", str(e))
+        return ""
+
+
+# ============ Event Handlers ============
 
 @event_bus.on("onboarding.step4_confirmed")
 async def handle_step4_confirmed(
@@ -30,7 +99,6 @@ async def handle_step4_confirmed(
     - 落库操作（update_name / update_cover_image_url）无论 WS 是否在线都会执行
     - WS 推送在 try/except 里，失败静默忽略
     """
-    from backend.agent.onboarding_agent import _generate_project_name
     from backend.persistence.project_repository import ProjectRepository
     from backend.services.onboarding_flow import OnboardingFlow
     from backend.services.cover_image_generator import generate_and_save_cover
@@ -94,4 +162,3 @@ async def handle_step4_confirmed(
 
     log.info("onboarding_hooks: step4_confirmed DONE project_id=%s name=%r cover=%s",
              project_id, new_name, cover_image_url)
-
