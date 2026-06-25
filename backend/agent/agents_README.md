@@ -1,23 +1,40 @@
-# Agent 角色矩阵（v0.6 novel-steward 迭代）
+# Agent 角色矩阵（v0.6.1 重塑版）
 
 > **对应 spec**：`.spec/m-v0.6-novel-steward/spec.md §3`
-> **创建**：2026-06-24（s2 抽象定义阶段）
-> **状态**：🟡 骨架已落地（s2），实装在 s3/s4
+> **重写日期**：2026-06-25（v0.6.1 agent/ 模块重塑完成）
+> **状态**：✅ 全部完成（v0.6 端到端已实装 + 跑通）
 
 ---
 
-## 1. 3 顶层 Agent
+## 1. 架构总览
 
-### 1.1 小说管家 NovelSteward
+v0.6.1 重塑后，`backend/agent/` 按"**目录 = 抽象边界**"重组为 7 个模块：
+
+```
+backend/agent/
+├── agents/         ← 3 顶层 Agent（用户直接对话）
+├── runtime/        ← ReAct 引擎（执行/路由/状态）
+├── onboarding/     ← 5 步流程统一入口（吸收原 OnboardingAgent）
+├── specialists/    ← 内部专家工具（降级，不再是顶层 Agent）
+├── context/        ← 上下文/工具（按角色裁剪 messages）
+├── prompts/        ← Prompt 模板集中
+└── tools/          ← 13 个工具（ToolRegistry）
+```
+
+---
+
+## 2. 3 顶层 Agent（agents/）
+
+### 2.1 小说管家 NovelSteward
 
 | 项 | 内容 |
 |---|------|
-| **文件** | `backend/agent/novel_steward.py` |
+| **文件** | `backend/agent/agents/novel_steward.py` |
 | **类** | `NovelSteward` |
 | **工厂方法** | `get_novel_steward()` |
 | **职责** | 唯一用户入口 + 意图识别 + 路由分发 + 接管 Onboarding |
 | **调用方** | API 入口（`/api/chat` WebSocket / HTTP POST） |
-| **被调方** | NovelWriter, WorldTreeManager, OnboardingAgent（内部） |
+| **被调方** | NovelWriter, WorldTreeManager, OnboardingController（内部） |
 
 **主入口**：
 ```python
@@ -27,7 +44,7 @@ async def receive(
     user_id: str = "default",
     in_onboarding: bool = False,
     conversation_id: Optional[str] = None,
-) -> dict:
+) -> dict
 ```
 
 **响应结构**：
@@ -47,16 +64,16 @@ async def receive(
 - ❌ 不分析干预影响（转发给 WorldTreeManager）
 - ✅ 只负责「听懂用户 → 找对人 → 回话」
 
-### 1.2 小说文笔家 NovelWriter
+### 2.2 小说文笔家 NovelWriter
 
 | 项 | 内容 |
 |---|------|
-| **文件** | `backend/agent/novel_writer.py` |
+| **文件** | `backend/agent/agents/novel_writer.py` |
 | **类** | `NovelWriter` |
 | **工厂方法** | `get_novel_writer()` |
 | **职责** | 章节正文生成 + summary 抽取 + 文风控制 + 历史承接 |
 | **调用方** | NovelSteward（intent=GENERATE 时） |
-| **被调方** | ChapterGeneratorSpecialist（v0.5 已实装，复用） |
+| **被调方** | ChapterGeneratorSpecialist（`backend/agent/specialists/specialists.py`） |
 
 **主入口**：
 ```python
@@ -64,24 +81,24 @@ async def generate_chapter(
     project_id: str,
     user_message: str = "请生成下一章",
     max_history: int = 5,
-) -> ChapterOutput:
+) -> ChapterOutput
 ```
 
 **关键约束**：
 - ❌ 不决定剧情走向（走向由世界树基座约束）
 - ❌ 不修改任何基座（只读）
-- ✅ 调用 MemoryKeeper 检索历史章节上下文（s3 扩展）
+- ✅ 调用 MemoryKeeper 检索历史章节上下文
 
-### 1.3 世界树管理 WorldTreeManager
+### 2.3 世界树管理 WorldTreeManager
 
 | 项 | 内容 |
 |---|------|
-| **文件** | `backend/agent/world_tree_manager.py` |
+| **文件** | `backend/agent/agents/world_tree_manager.py` |
 | **类** | `WorldTreeManager` |
 | **工厂方法** | `get_world_tree_manager()` |
 | **职责** | 基座一致性 + 干预影响分析 + 种子预留 + 走向调整 + diff 输出 |
 | **调用方** | NovelSteward（intent=INTERVENE/ADJUST_BASE 时） |
-| **被调方** | WorldTreeKeeperSpecialist（v0.5 已实装，复用） |
+| **被调方** | WorldTreeKeeperSpecialist（`backend/agent/specialists/specialists.py`） |
 
 **主入口**：
 ```python
@@ -89,10 +106,10 @@ async def analyze_intervention(
     project_id: str,
     intervention_text: str,
     max_history: int = 5,
-) -> WorldTreeDiff:
+) -> WorldTreeDiff
 ```
 
-**Diff 结构**（核心，对应 spec.md §1.2 目标 3）：
+**Diff 结构**（核心）：
 ```python
 {
     "intent": "intervene",
@@ -122,47 +139,154 @@ async def analyze_intervention(
 **关键约束**：
 - ❌ 不生成章节正文（写不是它的职责）
 - ❌ 不直接和用户对话（通过管家中转）
-- ✅ 调用 MemoryKeeper 检索历史干预（s4 扩展）
+- ✅ 调用 MemoryKeeper 检索历史干预
 
 ---
 
-## 2. 2 内部工具（降级）
+## 3. ReAct 运行时（runtime/）
 
-### 2.1 MemoryKeeper（记忆专员）
-
-| 项 | 内容 |
+| 文件 | 职责 |
 |---|------|
-| **文件** | `backend/agent/specialists.py` 中的 `MemoryKeeperSpecialist` 类 |
-| **调用方** | NovelWriter / WorldTreeManager（内部调用） |
-| **职责** | 检索历史章节 / 历史干预 / 历史基座版本 |
-| **不再是顶层 Agent** | 用户不会直接对它说话 |
+| `executor.py` | ReAct loop 引擎，max_iterations=7（18:02 拍板） |
+| `intent_recognizer.py` | Intent 分类（用户级 / 项目级两套） |
+| `state.py` | Intent 枚举 + AgentState 数据类 |
 
-### 2.2 ImageGenerator（图片生成）
+**ReAct loop 工作流**：
+1. 调 LLM（带 tools 列表）
+2. LLM 决定调工具 / 输出 final_response
+3. 调工具 → 结果回传 LLM → 下一轮
+4. 退出条件：① final_response ② max_iterations=7 ③ 死循环检测
 
-| 项 | 内容 |
+---
+
+## 4. Onboarding 5 步（onboarding/）
+
+| 文件 | 职责 |
 |---|------|
-| **文件** | `backend/agent/specialists.py` 中的 `ImageGeneratorStub` 类 |
-| **调用方** | NovelSteward（生成封面/插图时） |
-| **职责** | 调 Gemini 生成图片 |
-| **不再是顶层 Agent** | 由管家内部调用 |
+| `controller.py` | 5 步统一入口（HTTP 5 步端点 + WS Step 3/4 推演共享） |
+| `hooks.py` | 事件总线订阅（Step 4 完成后生成项目名 + 封面图） |
+
+**v0.6.1 重大变更**：
+- ❌ 删除 `backend/agent/onboarding_agent.py`（v0.5 旧版）
+- ✅ `OnboardingController` 吸收原 `OnboardingAgent` 全部能力（DB 读 / context_builder / LLM 调 / JSON 解析 / Pydantic 校验 / 重新提议检测）
+- ✅ 暴露统一入口：`OnboardingController.consult(project_id, step, user_message, current_fields)`
+- ✅ HTTP 5 步端点仍走 `OnboardingFlow` 状态机（service），Step 3/4 走 controller LLM 推演
+- ✅ `_generate_project_name` 从 onboarding_agent 移入 hooks.py（事件触发时调用）
+
+**能力清单**：
+- Step 1-2: 按钮交互（题材/风格/基调 + palette）
+- Step 3-4: LLM 多轮推演（`controller.consult()`）
+- Step 5: 调 NovelWriter 生成第 1 章
+- 重新提议检测（11 关键词）
+- 完整 LLM CALL/RESPONSE/PARSE 边界日志
 
 ---
 
-## 3. 废弃/删除的模块
+## 5. 内部专家工具（specialists/）
 
-| 模块 | 状态 | 替代 |
-|------|------|------|
-| `backend/agent/state_graph.py` | 🟡 简化（v0.6 s3 阶段删除 6 节点 StateGraph） | 3 个 Agent 直接路由 |
-| `backend/agent/state_graph_stub.py` | 🟡 简化（保留 generate_summary 部分） | 同上 |
-| `backend/agent/onboarding_agent.py` | 🟡 重命名/合并（v0.6 s3 阶段） | 合并到 NovelSteward 的 onboard 分支 |
-| `backend/agent/onboarding_hooks.py` | ✅ 保留 | 事件总线订阅（不专属 Onboarding） |
-| `backend/agent/nodes.py` | 🟡 简化（v0.6 s3 阶段） | StateGraph 删除后无节点概念 |
-| `backend/agent/specialists.py` | ✅ 保留 + 重构 | SpecialistAgent ABC 废除；3 个 specialist 降级为内部工具 |
-| `backend/services/intervention_parser.py` | ❌ 删除（v0.6 s4 阶段） | 合并到 WorldTreeManager |
+| 文件 | 职责 |
+|---|------|
+| `specialists.py` | 3 specialist + ImageGeneratorStub + 章节生成包装 |
+| `chapter_summarizer.py` | 章节 summary 抽取（sentinel 解析 + fallback） |
+| `exploration.py` | 探索度参数 (conservative/standard/wild) |
+
+**3 个 Specialist**（v0.5 降级为内部工具，v0.6.1 仍降级）：
+
+| 类 | 文件位置 | 调用方 |
+|---|---|---|
+| `ChapterGeneratorSpecialist` | `specialists/specialists.py` | NovelWriter |
+| `WorldTreeKeeperSpecialist` | `specialists/specialists.py` | WorldTreeManager |
+| `MemoryKeeperSpecialist` | `specialists/specialists.py` | NovelWriter / WorldTreeManager |
+| `ImageGeneratorStub` | `specialists/specialists.py` | 管家（生成封面/插图） |
+
+**v0.6.1 重大变更**：
+- ❌ 删除 `backend/agent/state_graph_stub.py`（v0.4 残留）
+- ✅ 全部能力吸收到 `specialists.py:generate_chapter_via_specialist()`
+- ❌ 删除 `backend/services/chapter_generator.py`（dead service，42 行仅包一层日志）
+
+**章节生成新入口**：
+```python
+from backend.agent.specialists.specialists import generate_chapter_via_specialist
+
+result = await generate_chapter_via_specialist(
+    project_id=project_id,
+    intervention=intervention,         # 可选
+    actor_feedback=actor_feedback,     # 可选
+    actor_character=actor_character,   # 可选
+)
+# 返回 {num, title, content, file_path, word_count, summary}
+```
 
 ---
 
-## 4. 路由协议（管家大厅 vs 项目管家）
+## 6. 上下文/工具（context/）
+
+| 文件 | 职责 |
+|---|------|
+| `builders.py` | 3 角色 messages 拼装 + 通用 node builder |
+| `onboarding_builders.py` | Step 3/4 推演 messages 拼装 |
+| `_helpers.py` | 私有 helper（DB 转换 + 字段格式化 + json_dumps） |
+| `style_inference.py` | style_charter 字段推断（12 风格 + 7 基调 + 5 题材映射） |
+
+**v0.6.1 重大变更**：
+- ❌ 删除 `backend/agent/context_builder.py`（745 行单文件）
+- ✅ 拆为 3 文件（`_helpers.py` / `builders.py` / `onboarding_builders.py`）
+- ✅ `__init__.py` re-export 7 公共 API，保持外部 import 路径不变
+
+**公开 API**（从 `backend.agent.context` import）：
+```python
+build_messages_for_steward
+build_messages_for_worldtree_keeper
+build_messages_for_chapter_generator
+build_messages_for_onboarding_step3
+build_messages_for_onboarding_step4
+build_messages_for_node
+load_history_messages
+```
+
+---
+
+## 7. Prompt 集中（prompts/）
+
+| 文件 | 职责 |
+|---|------|
+| `specialists.py` | 3 个 specialist prompt (WORLDTREE/CHAPTER/MEMORY) |
+| `onboarding.py` | Step 3/4 推演 prompt (ONBOARDING_STEP3/STEP4) |
+| `__init__.py` | re-export 5 活 prompt |
+
+**v0.6.1 重大变更**：
+- ❌ 删除 9 个 v0.4 死 prompt（无外部引用）：
+  - `INTAKE_PROMPT` / `CONSULT_EXPERTS_PROMPT` / `PLAN_PROMPT` / `ACT_PROMPT` / `REFLECT_PROMPT` / `RESPOND_PROMPT`（v0.4 6 节点 StateGraph 时代）
+  - `CHAPTER_SUMMARY_PROMPT` / `CHAPTER_DETAILED_SUMMARY_PROMPT` / `CONVERSATION_SUMMARY_PROMPT`（旧版 summary）
+- ✅ 拆 `prompts.py` 386 行 → 2 文件 + __init__ re-export
+
+---
+
+## 8. 工具（tools/）
+
+13 个工具，由 `ToolRegistry` 统一管理：
+
+| 类别 | 文件 |
+|---|---|
+| 基础 | `base.py` / `base_edit_tools.py` |
+| 章节 | `chapter_tools.py` |
+| 角色 | `character_tools.py` |
+| 情节 | `plot_tools.py` |
+| 视角 | `pov_tools.py` |
+| 项目 | `project_tools.py` |
+| 风格 | `style_tools.py` |
+| 记忆 | `memory_tools.py` |
+| 图片 | `image_tools.py` |
+| 通用 | `edit_artifact_tool.py` |
+| Schema | `schemas.py` |
+| Registry | `registry.py` |
+| Locks | `locks.py` |
+
+v0.6.1 工具模块**未动**（目录结构已合理）。
+
+---
+
+## 9. 路由协议（管家大厅 vs 项目管家）
 
 ```
 用户消息（带可选 projectId 上下文）
@@ -181,7 +305,7 @@ NovelSteward.receive(message, project_id=None/str)
 
 ---
 
-## 5. Intent 完整枚举（v0.6 拍板）
+## 10. Intent 完整枚举（v0.6 拍板）
 
 ### 项目级（管家大厅内不响应）
 - `GENERATE` - 生成下一章 → NovelWriter
@@ -201,28 +325,21 @@ NovelSteward.receive(message, project_id=None/str)
 
 ---
 
-## 6. s2 阶段交付物（已完成）
+## 11. v0.6.1 重塑历程（参考）
 
-- ✅ `backend/agent/intent_recognizer.py` - 意图识别器（实装）
-- ✅ `backend/agent/novel_steward.py` - 小说管家骨架（路由逻辑 + 占位响应）
-- ✅ `backend/agent/novel_writer.py` - 小说文笔家骨架（委托给 ChapterGeneratorSpecialist）
-- ✅ `backend/agent/world_tree_manager.py` - 世界树管理骨架（委托给 WorldTreeKeeperSpecialist + WorldTreeDiff schema）
-- ✅ `backend/agent/state.py` - Intent 枚举扩展（加 6 类）+ AgentState 适配新流程
-- ✅ `backend/agent/agents_README.md` - 本文件
+| Phase | 任务 | commit |
+|---|---|---|
+| P0 | 备份 data/ 目录 | (无 commit, data.backup-20260625-1045.tar.gz) |
+| P1 | 死代码清场 (state_graph.py / nodes.py / 2 空目录) | `f795d6f` |
+| P2 | Onboarding 收口 (controller 吸收 OnboardingAgent 能力 + 删 OnboardingAgent) | `a0f9392` |
+| P3 | 17 .py 移位到 6 个子目录 + 6 个新 __init__.py | `52530a7` |
+| P4-1 | 拆 context_builder.py 745 行 → 3 文件 | `9720b63` |
+| P4-2 | 拆 prompts.py 386 行 → 2 文件 + 删 9 个死 prompt | `003b3a7` |
+| P5 | state_graph_stub 归一到 specialists | `e9c7033` |
+| P6 | agents_README 重写（本文档） | (本 commit) |
 
-## 7. s3/s4 阶段待办
-
-### s3（管家实装）
-- [ ] 实装 `_handle_list_projects` / `_handle_query_projects` / `_handle_recommend_projects`
-- [ ] 实装 `_handle_create_project`（启动 Onboarding）
-- [ ] 实装 `_handle_open_project`（LLM 模糊匹配 + 用户确认）
-- [ ] 实装 `_handle_adjust_global_pref`（写 user_preferences）
-- [ ] 实装 `_handle_generate`（调用 NovelWriter.generate_chapter）
-- [ ] 重写 `backend/api/ws_manager.py`（统一进 /api/chat）
-
-### s4（世界树管理实装）
-- [ ] 实装一致性检查器（`backend/services/consistency_checker.py`）
-- [ ] 完善 WorldTreeDiff 的 base_updates / plot_adjustments / new_seeds 解析
-- [ ] 实装 risk_level 评估（基于改动数量）
-- [ ] 删除 `backend/services/intervention_parser.py`（合并完成）
-- [ ] 处理 requires_double_confirm 的 UI 弹窗逻辑
+**重构原则**（欧尼酱 11:40 拍板）：
+- 完整重构，不向前兼容
+- 目录 = 抽象边界
+- 死代码立刻删
+- 文件大小失控就拆
