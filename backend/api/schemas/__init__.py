@@ -1,4 +1,9 @@
-"""api.schemas 包：WS 事件 + Onboarding Pydantic Schema"""
+"""api.schemas 包：WS 事件 Pydantic Schema
+
+v0.6.2 简化:
+- 删 Onboarding 相关 schema (HTTP /onboarding 路由 + WS onboarding_request_proposal/confirm handler 都已删除)
+- OnboardingProposalEvent / OnboardingConfirmedEvent / OnboardingStepDoneEvent 保留定义（兼容历史消息）, 不再主动发送
+"""
 from backend.api.schemas.events import (
     AgentThinkingEvent,
     ToolCallingEvent,
@@ -7,20 +12,10 @@ from backend.api.schemas.events import (
     ErrorEvent,
     InterruptedEvent,
     ConfirmRequiredEvent,
+    # Onboarding 事件保留定义（兼容历史消息）, 不再主动发送
     OnboardingProposalEvent,
     OnboardingConfirmedEvent,
     OnboardingStepDoneEvent,
-)
-from backend.api.schemas.onboarding import (
-    OnboardingPayloadStep1,
-    OnboardingPayloadStep2,
-    OnboardingPayloadStep3,
-    OnboardingPayloadStep4,
-    OnboardingPayloadStep5,
-    OnboardingPayload,
-    OnboardingRequest,
-    OnboardingResponse,
-    validate_onboarding_payload,
 )
 
 __all__ = [
@@ -32,19 +27,8 @@ __all__ = [
     "ErrorEvent",
     "InterruptedEvent",
     "ConfirmRequiredEvent",
-    # WS Onboarding 事件
+    # Onboarding 事件保留定义（兼容历史消息）, 不再主动发送
     "OnboardingProposalEvent",
     "OnboardingConfirmedEvent",
     "OnboardingStepDoneEvent",
-    # HTTP Onboarding Schema
-    "OnboardingPayloadStep1",
-    "OnboardingPayloadStep2",
-    "OnboardingPayloadStep3",
-    "OnboardingPayloadStep4",
-    "OnboardingPayloadStep5",
-    "OnboardingPayload",
-    "OnboardingRequest",
-    "OnboardingResponse",
-    "validate_onboarding_payload",
 ]
-

@@ -11,9 +11,8 @@ export interface ProjectInfo {
   exploration_level: 'conservative' | 'standard' | 'wild'
   chapter_count: number
   last_updated: string | null
-  // v0.8.3: onboard 续接用
-  onboarding_step: number | null  // null=从未进过, 0=未开始, 1-4=进行中
-  status: 'not_started' | 'in_progress' | 'completed'  // v0.8.3
+  // v0.8.3: 项目状态（v0.6.2 去掉 onboarding_step 判断逻辑，保留 status 展示）
+  status: 'not_started' | 'in_progress' | 'completed'
   // v0.9: 世界封面图
   cover_image_url?: string | null
 }
@@ -27,10 +26,6 @@ export interface ProjectDetail {
   seven_artifacts: Record<string, any> | null
   world_tree: Record<string, any> | null
   chapters: ChapterSummary[] | null
-  // v0.8.3: onboard 续接用
-  onboarding_step?: number | null
-  // 续接回填用：已保存的所有 payload 字段（genres/styles/tone/palette/story_core/...）
-  onboarding_payload?: Record<string, any> | null
   // v0.9: 世界封面图
   cover_image_url?: string | null
 }

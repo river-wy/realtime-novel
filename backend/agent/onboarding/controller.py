@@ -26,7 +26,6 @@ from typing import Any, Dict, List, Optional
 
 from backend.adapters import get_llm_adapter
 from backend.adapters.types import LLMRequest, ModelRole
-from backend.agent.agents.novel_writer import get_novel_writer
 from backend.agent.prompts import (
     ONBOARDING_STEP3_PROMPT,
     ONBOARDING_STEP4_PROMPT,
@@ -80,14 +79,6 @@ class OnboardingResult(BaseModel):
     should_generate_chapter: bool = False
     fields: Optional[Dict[str, str]] = None
     raw: Optional[str] = None
-    error: Optional[str] = None
-
-
-class ChapterGenResult(BaseModel):
-    """Step 5 生成结果"""
-    chapter_content: str = ""
-    chapter_summary: str = ""
-    iterations: int = 0
     error: Optional[str] = None
 
 
@@ -263,9 +254,6 @@ class OnboardingController:
 
         # WS 路径同样调 consult (handler 转 raw args)
         result = await controller.consult(...)
-
-        # Step 5 调 generate_chapter
-        chapter = await controller.run_step_5_generate_chapter(project_id)
     """
 
     def __init__(self, executor: Optional[AgentExecutor] = None):
@@ -461,118 +449,6 @@ class OnboardingController:
             )
         except KeyError:
             return template
-
-    # ---------- 旧 run_step_3_or_4（保留：state 走 controller 不走 DB） ----------
-
-    async def run_step_3_or_4(
-        self,
-        user_message: str,
-        state: OnboardingState,
-        max_tokens: int = 2048,
-        temperature: float = 0.8,
-    ) -> OnboardingResult:
-        """运行 Step 3 或 Step 4（多轮对话引导，state 走 controller）
-
-        这是 v0.6 s3.5 的 state-driven 版本，主要给 novel_steward 用。
-        HTTP/WS 走 consult() (DB-driven)。
-        """
-        self.log.info(
-            "OnboardingController.run_step_3_or_4 START: project_id=%s, step=%s, "
-            "history_len=%d, msg_len=%d",
-            state.project_id, state.current_step.value,
-            len(state.history), len(user_message or ""),
-        )
-        messages = [
-            {"role": "system", "content": ONBOARDING_SYSTEM_PROMPT},
-            {"role": "system", "content": f"【当前 Step】{state.current_step.value}\n【project_id】{state.project_id or '尚未创建'}"},
-        ] + state.history + [
-            {"role": "user", "content": user_message},
-        ]
-
-        llm_request = LLMRequest(
-            messages=messages,
-            max_tokens=max_tokens,
-            temperature=temperature,
-            role=ModelRole.TEXT,
-            enable_thinking=True,
-        )
-
-        llm_response = await self.executor.llm.complete(llm_request)
-        assistant_response = llm_response.content or ""
-
-        new_history = list(state.history) + [
-            {"role": "user", "content": user_message},
-            {"role": "assistant", "content": assistant_response},
-        ]
-
-        new_state = OnboardingState(
-            project_id=state.project_id,
-            current_step=state.current_step,
-            history=new_history,
-            completed=state.completed,
-        )
-
-        should_generate = self._should_trigger_chapter(user_message, assistant_response)
-        if should_generate:
-            new_state.current_step = OnboardingStep.STEP_5
-
-        self.log.info(
-            "OnboardingController.run_step_3_or_4 DONE: project_id=%s, "
-            "new_step=%s, should_generate=%s, response_len=%d",
-            state.project_id, new_state.current_step.value,
-            should_generate, len(assistant_response),
-        )
-        return OnboardingResult(
-            new_state=new_state,
-            assistant_response=assistant_response,
-            should_generate_chapter=should_generate,
-        )
-
-    # ---------- Step 5 章节生成 ----------
-
-    async def run_step_5_generate_chapter(
-        self,
-        project_id: str,
-        user_message: str = "生成第 1 章",
-    ) -> ChapterGenResult:
-        """Step 5: 调 NovelWriter 生成第 1 章"""
-        self.log.info(
-            "OnboardingController.run_step_5_generate_chapter START: project_id=%s",
-            project_id,
-        )
-        writer = get_novel_writer()
-        chapter_output = await writer.generate_chapter(
-            project_id=project_id,
-            user_message=user_message,
-        )
-        if chapter_output.error:
-            self.log.error(
-                "OnboardingController.run_step_5_generate_chapter ERROR: "
-                "project_id=%s, error=%s",
-                project_id, chapter_output.error,
-            )
-        else:
-            self.log.info(
-                "OnboardingController.run_step_5_generate_chapter DONE: "
-                "project_id=%s, content_len=%d, iterations=%d",
-                project_id, len(chapter_output.chapter_content),
-                chapter_output.iterations,
-            )
-        return ChapterGenResult(
-            chapter_content=chapter_output.chapter_content,
-            chapter_summary=chapter_output.chapter_summary,
-            iterations=chapter_output.iterations,
-            error=chapter_output.error,
-        )
-
-    def _should_trigger_chapter(self, user_message: str, assistant_response: str) -> bool:
-        """判断是否触发 Step 5（用户/管家说可以开始生成了）"""
-        triggers = [
-            "差不多了", "够了", "开始生成", "生成", "可以了",
-            "下一步", "继续生成", "OK", "ok", "好",
-        ]
-        combined = user_message + " " + assistant_response
-        return any(t in combined for t in triggers)
 
 
 # ============ 工厂方法 ============

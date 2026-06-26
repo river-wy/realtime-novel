@@ -7,12 +7,7 @@ const routes: RouteRecordRaw[] = [
     component: () => import('@/views/Home.vue'),
     meta: { title: '首页' }
   },
-  {
-    path: '/onboarding',
-    name: 'onboarding',
-    component: () => import('@/views/Onboarding.vue'),
-    meta: { title: '新世界' }
-  },
+  // v0.6.2: /onboarding 路由已删除（项目 onboard 全部走管家 Agent 对接）
   {
     path: '/reader/:projectId/:chapterNum?',
     name: 'reader',

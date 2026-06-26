@@ -1,26 +1,10 @@
 /**
- * Actions API（onboarding / interventions / rollback / image）
+ * Actions API（interventions / rollback / image）
+ *
+ * v0.6.2: 刪除 Onboarding 相关函数（onboardingStep）
+ * 项目 onboard 创建全部走管家 Agent 对接
  */
 import { api } from './client'
-
-// ============ Onboarding ============
-
-export type OnboardingStep = '1' | '2' | '3' | '4' | '5'
-
-export interface OnboardingResult {
-  step: string
-  result: Record<string, any>
-  next_step: string | null
-}
-
-export async function onboardingStep(
-  projectId: string,
-  step: OnboardingStep,
-  payload: Record<string, any> = {}
-): Promise<OnboardingResult> {
-  const { data } = await api.post(`/projects/${projectId}/onboarding`, { step, payload })
-  return data
-}
 
 // ============ Interventions ============
 

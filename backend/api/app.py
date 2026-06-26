@@ -21,7 +21,9 @@ from backend.api.ws_manager import router as ws_router
 from backend.api.project_routes import router as project_router
 from backend.api.chapter_routes import router as chapter_router
 from backend.api.action_routes import router as action_router
-from backend.api.onboarding_routes import router as onboarding_router
+
+# v0.6.2: onboarding_routes 已删除（HTTP 路由 + WS handler 都不再用）
+# 项目 onboard 创建全部走管家 Agent 对接 (onboarding_propose_step / onboarding_user_confirm 工具)
 
 # 触发领域事件 handler 注册（import 即注册，无需显式调用）
 import backend.agent.onboarding.hooks  # noqa: F401
@@ -47,7 +49,6 @@ app.add_middleware(
 app.include_router(system_router)
 app.include_router(project_router)
 app.include_router(chapter_router)
-app.include_router(onboarding_router)
 app.include_router(action_router)
 app.include_router(ws_router)
 

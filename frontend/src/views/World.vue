@@ -8,7 +8,7 @@ import { onMounted, computed, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useProjectsStore } from '@/stores/projects'
 import { useChaptersStore } from '@/stores/chapters'
-import { rollbackProject, onboardingStep } from '@/api/actions'
+import { rollbackProject } from '@/api/actions'
 
 const route = useRoute()
 const router = useRouter()
@@ -35,26 +35,8 @@ async function doDelete() {
   router.push('/')
 }
 
-/** v0.8.3: 生成第 1 章 (onboard 完成后) */
-const generating = ref(false)
-const genError = ref<string | null>(null)
-async function generateFirstChapter() {
-  if (generating.value) return
-  if (!confirm('🚀 开始生成第 1 章？预计耗时 30-60 秒。')) return
-  generating.value = true
-  genError.value = null
-  try {
-    await onboardingStep(projectId.value, '5', {})
-    await chaptersStore.loadList(projectId.value)
-    if (chaptersStore.count > 0) {
-      enterChapter(1)
-    }
-  } catch (e: any) {
-    genError.value = e.message || '生成失败'
-  } finally {
-    generating.value = false
-  }
-}
+// v0.6.2: generateFirstChapter 已删除（项目 onboard 全部走管家 Agent 对接）
+// 用户在首页对话中说「生成第 1 章」→ 管家 ReAct 调 onboarding_generate_chapter 工具
 
 function enterChapter(n: number) {
   router.push({ name: 'reader', params: { projectId: projectId.value, chapterNum: n } })
@@ -92,14 +74,12 @@ onMounted(load)
           <dt>调色板</dt>
           <dd>{{ projectsStore.current?.palette || '-' }}</dd>
         </dl>
-        <!-- v0.8.3: 无章节时显示生成第 1 章入口 (onboard 完成但未生成) -->
-        <button v-if="chaptersStore.count === 0" class="btn btn-primary" :disabled="generating" @click="generateFirstChapter">
-          {{ generating ? '生成中...' : '✨ 生成第 1 章' }}
-        </button>
-        <button v-else class="btn btn-primary" @click="enterChapter(chaptersStore.count || 1)">
+        <!-- v0.6.2: 生成第 1 章入口删除（项目 onboard 全部走管家 Agent 对接） -->
+        <!-- 用户在首页对话中说「生成第 1 章」即可 -->
+        <button v-if="chaptersStore.count > 0" class="btn btn-primary" @click="enterChapter(chaptersStore.count || 1)">
           📖 进入阅读
         </button>
-        <p v-if="genError" class="error-text">{{ genError }}</p>
+        <p v-else class="hint-text">还未生成章节，请回首页对话中说「生成第 1 章」</p>
       </section>
 
       <section class="chapters-panel">

@@ -14,7 +14,6 @@ import mainImage from '@/assets/首页-主图.png'
         </RouterLink>
         <div class="nav-links">
           <RouterLink to="/">首页</RouterLink>
-          <RouterLink to="/onboarding">新世界</RouterLink>
           <RouterLink to="/worlds">世界</RouterLink>
         </div>
       </div>

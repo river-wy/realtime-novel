@@ -86,11 +86,6 @@ function goToProject(projectId: string) {
         @require-confirm="(action) => console.log('需要确认:', action)"
       />
     </main>
-
-    <!-- 底部兜底入口（按钮式 Onboarding，按 18:02 拍板保留） -->
-    <footer class="home-footer">
-      <a @click.prevent="router.push('/onboarding')">老版本表单入口 →</a>
-    </footer>
   </div>
 </template>
 

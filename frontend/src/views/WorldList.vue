@@ -15,13 +15,11 @@ onMounted(async () => {
 })
 
 function goToProject(p: api.ProjectInfo) {
+  // v0.6.2: 项目 onboard 全部走管家 Agent 对接，不判断 onboarding_step
   if (p.chapter_count > 0) {
     router.push({ name: 'reader', params: { projectId: p.id, chapterNum: 1 } })
-  } else if (p.onboarding_step === 4) {
-    router.push({ name: 'world', params: { projectId: p.id } })
-  } else if (p.onboarding_step && p.onboarding_step >= 1) {
-    router.push({ name: 'onboarding', query: { projectId: p.id, step: String(p.onboarding_step) } })
   } else {
+    // 未生成章节的项目也跳到世界页（对话或生成入口在 World 页）
     router.push({ name: 'world', params: { projectId: p.id } })
   }
 }
@@ -68,11 +66,10 @@ function explorationLabel(level: string): string {
 function statusIcon(status: string): string {
   return { not_started: '⚪', in_progress: '🟡', completed: '🟢' }[status] || '⚪'
 }
-function statusLabel(status: string, step: number | null): string {
+function statusLabel(status: string): string {
+  // v0.6.2: 简化状态标签（项目 onboard 由管家 Agent 对接，不区分引导中/大纲中）
   if (status === 'completed') return '已完成'
-  if (status === 'in_progress' && step) {
-    return step >= 3 ? `大纲中 (${step}/5)` : `引导中 (${step}/5)`
-  }
+  if (status === 'in_progress') return '进行中'
   return '未启动'
 }
 </script>
@@ -88,7 +85,7 @@ function statusLabel(status: string, step: number | null): string {
     <div v-if="projectsStore.loading" class="loading">加载中...</div>
     <div v-else-if="projectsStore.projects.length === 0" class="empty">
       <p>还没有世界</p>
-      <button class="btn btn-primary" @click="router.push({ name: 'onboarding' })">启动第一个世界</button>
+      <button class="btn btn-primary" @click="router.push({ name: 'home' })">去首页对话启动</button>
     </div>
     <div v-else class="project-grid">
       <article
@@ -124,7 +121,7 @@ function statusLabel(status: string, step: number | null): string {
                 :class="`status-${p.status || 'not_started'}`"
               >
                 {{ statusIcon(p.status || 'not_started') }}
-                {{ statusLabel(p.status || 'not_started', p.onboarding_step) }}
+                {{ statusLabel(p.status || 'not_started') }}
               </span>
             </div>
             <div class="card-chapter-count">{{ p.chapter_count }} 章</div>

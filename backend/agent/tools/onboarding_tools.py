@@ -38,12 +38,20 @@ class OnboardingUserConfirmInput(BaseModel):
     project_id: str
     step: int = Field(..., ge=1, le=5)
     user_response: str = Field(..., description="用户对 step 的响应 (确认/修改/补充)")
+    # v0.6.2: Step 3/4 可选传 fields (管家 ReAct 装入设计后的字段); 为空则只记录 user_response
+    fields: Optional[dict] = Field(
+        default=None,
+        description="Step 3/4 管家设计的字段 (Step 3: story_core/characters/opening_scene, Step 4: main_arc/sub_plots/seeds/reader_feeling)",
+    )
 
 
 class OnboardingUserConfirmOutput(BaseModel):
     step: int
     recorded: bool
     next_step: Optional[int] = None
+    # v0.6.2: 附加信息 (Step 3/4 写 7 件后填)
+    artifacts_written: Optional[list[str]] = Field(default=None, description="Step 3/4 写入的 7 件列表")
+    step4_hook_emitted: Optional[bool] = Field(default=None, description="Step 4 后置 hook 是否 emit")
 
 
 class OnboardingGenerateChapterInput(BaseModel):
@@ -115,9 +123,21 @@ class OnboardingProposeStepTool(BaseTool):
 
 
 class OnboardingUserConfirmTool(BaseTool):
-    """Onboarding 用户确认"""
+    """Onboarding 用户确认 (v0.6.2 吸收 WS handler 责任)
+
+    v0.6.2 改造:
+    - Step 1/2: 只写 user_response 到 payload
+    - Step 3/4: 如果传 fields, 调 merge_payload_to_state + assemble_7_artifacts 写 7 件
+    - Step 4 完成后: emit 'onboarding.step4_confirmed' 事件 (hooks.py 监听)
+
+    设计意图: 管家 ReAct 调一次工具完成所有副作用, 工具是唯一副作用入口。
+    """
     name = "onboarding_user_confirm"
-    description = "记录用户对当前 step 的确认/修改, 并把 user_response 合并到 onboarding_state.payload, 自动推进到下一步"
+    description = (
+        "记录用户对当前 step 的确认/修改, 自动推进到下一步。"
+        "Step 3/4 传 fields 时还会调 assemble_7_artifacts 写 7 件, "
+        "Step 4 完成后会触发项目名+封面图生成后置钩子。"
+    )
     input_schema = OnboardingUserConfirmInput
     output_schema = OnboardingUserConfirmOutput
 
@@ -125,14 +145,61 @@ class OnboardingUserConfirmTool(BaseTool):
         try:
             from backend.services.onboarding_flow import OnboardingFlow
             flow = OnboardingFlow()
-            # step 字符串 (1-5)
             step_str = str(input.step)
-            # 调 flow.step() 写 user_response 到 payload
+
+            # 1. 始终写 user_response 到 payload (记录对话)
             await flow.step(input.project_id, step_str, {"user_response": input.user_response})
+
+            artifacts_written = None
+            step4_hook_emitted = None
+
+            # 2. Step 3/4: 写 7 件 + emit 后置事件
+            if input.step in (3, 4) and input.fields:
+                from backend.services.onboarding_artifacts import (
+                    assemble_7_artifacts,
+                    merge_payload_to_state,
+                    load_payload,
+                )
+                # 2a. 合并 fields 到 state_json.payload
+                merge_payload_to_state(input.project_id, input.step, input.fields)
+                # 2b. 拼装 7 件
+                payload_full = load_payload(input.project_id)
+                artifacts_written = assemble_7_artifacts(input.project_id, payload_full)
+                log.info(
+                    "onboarding_user_confirm: project_id=%s, step=%d, "
+                    "artifacts_written=%s",
+                    input.project_id, input.step, artifacts_written,
+                )
+
+                # 2c. Step 4 完成后 emit 后置事件 (项目名 + 封面图生成)
+                if input.step == 4:
+                    try:
+                        from backend.core.event_bus import event_bus
+                        await event_bus.emit(
+                            "onboarding.step4_confirmed",
+                            project_id=input.project_id,
+                            payload=payload_full,
+                            ws=None,  # 管家路径不传 ws, 后置任务异步生成后推 WS
+                        )
+                        step4_hook_emitted = True
+                        log.info(
+                            "onboarding_user_confirm: emit onboarding.step4_confirmed "
+                            "for project_id=%s",
+                            input.project_id,
+                        )
+                    except Exception as e:
+                        log.warning(
+                            "onboarding_user_confirm: step4 hook emit failed: %s",
+                            str(e),
+                        )
+                        step4_hook_emitted = False
+
             return OnboardingUserConfirmOutput(
                 step=input.step,
                 recorded=True,
                 next_step=input.step + 1 if input.step < 5 else None,
+                artifacts_written=artifacts_written,
+                step4_hook_emitted=step4_hook_emitted,
             )
         except Exception as e:
             log.error(f"onboarding_user_confirm 失败: {e}", exc_info=True)
