@@ -29,6 +29,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 from pydantic import BaseModel, Field
@@ -36,6 +37,7 @@ from typing import Optional, List, Any, Callable, Awaitable
 
 from backend.adapters.llm_adapter import get_llm_adapter
 from backend.adapters.types import LLMRequest, ModelRole
+from backend.agent.runtime.session_cache import truncate_tool_result
 from backend.agent.tools.base import BaseTool, ToolError
 from backend.agent.tools.registry import (
     get_tool_registry,
@@ -198,6 +200,8 @@ class AgentExecutor:
         project_id: Optional[str] = None,
         context: Optional[dict] = None,
         context_message: Optional[str] = None,
+        history: Optional[List[dict]] = None,
+        session_key: Optional[str] = None,
         max_iterations: int = 7,  # 18:02 拍板
     ) -> AgentOutput:
         """执行 Agent ReAct 推演 loop
@@ -209,6 +213,9 @@ class AgentExecutor:
             context: 额外上下文 dict（注入到 system_prompt 的 context_block）
             context_message: 预注入的上下文 user message（7 件基座 + 章节摘要等），
                 作为独立 user message 插入到 system 和 user_message 之间
+            history: cache miss 时由调用方提供的历史 messages（用于 rebuild）
+            session_key: cache key（"user_id:conv_id:agent_name"）；
+                传入时启用 session cache，hit 则复用 cache，miss 则用 history rebuild
             max_iterations: 最大循环轮次（18:02 拍板 = 7）
 
         Returns:
@@ -260,14 +267,65 @@ class AgentExecutor:
             context=context,
         )
 
-        # 3. 初始化 messages
-        messages: List[dict] = [
-            {"role": "system", "content": system_prompt},
-        ]
-        # v0.6.2: 预注入上下文（7 件基座 + 章节摘要）作为独立 user message
-        if context_message:
-            messages.append({"role": "user", "content": context_message})
-        messages.append({"role": "user", "content": user_message})
+        # 3. 初始化 messages（cache hit / miss 两条路径）
+        messages: List[dict]
+        session_cache_obj = None
+        messages_base_len = 0  # 本轮开始前 messages 的长度，用于计算 delta
+
+        if session_key:
+            from backend.agent.runtime.session_cache import get_session_cache_manager
+            cache_mgr = get_session_cache_manager()
+
+            # 解析 session_key → user_id / conv_id / agent_name
+            _parts = session_key.split(":")
+            _user_id = _parts[0] if len(_parts) > 0 else "default"
+            _conv_id = _parts[1] if len(_parts) > 1 else ""
+
+            session_cache_obj = cache_mgr.get(
+                user_id=_user_id,
+                conversation_id=_conv_id,
+                agent_name=agent.agent_name,
+                sys_prompt=system_prompt,
+            )
+
+            if session_cache_obj is not None:
+                # ── cache HIT：直接复用，只追加新 user_message ──
+                self.log.info(
+                    "AgentExecutor[%s]: session cache HIT，key=%s，cached_msgs=%d",
+                    agent.agent_name, session_key, len(session_cache_obj.messages),
+                )
+                messages = list(session_cache_obj.messages)  # 浅拷贝，防止污染 cache
+            else:
+                # ── cache MISS：用 history rebuild ──
+                self.log.info(
+                    "AgentExecutor[%s]: session cache MISS，rebuild，key=%s",
+                    agent.agent_name, session_key,
+                )
+                initial_messages: List[dict] = [{"role": "system", "content": system_prompt}]
+                if history:
+                    initial_messages.extend(history)
+                session_cache_obj = cache_mgr.create(
+                    user_id=_user_id,
+                    conversation_id=_conv_id,
+                    agent_name=agent.agent_name,
+                    sys_prompt=system_prompt,
+                    initial_messages=initial_messages,
+                )
+                messages = list(session_cache_obj.messages)
+
+            # delta 从这里开始计算（context_message 是每轮临时注入，不持久化进 cache）
+            messages_base_len = len(messages)
+            if context_message:
+                messages.append({"role": "user", "content": context_message})
+            messages.append({"role": "user", "content": user_message})
+        else:
+            # ── 无 session_key：原有逻辑（文笔家 / 架构师） ──
+            messages = [{"role": "system", "content": system_prompt}]
+            if history:
+                messages.extend(history)
+            if context_message:
+                messages.append({"role": "user", "content": context_message})
+            messages.append({"role": "user", "content": user_message})
 
         # 4. ReAct loop
         tool_calls_history = []
@@ -456,12 +514,13 @@ class AgentExecutor:
                         tool_result = {"error": str(e)}
                         status = "exception"
 
-                    # 把 tool 结果拼回 messages
+                    # 把 tool 结果拼回 messages（超长时截断 content）
                     tool_msg = make_tool_message(
                         tool_call_id=tool_call_id,
                         tool_name=tool_name,
                         result=tool_result,
                     )
+                    tool_msg["content"] = truncate_tool_result(tool_msg.get("content", ""))
                     messages.append(tool_msg)
                     tool_calls_history.append({
                         "iteration": iteration,
@@ -477,52 +536,63 @@ class AgentExecutor:
             else:
                 # ── LLM 输出 final_response，退出 ──
                 last_response_text = llm_response.content or ""
-                duration_ms = int((time.time() - start) * 1000)
-                self.log.info(
-                    "AgentExecutor[%s]: final_response at iteration=%d, "
-                    "content_len=%d, tool_calls_total=%d, "
-                    "tokens(in=%d, out=%d), duration=%dms",
-                    agent.agent_name, iteration,
-                    len(last_response_text), len(tool_calls_history),
-                    total_input_tokens, total_output_tokens, duration_ms,
-                )
-                raw_output = AgentOutput(
-                    final_response=last_response_text,
-                    tool_calls_history=tool_calls_history,
-                    iterations=iteration,
-                    input_tokens=total_input_tokens,
-                    output_tokens=total_output_tokens,
-                    duration_ms=duration_ms,
-                )
-                # ── 后置节点 ──────────────────────────────
-                mw_context = {
-                    "agent_name": agent.agent_name,
-                    "project_id": project_id,
-                    **(context or {}),
-                }
-                return await self._run_middlewares(
-                    agent_name=agent.agent_name,
-                    output=raw_output,
-                    context=mw_context,
-                )
+                # 把 final_response 追加到 messages（供 cache 存储）
+                messages.append({"role": "assistant", "content": last_response_text})
+                break
 
-        # 达到 max_iterations 仍未退出
         duration_ms = int((time.time() - start) * 1000)
-        self.log.warning(
-            "AgentExecutor[%s]: 达到 max_iterations=%d 仍未输出 final_response, "
-            "tool_calls_total=%d, duration=%dms",
-            agent.agent_name, max_iterations,
-            len(tool_calls_history), duration_ms,
-        )
-        raw_output = AgentOutput(
-            final_response=last_response_text or "（达到最大循环轮次，未输出最终回复）",
-            tool_calls_history=tool_calls_history,
-            iterations=max_iterations,
-            input_tokens=total_input_tokens,
-            output_tokens=total_output_tokens,
-            duration_ms=duration_ms,
-            error=last_error or "max_iterations_reached",
-        )
+
+        # ── 完成后写回 session cache ───────────────────────────────────────────
+        if session_cache_obj is not None and messages_base_len > 0:
+            delta = messages[messages_base_len:]
+            if delta:
+                session_cache_obj.append_delta(delta)
+                self.log.info(
+                    "AgentExecutor[%s]: session cache 写回 delta=%d，total_cached=%d，key=%s",
+                    agent.agent_name, len(delta),
+                    len(session_cache_obj.messages), session_key,
+                )
+                # 超长时异步触发 summary 压缩（不阻塞返回）
+                if session_cache_obj.needs_summary():
+                    from backend.agent.runtime.session_cache import get_session_cache_manager
+                    asyncio.ensure_future(
+                        get_session_cache_manager().maybe_compress(session_cache_obj, self.llm)
+                    )
+
+        if last_error or (not last_response_text and not tool_calls_history):
+            self.log.warning(
+                "AgentExecutor[%s]: 达到 max_iterations=%d 或发生错误，"
+                "tool_calls_total=%d, duration=%dms",
+                agent.agent_name, max_iterations,
+                len(tool_calls_history), duration_ms,
+            )
+            raw_output = AgentOutput(
+                final_response=last_response_text or "（达到最大循环轮次，未输出最终回复）",
+                tool_calls_history=tool_calls_history,
+                iterations=max_iterations,
+                input_tokens=total_input_tokens,
+                output_tokens=total_output_tokens,
+                duration_ms=duration_ms,
+                error=last_error or "max_iterations_reached",
+            )
+        else:
+            self.log.info(
+                "AgentExecutor[%s]: final_response，"
+                "content_len=%d, tool_calls_total=%d, "
+                "tokens(in=%d, out=%d), duration=%dms",
+                agent.agent_name,
+                len(last_response_text), len(tool_calls_history),
+                total_input_tokens, total_output_tokens, duration_ms,
+            )
+            raw_output = AgentOutput(
+                final_response=last_response_text,
+                tool_calls_history=tool_calls_history,
+                iterations=len(tool_calls_history) + 1,
+                input_tokens=total_input_tokens,
+                output_tokens=total_output_tokens,
+                duration_ms=duration_ms,
+            )
+
         mw_context = {
             "agent_name": agent.agent_name,
             "project_id": project_id,

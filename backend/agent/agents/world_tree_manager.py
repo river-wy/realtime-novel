@@ -81,6 +81,50 @@ class WorldTreeDiff(BaseModel):
     tool_calls_trace: List[dict] = Field(default_factory=list)
 
 
+# ============ Onboarding 初始化专用提示 ============
+
+WORLD_TREE_INIT_PROMPT = """你是「世界树管理」，当前任务是为一部新小说初始化 7 件基座。
+
+【任务】
+用户已通过对话确认了以下 6 维基础信息，你需要基于这些信息设计完整的 7 件基座并逐一写入 DB。
+
+【7 件基座职责分配】
+1. world_tree     ← 从「世界树基础」+「故事核心」中提取时间线/地理/核心规则
+2. genre_resonance ← 从「世界树基础」（题材/风格/基调）+ 「笔风标签」中提取
+3. main_plot      ← 从「主线与大纲」（主线节点）中构建 arc_phrase + beats
+4. sub_plot       ← 从「主线与大纲」（支线）中构建 threads
+5. character_card ← 从「主要角色」中构建 characters 列表（明确 protagonist/antagonist/deuteragonist）
+6. seed_table     ← 从「主线与大纲」（伏笔/钩子）中构建 seeds（每条必须有 trigger + payoff）
+7. style_pack     ← 从「笔风标签」（叙述风格）推断 style_pack_id，通过 adjust_style 工具写入
+
+【工作流】
+1. 直接基于下方用户确认的 6 维信息进行设计（无需调 load_project，项目刚创建基座为空）
+2. 逐一调用 edit_artifact 写入每一件基座（7 件都要写）
+3. 如果叙述风格指向具体笔风，调 adjust_style 写入 style_pack_id
+4. 所有基座写完后，输出 final_response（JSON 格式 WorldTreeDiff，intent="initialize"）
+
+【关键约束】
+- 严格保留用户原文用词（人名/地名/专有名词不能改写）
+- 用户没说的地方可以合理补全，但不能与用户设定矛盾
+- 7 件必须内部一致（character_card 的角色与 world_tree 的世界规则不矛盾）
+- seed_table 每条种子必须有 trigger（触发条件）和 payoff（回收点），不能只是一句话描述
+- main_plot 的 beats 要覆盖用户提供的主线节点，节点格式统一
+
+【输出格式】
+输出合法 JSON（无 markdown 包裹）：
+{
+  "intent": "initialize",
+  "summary": "一句话描述初始化结果",
+  "base_updates": [{"artifact": "world_tree", "field": "...", "old_value": null, "new_value": "...", "reason": "..."}],
+  "plot_adjustments": [],
+  "new_seeds": [...],
+  "consistency": {"status": "PASS", "conflicts": [], "warnings": []},
+  "risk_level": "low",
+  "requires_double_confirm": false
+}
+"""
+
+
 # ============ 系统提示 ============
 
 WORLD_TREE_MANAGER_SYSTEM_PROMPT = """你是「世界树管理」。
@@ -153,6 +197,120 @@ class WorldTreeManager:
 
     def __init__(self, executor: Optional[AgentExecutor] = None):
         self.executor = executor or get_agent_executor()
+
+    async def initialize_world_tree(
+        self,
+        project_id: str,
+        onboarding_payload: dict,
+        max_iterations: int = 10,
+    ) -> WorldTreeDiff:
+        """Onboarding 专用：基于用户确认的 6 维信息初始化 7 件基座
+
+        调用方：OnboardingProposeStepTool（step=3/4 时替代 OnboardingController.consult）
+        本方法合并原 step 3+4 的推演，一次性完成所有 7 件基座的设计+落盘。
+
+        Args:
+            project_id: 项目 ID（create_project 已创建，基座为空）
+            onboarding_payload: 管家第一阶段收集到的 6 维信息，结构如下：
+                {
+                    "project_name": str,
+                    "genres": list[str],          # 题材
+                    "styles": list[str],           # 风格
+                    "tone": str,                   # 基调
+                    "story_core": str,             # 故事核心
+                    "opening_scene": str,          # 开篇场景
+                    "characters": str,             # 主要角色（每行一个，格式：名字-身份-特质）
+                    "main_arc": str,               # 主线节点（每行一个）
+                    "sub_plots": str,              # 支线
+                    "seeds": str,                  # 伏笔/钩子
+                    "style_description": str,      # 笔风描述
+                    "novel_tags": list[str],        # 小说类型标签
+                    "palette": str,                # UI 色调
+                }
+            max_iterations: ReAct loop 最大迭代数
+
+        Returns:
+            WorldTreeDiff（intent="initialize"）
+        """
+        self.log.info(
+            "WorldTreeManager.initialize_world_tree START: project_id=%s, "
+            "payload_keys=%s",
+            project_id, list(onboarding_payload.keys()),
+        )
+
+        # 拼装 user_message：把 6 维信息结构化成自然语言，让 WTM 的 LLM 理解
+        def _fmt(v) -> str:
+            if isinstance(v, list):
+                return "、".join(str(x) for x in v) if v else "（未指定）"
+            return str(v) if v else "（未指定）"
+
+        user_message = f"""请基于以下用户确认的完整小说设定，初始化 7 件基座并逐一写入 DB。
+
+【项目名称】{_fmt(onboarding_payload.get('project_name'))}
+
+【世界树基础】
+- 题材：{_fmt(onboarding_payload.get('genres'))}
+- 风格：{_fmt(onboarding_payload.get('styles'))}
+- 基调：{_fmt(onboarding_payload.get('tone'))}
+
+【故事核心】
+{_fmt(onboarding_payload.get('story_core'))}
+
+【开篇场景】
+{_fmt(onboarding_payload.get('opening_scene'))}
+
+【主要角色】（每行：名字 - 身份/角色 - 核心特质）
+{_fmt(onboarding_payload.get('characters'))}
+
+【主线与大纲】
+- 主线节点：
+{_fmt(onboarding_payload.get('main_arc'))}
+- 关键支线：{_fmt(onboarding_payload.get('sub_plots'))}
+- 主要伏笔/钩子：{_fmt(onboarding_payload.get('seeds'))}
+
+【笔风与标签】
+- 叙述风格：{_fmt(onboarding_payload.get('style_description'))}
+- 小说类型标签：{_fmt(onboarding_payload.get('novel_tags'))}
+- UI 色调：{_fmt(onboarding_payload.get('palette'))}
+
+请按【7 件基座职责分配】逐一调用 edit_artifact 完成写入，然后输出 WorldTreeDiff JSON。"""
+
+        cfg = AgentConfig(
+            agent_name="world_tree_manager",
+            system_prompt=WORLD_TREE_INIT_PROMPT,
+        )
+
+        executor_output = await self.executor.execute(
+            agent=cfg,
+            user_message=user_message,
+            project_id=project_id,
+            context_message=None,   # 新建项目，基座为空，不需要注入 context
+            max_iterations=max_iterations,
+        )
+
+        self.log.info(
+            "WorldTreeManager.initialize_world_tree EXECUTOR DONE: project_id=%s, "
+            "iterations=%d, tool_calls=%d, error=%s",
+            project_id, executor_output.iterations,
+            len(executor_output.tool_calls_history), executor_output.error,
+        )
+
+        diff = self._parse_diff(executor_output, intent="initialize")
+        diff.iterations = executor_output.iterations
+        diff.tool_calls_count = len(executor_output.tool_calls_history)
+        diff.tool_calls_trace = executor_output.tool_calls_history
+
+        # Onboarding 初始化不做一致性检查（项目刚创建，没有历史状态可对比）
+        # 但记录 summary 供上层工具透传
+        self.log.info(
+            "WorldTreeManager.initialize_world_tree DONE: project_id=%s, "
+            "base_updates=%d, new_seeds=%d, summary=%s",
+            project_id,
+            len(diff.base_updates), len(diff.new_seeds),
+            diff.summary[:80],
+        )
+
+        return diff
 
     async def analyze_intervention(
         self,

@@ -1,19 +1,9 @@
-"""onboarding_controller — Onboarding 5 步流程统一控制器（v0.6.1）
+"""onboarding_controller — Onboarding Step 3/4 LLM 推演控制器
 
-v0.6.1 重构（合并原 OnboardingAgent 能力）:
-- 旧 OnboardingAgent.consult() 的全部能力吸收到 controller
-- HTTP 5 步端点 + WS Step 3-4 推演都用这一套 controller
-- 不再有独立 OnboardingAgent 类
-
-职责（spec.md §3.1.1）:
-1. HTTP POST /api/projects/{id}/onboarding: 5 步串行
-   - Step 1-2: 按钮交互（题材/风格/基调 + palette），状态由 OnboardingFlow 管
-   - Step 3-4: LLM 推演（多轮对话）
-   - Step 5: 调 NovelWriter 生成第 1 章
-2. WS handler: handle_onboarding_request_proposal / handle_onboarding_confirm
-   都通过 controller 走
-
-对应 spec.md §3.1.1
+职责：
+- Step 3/4 调 LLM 生成字段建议（consult 方法）
+- 管家 ReAct loop 通过 onboarding_propose_step 工具调用
+- 包含 JSON 解析（三层 fallback）、Pydantic 校验、重新提议检测
 """
 from __future__ import annotations
 
@@ -59,7 +49,6 @@ class Step4Fields(BaseModel):
     main_arc: str = Field(..., description="主线节点（多行，每行一个节点）")
     sub_plots: str = Field(default="", description="支线故事")
     seeds: str = Field(default="", description="伏笔/钩子")
-    reader_feeling: str = Field(default="", description="读者读完的情绪基调")
 
 
 # ============ Onboarding 状态 ============

@@ -247,10 +247,10 @@ def _format_style_charter(style_charter: dict) -> str:
 def _format_main_plot(main_plot: dict) -> str:
     """压缩 main_plot 为字符串（文笔家用）
 
-    包含:
-    - arc_phrase (Step 3 story_core 故事一句话)
-    - beats (Step 4 main_arc 拆的节奏)
-    - metadata.story_core / main_arc / reader_feeling
+    包含：
+    - arc_phrase：Step 3 story_core 故事内核
+    - beats：Step 4 main_arc 拆出的节奏节点
+    - metadata.story_core / main_arc：完整文字（不只靠 arc_phrase + beats）
     """
     if not main_plot or not isinstance(main_plot, dict):
         return "（主线为空）"
@@ -280,11 +280,9 @@ def _format_main_plot(main_plot: dict) -> str:
             line += cr_str
             parts.append(line)
 
-    # v0.8.3: metadata 里保存了 Step 3 story_core / Step 4 main_arc / reader_feeling
-    # 给 LLM 看到全量信息 (不能只靠 arc_phrase + beats)
     metadata = main_plot.get('metadata') or {}
     if isinstance(metadata, dict):
-        for key, label in [('story_core', '故事内核'), ('main_arc', '主线节点'), ('reader_feeling', '读者情绪')]:
+        for key, label in [('story_core', '故事内核'), ('main_arc', '主线节点')]:
             v = metadata.get(key, '')
             if v and v not in (main_plot.get('arc_phrase', '') or ''):
                 parts.append(f"{label}: {v}")
@@ -438,30 +436,24 @@ async def load_chat_history(
     base_rounds: int = 7,
     session_rounds: int = 15,
 ) -> List[Dict[str, Any]]:
-    """v0.6.1: 管家 CHAT 路径 history 加载 (7+15 滑动窗口)
+    """管家 CHAT 路径 history 加载（7+15 滑动窗口）
 
-    设计:
-    - base_rounds: 来自历史已 invalidated 的 conv (取最近 1 个的最近 base_rounds 条)
-    - session_rounds: 来自当前 active conv (滑动窗口, 最多 session_rounds 条)
-    - 组合: base + session (base 在前是「历史基底」, session 在后是「本轮叠加」)
-    - 总数 ≤ 22 条 (7+15)
-
-    用途: 管家 ReAct loop 调 LLM 时作为 messages 的一部分
-
-    Args:
-        user_id: 用户 ID
-        base_rounds: 历史基底轮次 (默认 7)
-        session_rounds: 本轮叠加轮次 (默认 15)
+    设计：
+    - base_rounds：最近 1 个 invalidated conv 的最后 N 条（历史基底）
+    - session_rounds：当前 active conv 的最近 N 条（本轮叠加）
+    - 组合：base 在前，session 在后，总数 ≤ base_rounds + session_rounds
+    - 去掉 session 最后一条 user 消息（ws_manager 在调管家前已把 user_message 存入 DB，
+      executor 末尾会自己 append user_message，不能重复）
 
     Returns:
-        list[dict]: OpenAI 格式 messages (含 role/content)
+        list[dict]: OpenAI 格式 messages（含 role/content）
     """
     from backend.persistence.conversation_repository import ConversationRepository
 
     conv_repo = ConversationRepository()
     result: List[Dict[str, Any]] = []
 
-    # 1. 历史基底: 最近 1 个 invalidated conv
+    # 1. 历史基底：最近 1 个 invalidated conv
     try:
         invalid_list = await conv_repo.list_conversations(
             user_id=user_id, status="invalidated", limit=1
@@ -486,13 +478,17 @@ async def load_chat_history(
         import logging
         logging.warning(f"load_chat_history: base 加载失败: {e}", exc_info=True)
 
-    # 2. 本轮叠加: 当前 active conv (滑动窗口)
+    # 2. 本轮叠加：当前 active conv（滑动窗口）
     try:
         active = await conv_repo.get_active_conversation(user_id)
         if active:
             session_msgs = await conv_repo.get_messages(active.id, limit=session_rounds)
             # DESC → ASC 翻转
             session_msgs = list(reversed(session_msgs))
+            # ws_manager 在调 steward.receive() 前已将 user_message 存入 DB，
+            # 因此 session_msgs 最后一条是本次请求的 user 消息（executor 会自己 append，去掉避免重复）
+            if session_msgs and (session_msgs[-1].role.value if hasattr(session_msgs[-1].role, "value") else session_msgs[-1].role) == "user":
+                session_msgs = session_msgs[:-1]
             for m in session_msgs:
                 d = {
                     "id": m.id,
