@@ -144,19 +144,21 @@ class DelegateToAgentTool(BaseTool):
     async def _delegate_novel_writer(
         self, input: DelegateToAgentInput
     ) -> DelegateToAgentOutput:
-        """委托文笔家生成章节"""
-        from backend.agent.agents.novel_writer import get_novel_writer
+        """委托文笔家生成章节（v0.6.2：走委托入口）"""
+        from backend.agent.agents.novel_writer import delegate_chapter_generation
 
-        writer = get_novel_writer()
-        output = await writer.generate_chapter(
+        output = await delegate_chapter_generation(
             project_id=input.project_id,
-            user_message=input.task,
+            source="steward_react",
+            extra_context=input.task,
         )
 
         log.info(
             "DelegateToAgentTool._delegate_novel_writer DONE: "
-            "project_id=%s, content_len=%d, iterations=%d, error=%s",
+            "project_id=%s, chapter_num=%s, content_len=%d, "
+            "iterations=%d, error=%s",
             input.project_id,
+            output.chapter_num,
             len(output.chapter_content),
             output.iterations,
             output.error,
@@ -172,17 +174,21 @@ class DelegateToAgentTool(BaseTool):
                 error=output.error,
             )
 
-        preview = output.chapter_content[:150].replace("\n", " ")
+        preview = output.chapter_content[:150].replace("\n", " ") if output.chapter_content else ""
         return DelegateToAgentOutput(
             agent="novel_writer",
             success=True,
             result=(
-                f"已生成章节（{output.iterations} 轮推演，"
-                f"{output.tool_calls_count} 个工具调用）：{preview}..."
+                f"已生成第 {output.chapter_num} 章《{output.title}》"
+                f"（{output.iterations} 轮推演，"
+                f"{output.tool_calls_count} 个工具调用，{output.word_count} 字）：{preview}..."
             ),
             structured_data={
                 "chapter_content": output.chapter_content,
                 "chapter_summary": output.chapter_summary,
+                "chapter_num": output.chapter_num,
+                "title": output.title,
+                "word_count": output.word_count,
                 "iterations": output.iterations,
                 "tool_calls_count": output.tool_calls_count,
             },

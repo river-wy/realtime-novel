@@ -2,7 +2,8 @@
 
 v0.6 重构：从 v0_4_new_tools.py 拆出
 v0.4 原版是 stub（手写 3 段式 plot 模板）
-v0.6 改用 LLM 真实生成 next_chapter_plan（调 ChapterGeneratorSpecialist 的 LLM 链路）
+v0.6 改用 LLM 真实生成 next_chapter_plan
+v0.6.2 架构师 WorldTreeManager 在 ReAct loop 里调这个工具（属于架构师工具集）
 """
 from __future__ import annotations
 

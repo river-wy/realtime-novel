@@ -11,10 +11,6 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException, Path
 from pydantic import BaseModel
 
-from backend.agent.tools import get_tool
-from backend.agent.tools.schemas import (
-    GenerateChapterInput,
-)
 from backend.persistence import ConversationRepository, \
     MessageRole  # noqa: F401
 
@@ -130,39 +126,58 @@ async def generate_chapter(
     project_id: str,
     req: GenerateChapterRequest,
 ):
-    """生成下一章（60-100s 端到端）— 薄路由，只调 tool（v0.4.1 落库）"""
-    tool = get_tool("generate_chapter")
-    input_obj = GenerateChapterInput(
+    """生成下一章（60-100s 端到端）— 薄路由，委托给文笔家 Agent (v0.6.2)
+
+    内部调 delegate_chapter_generation()，走文笔家 ReAct loop，
+    最终调 generate_chapter / summarize_chapter 工具落盘。
+    """
+    from backend.agent.agents.novel_writer import delegate_chapter_generation
+
+    chapter_output = await delegate_chapter_generation(
         project_id=project_id,
         intervention=req.intervention,
         actor_feedback=req.actor_feedback,
         actor_character=req.actor_character,
+        source="page_button",
     )
-    from backend.agent.tools.base import ToolError
-    output = await tool.run(input_obj)
-    if isinstance(output, ToolError):
-        if output.code == "CONCURRENT_GENERATION":
-            raise HTTPException(409, output.message)
-        raise HTTPException(500, f"Chapter generation failed: {output.message}")
-    # v0.4.1 落库 (via ConversationRepository)
-    result_dict = output.model_dump() if hasattr(output, "model_dump") else {"_raw": str(output)}
+
+    if chapter_output.error:
+        # 文笔家 ReAct loop 返回错误（保留旧的 409 并发语义）
+        if "CONCURRENT_GENERATION" in chapter_output.error:
+            raise HTTPException(409, chapter_output.error)
+        raise HTTPException(500, f"Chapter generation failed: {chapter_output.error}")
+
+    # 落 conversation (via ConversationRepository)
     conv_repo = ConversationRepository()
     conv = await conv_repo.get_or_create_active_conversation("default")
     await conv_repo.add_message(
         conversation_id=conv.id,
         role=MessageRole.TOOL,
-        tool_results={"name": "generate_chapter",
-                      "args": {"project_id": project_id, "intervention": req.intervention,
-                               "actor_feedback": req.actor_feedback, "actor_character": req.actor_character},
-                      "result": result_dict},
+        tool_results={
+            "name": "delegate_chapter_generation",
+            "args": {
+                "project_id": project_id,
+                "intervention": req.intervention,
+                "actor_feedback": req.actor_feedback,
+                "actor_character": req.actor_character,
+                "source": "page_button",
+            },
+            "result": {
+                "chapter_num": chapter_output.chapter_num,
+                "title": chapter_output.title,
+                "word_count": chapter_output.word_count,
+                "summary": chapter_output.chapter_summary,
+            },
+        },
         project_id=project_id,
     )
+
     return GenerateChapterResponse(
-        chapter_num=output.num,
-        title=output.title,
-        content=output.content,
-        word_count=output.word_count,
-        generated_at=output.generated_at or datetime.now().isoformat(),
+        chapter_num=chapter_output.chapter_num or 0,
+        title=chapter_output.title or "",
+        content=chapter_output.chapter_content,
+        word_count=chapter_output.word_count or len(chapter_output.chapter_content),
+        generated_at=datetime.now().isoformat(),
         new_seeds_triggered=0,
-        summary=getattr(output, "summary", None),
+        summary=chapter_output.chapter_summary,
     )

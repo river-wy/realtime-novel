@@ -6,7 +6,7 @@
 - intervention_parser.py    剧情干预写入
 - cover_image_generator.py  封面图生成
 - onboarding_artifacts.py   7 件基座拼装（Step 4 落库用）
-- 章节生成 v0.6.1: 迁到 backend.agent.specialists.generate_chapter_via_specialist
+- 章节生成 v0.6.2: 委托文笔家 ReAct loop 走 generate_chapter / summarize_chapter 工具
 """
 from .intervention_parser import InterventionParser
 from .onboarding_artifacts import assemble_7_artifacts

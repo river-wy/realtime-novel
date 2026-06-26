@@ -84,16 +84,26 @@ class OnboardingFlow:
                 # 前端 catch 收到 e.message (含错误详情) 能正确显示
                 raise RuntimeError(f"7件生成失败: {str(e)}")
 
-        # Step 5 触发生成第 1 章
+        # Step 5 触发生成第 1 章（v0.6.2 重构：走委托入口，不调 specialist）
         if step == "5":
             try:
-                # v0.6.1: state_graph_stub 归一到 specialists.py
-                from backend.agent.specialists.specialists import generate_chapter_via_specialist
-                # 调 LLM 生成第 1 章（specialist 会从 DB 读 7 件）
-                chapter_result = await generate_chapter_via_specialist(
+                from backend.agent.agents.novel_writer import delegate_chapter_generation
+                # 委托文笔家 ReAct loop（source=onboarding_step5 与 source 标记同步）
+                chapter_output = await delegate_chapter_generation(
                     project_id=project_id,
                     intervention=None,  # 第一章无需干预
+                    source="onboarding_step5",
                 )
+                if chapter_output.error:
+                    raise RuntimeError(f"第1章生成失败: {chapter_output.error}")
+                # 转 chapter_output 为原 step 接口期望的 dict 格式
+                chapter_result = {
+                    "num": chapter_output.chapter_num,
+                    "title": chapter_output.title,
+                    "content": chapter_output.chapter_content,
+                    "word_count": chapter_output.word_count,
+                    "summary": chapter_output.chapter_summary,
+                }
                 return {
                     "step": step,
                     "next_step": None,

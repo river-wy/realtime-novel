@@ -1,5 +1,15 @@
 """Chapter 工具（generate_chapter / read_chapter）
 
+v0.6.2 重构：
+- generate_chapter: 只负责落盘（写文件 + 入 DB + 提取标题），不再调 LLM
+  - LLM 在文笔家 ReAct loop 里写正文
+  - 工具接收 content 字段 → 落盘
+- read_chapter: 读章节正文（不变）
+
+所有章节生成入口（页面按钮 / Onboarding Step 5 / 管家 ReAct）
+都通过 delegate_chapter_generation() 委托给文笔家 ReAct loop，
+最终调用 generate_chapter 工具落盘。
+
 对应 core.md §B.1
 """
 from __future__ import annotations
@@ -18,8 +28,20 @@ from backend.persistence import ChapterStatusRepository, ChapterState
 
 
 class GenerateChapterTool(BaseTool):
+    """v0.6.2 重构：纯落盘工具
+    
+    输入: LLM 在 ReAct loop 里写的章节正文 (content)
+    输出: 落盘结果 (ChapterContent 含 num/title/content/word_count/generated_at/summary)
+    
+    不再调 LLM, 不再调 specialist. 落盘逻辑:
+    1. 拿当前章节数 → next_num
+    2. 写文件 (data/projects/{id}/chapters/chapter_NNN.md)
+    3. 入 DB (ChapterRepository.create)
+    4. 提取标题 (# 第 N 章 行)
+    5. 返回结构化结果
+    """
     name = "generate_chapter"
-    description = "生成下一章（60-100s 端到端；同项目并发返回 409）"
+    description = "将文笔家写的章节正文落盘（写文件 + 入 DB + 提取标题）。同项目并发返回 409。"
     input_schema = GenerateChapterInput
     output_schema = ChapterContent
 
@@ -38,41 +60,65 @@ class GenerateChapterTool(BaseTool):
             )
         async with lock:
             try:
-                # 标 generating
+                # 1. 拿当前章节数 → next_num
                 proj = await self._pm.load(input.project_id)
                 existing = proj.get("chapters", []) if proj else []
                 next_chapter_num = len(existing) + 1
 
+                # 2. 标 generating
                 await self._status_repo.set_status(
                     input.project_id, next_chapter_num, ChapterState.GENERATING
                 )
                 if progress_callback:
                     await progress_callback({"step": "generating", "percentage": 10})
 
-                # v0.4 简化版：不调真实 v0.3 ChapterGenerator（避免依赖 WorldTree/Project 复杂初始化）
-                # 直接生成 placeholder 章节（Phase 4 接入真实 v0.3 时替换）
-                # v0.6.1: state_graph_stub 归一到 specialists.py
-                from backend.agent.specialists.specialists import generate_chapter_via_specialist
-                chapter = await generate_chapter_via_specialist(
+                # 3. 提取标题（首行 # 开头）
+                chapter_content = input.content
+                chapter_title = f"第 {next_chapter_num} 章"
+                for line in chapter_content.split("\n"):
+                    line = line.strip()
+                    if line.startswith("# "):
+                        chapter_title = line[2:].strip()
+                        break
+
+                # 4. 写文件
+                from backend.config.config_loader import PROJECT_ROOT
+                from backend.persistence import ChapterRepository
+                
+                chapters_dir = PROJECT_ROOT / f"data/projects/{input.project_id}/chapters"
+                chapters_dir.mkdir(parents=True, exist_ok=True)
+                chapter_path = chapters_dir / f"chapter_{next_chapter_num:03d}.md"
+                chapter_path.write_text(chapter_content, encoding="utf-8")
+
+                # 5. 入 DB
+                chap_repo = ChapterRepository()
+                chap_repo.create(
                     project_id=input.project_id,
+                    chapter_num=next_chapter_num,
+                    file_path=str(chapter_path),
+                    title=chapter_title,
+                    content_text=None,
+                    word_count=len(chapter_content),
                     intervention=input.intervention,
                     actor_feedback=input.actor_feedback,
                     actor_character=input.actor_character,
+                    summary=None,  # 由文笔家在 ReAct loop 里调 summarize_chapter 工具填
+                )
+
+                # 6. 标 done
+                await self._status_repo.set_status(
+                    input.project_id, next_chapter_num, ChapterState.DONE
                 )
                 if progress_callback:
                     await progress_callback({"step": "done", "percentage": 100})
 
-                # 标 done
-                await self._status_repo.set_status(
-                    input.project_id, next_chapter_num, ChapterState.DONE
-                )
                 return ChapterContent(
                     num=next_chapter_num,
-                    title=chapter.get("title", f"第 {next_chapter_num} 章"),
-                    content=chapter.get("content", ""),
-                    word_count=len(chapter.get("content", "")),
+                    title=chapter_title,
+                    content=chapter_content,
+                    word_count=len(chapter_content),
                     generated_at=datetime.now().isoformat(),
-                    summary=chapter.get("summary"),  # v0.5 新增
+                    summary=None,  # 由文笔家在 ReAct loop 里调 summarize_chapter 工具填
                 )
             except Exception as e:
                 try:

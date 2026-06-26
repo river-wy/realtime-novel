@@ -45,7 +45,13 @@ class ProjectDetail(BaseModel):
 # ============ Chapter 工具 ============
 
 class GenerateChapterInput(BaseModel):
+    """v0.6.2 重构：LLM 在 ReAct loop 里写正文，工具只负责落盘
+    
+    - content: LLM 写的章节正文（3000-4500 字）
+    - intervention/actor_feedback/actor_character: 用户干预信息（可选，写入 DB）
+    """
     project_id: str = Field(..., min_length=1)
+    content: str = Field(..., min_length=100, description="章节正文（LLM 写的 3000-4500 字）")
     intervention: Optional[str] = None
     actor_feedback: Optional[str] = None
     actor_character: Optional[str] = None
@@ -63,6 +69,29 @@ class ChapterContent(BaseModel):
     word_count: int
     generated_at: Optional[str] = None
     summary: Optional[str] = None  # v0.5 新增：1 句话 summary
+
+
+# ============ v0.6.2: 章节总结工具（文笔家 ReAct 用）============
+
+class SummarizeChapterInput(BaseModel):
+    """章节总结工具输入
+    
+    - chapter_num: 章节号（写入日志用，可选）
+    - content: 章节正文（>= 100 字）
+    """
+    project_id: str = Field(..., min_length=1)
+    chapter_num: Optional[int] = Field(default=None, ge=1, description="章节号（日志用）")
+    content: str = Field(..., min_length=100, description="章节正文")
+
+
+class SummarizeChapterOutput(BaseModel):
+    """章节总结工具输出
+    
+    - summary: 1 句话总结（~50-100 字）
+    - method: 解析方式（sentinel / fallback_truncate / llm_fallback）
+    """
+    summary: str = Field(..., description="1 句话总结（~50-100 字）")
+    method: str = Field(default="sentinel", description="sentinel / fallback_truncate / llm_fallback")
 
 
 # ============ Base Edit 工具（7 件基座）============

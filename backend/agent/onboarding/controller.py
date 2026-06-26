@@ -332,7 +332,7 @@ class OnboardingController:
             build_messages_for_onboarding_step3,
             build_messages_for_onboarding_step4,
         )
-        from backend.agent.specialists.specialists import get_llm_params_for_project
+        from backend.agent.specialists.exploration import get_llm_params_for_project
 
         if step == 3:
             messages = build_messages_for_onboarding_step3(

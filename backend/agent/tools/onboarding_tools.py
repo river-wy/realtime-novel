@@ -140,24 +140,31 @@ class OnboardingUserConfirmTool(BaseTool):
 
 
 class OnboardingGenerateChapterTool(BaseTool):
-    """Onboarding Step 5 生成第 1 章"""
+    """Onboarding Step 5 生成第 1 章（v0.6.2 委托文笔家 ReAct）"""
     name = "onboarding_generate_chapter"
-    description = "Step 5: 调 specialist 生成第 1 章 (60-100s, 真 LLM 调用)"
+    description = "Step 5: 委托文笔家生成第 1 章（60-100s，真 LLM 调用，ReAct loop 调 generate_chapter / summarize_chapter 工具）"
     input_schema = OnboardingGenerateChapterInput
     output_schema = OnboardingGenerateChapterOutput
 
     async def run(self, input: OnboardingGenerateChapterInput, progress_callback=None) -> OnboardingGenerateChapterOutput:
         try:
-            from backend.agent.specialists.specialists import generate_chapter_via_specialist
+            from backend.agent.agents.novel_writer import delegate_chapter_generation
             from backend.persistence import ProjectRepository
 
-            chapter = await generate_chapter_via_specialist(project_id=input.project_id)
+            chapter_output = await delegate_chapter_generation(
+                project_id=input.project_id,
+                intervention=None,
+                source="onboarding_step5",
+            )
+            if chapter_output.error:
+                return ToolError(code="GENERATE_FAILED", message=chapter_output.error)
+
             project = ProjectRepository().get(input.project_id)
             return OnboardingGenerateChapterOutput(
-                chapter_num=chapter.get("num", 0),
-                title=chapter.get("title", ""),
-                word_count=chapter.get("word_count", 0),
-                summary=chapter.get("summary", ""),
+                chapter_num=chapter_output.chapter_num or 0,
+                title=chapter_output.title or "",
+                word_count=chapter_output.word_count or len(chapter_output.chapter_content),
+                summary=chapter_output.chapter_summary or "",
                 project_name=project.name if project else "",
             )
         except Exception as e:
