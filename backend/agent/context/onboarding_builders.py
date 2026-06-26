@@ -11,13 +11,8 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 
 from backend.agent.context._helpers import (
-    _load_project_data,
     _load_project_history,
-    _format_style_charter,
-    _format_world_tree_compact,
-    _row_to_message,
 )
-from backend.persistence import ConversationRepository
 
 
 # ============ Onboard 阶段 messages 拼装 ============
@@ -31,7 +26,7 @@ def build_messages_for_onboarding_step3(
     """ 故事引擎 Agent (Step 3) 的 messages
 
     与 reading 阶段不同: 不需要 7 件全件 (Step 3 还没完成),
-    只拼: world_tree + style_charter + genre_resonance (Step 1 已有)
+    只拼: world_tree + genre_resonance (Step 1 已有)
          + Step 1-2 已有数据 (genres/styles/tone/palette)
 
     结构:
@@ -79,7 +74,7 @@ def build_messages_for_onboarding_step4(
 
     与 Step 3 不同: 此时 Step 3 已确认, 需要拼:
     - Step 1-2 已有数据
-    - Step 3 已写入的 7 件 (style_charter / main_plot / character_card 等) — 从 DB 读
+    - Step 3 已写入的基座 (main_plot / character_card 等) — 从 DB 读
     - Step 4 当前 user 输入
     - Step 3/4 多轮对话 history
     """
@@ -112,7 +107,6 @@ def build_messages_for_onboarding_step4(
 ## Step 3 已写入的 7 件 (Step 3 确认后落库)
 - story_core: {artifacts.get("world_tree", {}).get("core_premise", "") or artifacts.get("world_tree", {}).get("story_core", "") or "（未填）"}
 - main_plot 主线: {artifacts.get("main_plot", {}).get("arc_phrase", "") or "（未填）"}
-- style_charter notes: {(artifacts.get("style_charter", {}).get("notes", []) or ["（未填）"])[-3:] if artifacts.get("style_charter", {}).get("notes") else "（未填）"}
 - 人物 ({len(artifacts.get("character_card", {}).get("characters", []))} 个): {[c.get("name", "") for c in artifacts.get("character_card", {}).get("characters", [])][:5]}
 """
         messages.append({"role": "system", "content": data_block})

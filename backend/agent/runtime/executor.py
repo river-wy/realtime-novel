@@ -197,6 +197,7 @@ class AgentExecutor:
         user_message: str,
         project_id: Optional[str] = None,
         context: Optional[dict] = None,
+        context_message: Optional[str] = None,
         max_iterations: int = 7,  # 18:02 拍板
     ) -> AgentOutput:
         """执行 Agent ReAct 推演 loop
@@ -206,6 +207,8 @@ class AgentExecutor:
             user_message: 用户消息（首轮 user 消息）
             project_id: 项目 ID（注入到 context_block）
             context: 额外上下文 dict（注入到 system_prompt 的 context_block）
+            context_message: 预注入的上下文 user message（7 件基座 + 章节摘要等），
+                作为独立 user message 插入到 system 和 user_message 之间
             max_iterations: 最大循环轮次（18:02 拍板 = 7）
 
         Returns:
@@ -260,8 +263,11 @@ class AgentExecutor:
         # 3. 初始化 messages
         messages: List[dict] = [
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_message},
         ]
+        # v0.6.2: 预注入上下文（7 件基座 + 章节摘要）作为独立 user message
+        if context_message:
+            messages.append({"role": "user", "content": context_message})
+        messages.append({"role": "user", "content": user_message})
 
         # 4. ReAct loop
         tool_calls_history = []

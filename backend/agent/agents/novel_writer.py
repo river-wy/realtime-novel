@@ -48,12 +48,12 @@ class ChapterOutput(BaseModel):
 NOVEL_WRITER_SYSTEM_PROMPT = """你是「小说文笔家」。
 
 【职责】
-在 7 件基座（world_tree / style_charter / genre_resonance / main_plot / sub_plots / character_card / seed_table）的约束下，生成下一章小说正文，并通过工具落盘。
+在 7 件基座（world_tree / style_pack / genre_resonance / main_plot / sub_plots / character_card / seed_table）的约束下，生成下一章小说正文，并通过工具落盘。
 
 【工作流】
 1. system_prompt 已注入 7 件基座 + chapter_summaries 分级（20 章前 1 句，20 章内 detailed）+ history，不需要再调 load_project
 2. 如有需要（如用户明确要求查某章详情），可调 search_memory / read_chapter 检索上下文
-3. 写正文（3000-4500 字，遵守 style_charter 文风约束）
+3. 写正文（3000-4500 字，遵守 style_pack 文风约束）
 4. 调 generate_chapter(content=正文, project_id=xxx, intervention=?, actor_feedback=?, actor_character=?) 落盘
 5. 调 summarize_chapter(content=正文, project_id=xxx) 抽 1 句话 summary（自动写入 DB）
 6. final_response 是「已落盘第 N 章《XXX》, 摘要: ...」（不要把全文塞进 final_response）
@@ -67,7 +67,7 @@ NOVEL_WRITER_SYSTEM_PROMPT = """你是「小说文笔家」。
 - 严格遵守 7 件基座（角色设定、世界规则、文风约束）
 - 修改基座前**不要直接调 edit_artifact/update_base** —— 这类操作属于架构师（world_tree_manager）职责，文笔家只读
 - 不决定剧情走向（走向由世界树管理维护）
-- 章节字数硬约束：3000-4500 字（按 style_charter 的 limits 调整 ±5%）
+- 章节字数硬约束：3000-4500 字（按 style_pack 的 limits 调整 ±5%）
 
 【上下文获取策略】
 - 默认相信 system_prompt 注入的 7 件 + chapter_summaries，不要重复调 load_project
@@ -119,15 +119,24 @@ class NovelWriter:
             project_id, len(user_message), max_iterations,
         )
 
+        # v0.6.2: 调组装模块拼 system_prompt（身份+笔风+法则+基座摘要）
+        from backend.agent.prompts.agent_prompt_factory import (
+            build_writer_system_prompt,
+            build_project_context_message,
+        )
+        system_prompt = build_writer_system_prompt(project_id)
+        context_message = build_project_context_message(project_id, "novel_writer")
+
         cfg = AgentConfig(
             agent_name="novel_writer",
-            system_prompt=NOVEL_WRITER_SYSTEM_PROMPT,
+            system_prompt=system_prompt,
         )
 
         executor_output = await self.executor.execute(
             agent=cfg,
             user_message=user_message,
             project_id=project_id,
+            context_message=context_message,
             max_iterations=max_iterations,
         )
 

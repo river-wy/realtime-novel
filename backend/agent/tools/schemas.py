@@ -4,8 +4,8 @@
 """
 from __future__ import annotations
 
-from typing import Literal, Optional, Any
 from pydantic import BaseModel, Field
+from typing import Literal, Optional, Any
 
 
 # ============ Project 工具 ============
@@ -102,7 +102,7 @@ class UpdateBaseInput(BaseModel):
     v0.4.1 推荐改用 EditArtifactInput（结构化增删改）
     """
     project_id: str = Field(..., min_length=1)
-    key: Literal["name", "palette", "world_tree", "main_plot", "style_charter", "seed_table", "genre_resonance", "character_card", "sub_plot"]
+    key: Literal["name", "palette", "world_tree", "main_plot", "style_pack", "seed_table", "genre_resonance", "character_card", "sub_plot"]
     new_value: str = Field(..., min_length=1)
 
 
@@ -185,12 +185,12 @@ class SearchMemoryResult(BaseModel):
 
 class AdjustStyleInput(BaseModel):
     project_id: str = Field(..., min_length=1)
-    style_directive: str = Field(..., min_length=1, max_length=500)
+    style_pack_id: str = Field(..., min_length=1, max_length=500)
 
 
 class AdjustStyleResult(BaseModel):
     project_id: str
-    style_charter_updated: bool
+    style_pack_updated: bool
 
 
 class SwitchPovInput(BaseModel):

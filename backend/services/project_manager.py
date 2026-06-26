@@ -173,7 +173,6 @@ class ProjectManager:
         # 7 件表名映射（v0.4 key 名 → v0.4.1 表名）
         key_to_table = {
             "world_tree": "world_tree",
-            "style_charter": "style_charter",
             "genre_resonance": "genre_resonance",
             "main_plot": "main_plot",
             "sub_plot": "sub_plot",
@@ -191,7 +190,6 @@ class ProjectManager:
 
         # 读其他 6 件保持不变
         world_tree = parsed if key == "world_tree" else self._load_one(project_id, "world_tree")
-        style_charter = parsed if key == "style_charter" else self._load_one(project_id, "style_charter")
         genre_resonance = parsed if key == "genre_resonance" else self._load_one(project_id, "genre_resonance")
         main_plot = parsed if key == "main_plot" else self._load_one(project_id, "main_plot")
         sub_plot = parsed if key == "sub_plot" else self._load_one(project_id, "sub_plot")
@@ -201,7 +199,7 @@ class ProjectManager:
         self._proj_repo.save_7_artifacts(
             project_id=project_id,
             world_tree=world_tree,
-            style_charter=style_charter,
+            style_charter={},
             genre_resonance=genre_resonance,
             main_plot=main_plot,
             sub_plot=sub_plot,

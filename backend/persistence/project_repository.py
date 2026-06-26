@@ -52,26 +52,50 @@ class ProjectRepository:
     # ----- Project 元数据 -----
 
     def create(self, project_id: str, name: str, palette: str = "",
-               exploration_level: str = "standard") -> Project:
+               exploration_level: str = "standard",
+               style_pack_id: Optional[str] = None) -> Project:
         """创建项目（projects 表）
 
         v0.8: exploration_level 默认 standard
+        v0.6.2: style_pack_id 可选，为空时用默认笔风
         """
         now = _now()
         with get_store().connection() as conn:
             conn.execute(
                 """
-                INSERT INTO projects (id, name, palette, exploration_level, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO projects (id, name, palette, exploration_level, style_pack_id, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
-                (project_id, name, palette, exploration_level, now, now),
+                (project_id, name, palette, exploration_level, style_pack_id, now, now),
             )
-        self.log.info("DB project CREATE: id=%s, name=%r, exploration_level=%s", project_id, name, exploration_level)
+        self.log.info("DB project CREATE: id=%s, name=%r, exploration_level=%s, style_pack_id=%s",
+                      project_id, name, exploration_level, style_pack_id)
         return Project(
             id=project_id, name=name, palette=palette,
             exploration_level=exploration_level,
+            style_pack_id=style_pack_id,
             current_pov=None, created_at=now, updated_at=now,
         )
+
+    def update_style_pack_id(self, project_id: str, style_pack_id: str) -> None:
+        """更新项目的写作笔风 id"""
+        with get_store().connection() as conn:
+            conn.execute(
+                "UPDATE projects SET style_pack_id = ?, updated_at = ? WHERE id = ?",
+                (style_pack_id, _now(), project_id),
+            )
+        self.log.info("DB project UPDATE style_pack_id: id=%s, style_pack_id=%s", project_id, style_pack_id)
+
+    def get_style_pack_id(self, project_id: str) -> Optional[str]:
+        """读取项目的写作笔风 id（为空返回 None）"""
+        with get_store().connection() as conn:
+            row = conn.execute(
+                "SELECT style_pack_id FROM projects WHERE id = ?",
+                (project_id,),
+            ).fetchone()
+        if row:
+            return row[0] or None
+        return None
 
     def get(self, project_id: str) -> Optional[Project]:
         with get_store().connection() as conn:

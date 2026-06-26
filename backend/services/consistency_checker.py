@@ -17,11 +17,11 @@
 from __future__ import annotations
 
 import logging
-from typing import List, Optional
 from pydantic import BaseModel, Field
+from typing import List, Optional
 
 from backend.agent.agents.world_tree_manager import (
-    BaseUpdate, PlotAdjustment, NewSeed, ConsistencyCheckResult,
+    BaseUpdate, NewSeed, ConsistencyCheckResult,
 )
 from backend.persistence import ProjectRepository
 
@@ -31,7 +31,7 @@ log = logging.getLogger(__name__)
 class BaseSnapshot(BaseModel):
     """7 件基座快照（检查器内部用）"""
     world_tree: dict = Field(default_factory=dict)
-    style_charter: dict = Field(default_factory=dict)
+    style_pack_id: Optional[str] = None
     genre_resonance: dict = Field(default_factory=dict)
     main_plot: dict = Field(default_factory=dict)
     sub_plots: List[dict] = Field(default_factory=list)
@@ -213,7 +213,7 @@ class ConsistencyChecker:
 
         # v0.6 简化：直接从 repo 读各表的 JSON 字段
         world_tree = repo.get_world_tree(project_id) or {}
-        style_charter = repo.get_style_charter(project_id) or {}
+        style_pack_id = repo.get_style_pack_id(project_id)
         genre_resonance = repo.get_genre_resonance(project_id) or {}
         main_plot = repo.get_main_plot(project_id) or {}
         sub_plots = repo.list_subplots(project_id) or []
@@ -222,7 +222,7 @@ class ConsistencyChecker:
 
         return BaseSnapshot(
             world_tree=world_tree,
-            style_charter=style_charter,
+            style_pack_id=style_pack_id,
             genre_resonance=genre_resonance,
             main_plot=main_plot,
             sub_plots=sub_plots,

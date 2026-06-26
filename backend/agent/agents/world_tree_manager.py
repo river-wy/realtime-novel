@@ -90,7 +90,7 @@ WORLD_TREE_MANAGER_SYSTEM_PROMPT = """你是「世界树管理」。
 
 【可用基座 7 件】
 1. world_tree - 时间线、地理、核心规则
-2. style_charter - 写作风格
+2. style_pack - 写作笔风
 3. genre_resonance - 题材、情绪基调
 4. main_plot - 主线弧线
 5. sub_plots - 支线
@@ -166,15 +166,24 @@ class WorldTreeManager:
             project_id, len(intervention_text),
         )
 
+        # v0.6.2: 调组装模块拼 system_prompt（身份+笔风+法则+基座摘要）
+        from backend.agent.prompts.agent_prompt_factory import (
+            build_worldtree_system_prompt,
+            build_project_context_message,
+        )
+        system_prompt = build_worldtree_system_prompt(project_id)
+        context_message = build_project_context_message(project_id, "world_tree_manager")
+
         cfg = AgentConfig(
             agent_name="world_tree_manager",
-            system_prompt=WORLD_TREE_MANAGER_SYSTEM_PROMPT,
+            system_prompt=system_prompt,
         )
 
         executor_output = await self.executor.execute(
             agent=cfg,
             user_message=f"用户干预：{intervention_text}",
             project_id=project_id,
+            context_message=context_message,
             max_iterations=max_iterations,
         )
 
@@ -225,15 +234,24 @@ class WorldTreeManager:
             project_id, len(adjustment_text),
         )
 
+        # v0.6.2: 调组装模块拼 system_prompt（身份+笔风+法则+基座摘要）
+        from backend.agent.prompts.agent_prompt_factory import (
+            build_worldtree_system_prompt,
+            build_project_context_message,
+        )
+        system_prompt = build_worldtree_system_prompt(project_id)
+        context_message = build_project_context_message(project_id, "world_tree_manager")
+
         cfg = AgentConfig(
             agent_name="world_tree_manager",
-            system_prompt=WORLD_TREE_MANAGER_SYSTEM_PROMPT,
+            system_prompt=system_prompt,
         )
 
         executor_output = await self.executor.execute(
             agent=cfg,
             user_message=f"用户基座调整：{adjustment_text}",
             project_id=project_id,
+            context_message=context_message,
             max_iterations=max_iterations,
         )
 

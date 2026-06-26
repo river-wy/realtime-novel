@@ -8,7 +8,7 @@ v0.6.1 P4: 从 context_builder.py 拆出
 私有:
 - _row_to_message: DB message row → OpenAI 格式
 - _load_project_data: 加载项目 7 件基座 + 章节 metadata
-- _format_*: 7 件字段格式化 (chapter_summaries/world_tree/style_charter/main_plot/sub_plot/characters/seeds)
+- _format_*: 7 件字段格式化 (chapter_summaries/world_tree/main_plot/sub_plot/characters/seeds)
 - json_dumps: 中文安全 JSON 序列化
 """
 from __future__ import annotations
@@ -18,7 +18,7 @@ from typing import List, Dict, Any, Optional
 
 from backend.persistence import (
     ProjectRepository, ChapterRepository,
-    ConversationRepository, OnboardingRepository,
+    ConversationRepository,
 )
 
 
@@ -105,7 +105,7 @@ def _load_project_data(project_id: str) -> Dict[str, Any]:
     Returns:
         {
             "world_tree": {...},
-            "style_charter": {...},
+            "style_pack_id": "...",
             "genre_resonance": {...},
             "main_plot": {...},
             "sub_plot": {...},
@@ -182,6 +182,8 @@ def _format_world_tree_compact(world_tree: dict) -> str:
 
 def _format_style_charter(style_charter: dict) -> str:
     """压缩 style_charter 为字符串（文笔家用）
+
+    [v0.6.2 已废弃，style_charter 已被 style_pack 替代]
 
     包含: prose_style / tone / density / taboos / notes / limits
     """

@@ -8,8 +8,8 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum
-from typing import Any, Optional, Literal
 from pydantic import BaseModel, Field
+from typing import Any, Optional, Literal
 
 
 # ============ Enums ============
@@ -149,6 +149,8 @@ class Project(BaseModel):
     current_pov: Optional[str] = None
     # v0.9: 世界封面图 URL（相对路径 /static/projects/{id}/cover.png，null 表示未生成）
     cover_image_url: Optional[str] = None
+    # v0.6.2: 写作笔风 id（style_pack 库中的 id，为空时用默认笔风）
+    style_pack_id: Optional[str] = None
     created_at: datetime
     updated_at: datetime
     deleted_at: Optional[datetime] = None

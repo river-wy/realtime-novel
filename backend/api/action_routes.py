@@ -165,7 +165,7 @@ async def generate_image(project_id: str, req: ImageRequest):
 # ============ PATCH /base ============
 
 class UpdateBaseRequest(BaseModel):
-    key: Literal["name", "palette", "world_tree", "main_plot", "style_charter", "seed_table", "genre_resonance"]
+    key: Literal["name", "palette", "world_tree", "main_plot", "style_pack", "seed_table", "genre_resonance"]
     new_value: str = Field(..., min_length=1)
 
 

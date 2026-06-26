@@ -18,7 +18,6 @@ from backend.agent.context._helpers import (
     _format_chapter_summaries_short,
     _format_chapter_summaries_graded,
     _format_world_tree_compact,
-    _format_style_charter,
     _format_main_plot,
     _format_sub_plot,
     _format_characters,
@@ -153,7 +152,7 @@ def build_messages_for_chapter_generator(
     结构：
     1. system: 章节生成 prompt
     2. world_tree: 基座 (叙事核心)
-    3. style_charter: 文风宪法 (基调/禁区/密度)  [s1.4 新增]
+    3. style_pack: 写作笔风 (已移至 system_prompt 组装)  [v0.6.2 废弃]
     4. main_plot: 主线 (核心矛盾/节奏)             [s1.4 新增]
     5. sub_plot: 支线                              [s1.4 新增]
     6. character_card: 人物                        [s1.4 新增]
@@ -167,7 +166,6 @@ def build_messages_for_chapter_generator(
 
     data = _load_project_data(project_id)
     world_tree = data.get("world_tree", {})
-    style_charter = data.get("style_charter", {})
     main_plot_raw = data.get("main_plot", {})
     sub_plot_raw = data.get("sub_plot", {})
     character_card = data.get("character_card", {})
@@ -179,12 +177,6 @@ def build_messages_for_chapter_generator(
         "role": "user",
         "content": f"## 世界树基座\n{_format_world_tree_compact(world_tree)}",
     })
-    # 3. style_charter 文风宪法 (s1.4 新增)
-    if style_charter:
-        messages.append({
-            "role": "user",
-            "content": f"## 文风宪法\n{_format_style_charter(style_charter)}",
-        })
     # 4. main_plot 主线 (s1.4 新增)
     if main_plot_raw and (main_plot_raw.get('arc_phrase') or main_plot_raw.get('beats')):
         messages.append({

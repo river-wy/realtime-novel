@@ -4,9 +4,8 @@
 """
 from __future__ import annotations
 
-from typing import Optional
-
 from pydantic import BaseModel
+from typing import Optional
 
 
 # ============ 通用聊天事件 ============
@@ -64,7 +63,7 @@ class OnboardingConfirmedEvent(BaseModel):
     type: str = "onboarding_confirmed"
     step: int  # 3 or 4
     fields: dict
-    artifacts_written: list  # 写入了哪些 7 件表 (e.g. ['style_charter', 'main_plot'])
+    artifacts_written: list  # 写入了哪些基座表 (e.g. ['main_plot', 'seed_table'])
 
 
 class OnboardingStepDoneEvent(BaseModel):

@@ -18,7 +18,6 @@ from typing import List, Optional, Dict
 
 from .schemas import (
     WorldTreeSchema,
-    StyleCharterSchema,
     GenreResonanceSchema,
     MainPlotSchema,
     SubPlotSchema,
@@ -34,12 +33,12 @@ class WorldTree:
     7 件为可选项（缺件时为 None），允许部分加载
     """
     world_tree: WorldTreeSchema
-    style_charter: StyleCharterSchema
     genre_resonance: GenreResonanceSchema
     main_plot: MainPlotSchema
     character_card: CharacterCardSchema
     sub_plot: SubPlotSchema
     seed_table: SeedTableSchema
+    style_pack_id: Optional[str] = None
 
     # === 序列化（to_dict / from_dict） ===
 
@@ -48,7 +47,7 @@ class WorldTree:
         # mode='json' 让 enum 序列化为字符串 (YAML/JSON 兼容)
         return {
             "world_tree": self.world_tree.model_dump(mode="json", exclude_none=True),
-            "style_charter": self.style_charter.model_dump(mode="json", exclude_none=True),
+            "style_pack_id": self.style_pack_id,
             "genre_resonance": self.genre_resonance.model_dump(mode="json", exclude_none=True),
             "main_plot": self.main_plot.model_dump(mode="json", exclude_none=True),
             "character_card": self.character_card.model_dump(mode="json", exclude_none=True),
@@ -61,7 +60,7 @@ class WorldTree:
         """从 dict-of-dicts 反序列化"""
         return cls(
             world_tree=WorldTreeSchema.model_validate(data["world_tree"]),
-            style_charter=StyleCharterSchema.model_validate(data["style_charter"]),
+            style_pack_id=data.get("style_pack_id"),
             genre_resonance=GenreResonanceSchema.model_validate(data["genre_resonance"]),
             main_plot=MainPlotSchema.model_validate(data["main_plot"]),
             character_card=CharacterCardSchema.model_validate(data["character_card"]),

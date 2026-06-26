@@ -1,5 +1,6 @@
 """style_tools.py — adjust_style 工具
 
+v0.6.2 重构：从 style_charter 切换为 style_pack（操作 projects.style_pack_id）
 v0.6 重构：从 v0_4_new_tools.py 拆出
 v0.4 原版 broken：写 7_artifacts.yaml 文件（v0.4.1 删了，7 件全入 DB）
 v0.6 修复：复用 update_base 工具（不再写文件）
@@ -15,12 +16,9 @@ from backend.agent.tools.schemas import (
 
 
 class AdjustStyleTool(BaseTool):
-    """调整文风（追加 directive 到 style_charter.notes）
-
-    v0.6 实现：调 update_base key="style_charter" 完整重写 style_charter JSON
-    """
+    """切换写作笔风（更新项目的 style_pack_id）"""
     name = "adjust_style"
-    description = "调整文风（追加 directive 到 style_charter.notes）"
+    description = "切换写作笔风（更新项目的 style_pack_id）"
     input_schema = AdjustStyleInput
     output_schema = AdjustStyleResult
 
@@ -28,41 +26,16 @@ class AdjustStyleTool(BaseTool):
         self, input: AdjustStyleInput, progress_callback=None
     ) -> AdjustStyleResult:
         try:
-            # v0.6 改用 update_base 工具（写 DB）
-            from backend.agent.tools.schemas import UpdateBaseInput
             from backend.persistence import ProjectRepository
-            import json
 
             repo = ProjectRepository()
-            all_data = repo.load_all_artifacts(input.project_id)
-            style_charter = all_data.get("style_charter", {})
-            if not isinstance(style_charter, dict):
-                style_charter = {"raw": str(style_charter)}
-
-            # 追加 directive 到 notes
-            notes = style_charter.get("notes", [])
-            if not isinstance(notes, list):
-                notes = [str(notes)]
-            notes.append(input.style_directive)
-            style_charter["notes"] = notes
-
-            # 写回 DB
-            repo.save_7_artifacts(
-                project_id=input.project_id,
-                world_tree=all_data.get("world_tree", {}),
-                style_charter=style_charter,
-                genre_resonance=all_data.get("genre_resonance", {}),
-                main_plot=all_data.get("main_plot", {}),
-                sub_plot=all_data.get("sub_plot", {}),
-                character_card=all_data.get("character_card", {}),
-                seed_table=all_data.get("seed_table", {}),
-            )
+            repo.update_style_pack_id(input.project_id, input.style_pack_id)
 
             if progress_callback:
                 await progress_callback({"step": "done", "percentage": 100})
             return AdjustStyleResult(
                 project_id=input.project_id,
-                style_charter_updated=True,
+                style_pack_updated=True,
             )
         except Exception as e:
             return ToolError(code="ADJUST_STYLE_FAILED", message=str(e))

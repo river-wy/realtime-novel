@@ -55,11 +55,14 @@ def assemble_7_artifacts(project_id: str, payload: Dict[str, Any]) -> List[str]:
         artifacts_written: 写入了哪些 7 件表 (固定 7 张, 用于前端展示)
 
     字段映射:
-        Step 1: genres / styles / tone → world_tree + style_charter + genre_resonance
+        Step 1: genres / styles / tone → world_tree + genre_resonance
         Step 3: core_relationship / emotional_anchor / taboos / ending_preference
-                → style_charter (notes/taboos) + main_plot (metadata) + character_card (核心关系)
+                → main_plot (metadata) + character_card (核心关系)
         Step 4: main_conflict / sub_plots / characters / seeds
                 → main_plot (arc_phrase/beats) + sub_plot + character_card + seed_table
+
+    v0.6.2: style_charter 已废弃，笔风改由 style_pack 库（projects.style_pack_id）承载。
+    reader_feeling 已移除（不应出现在大纲中）。
     """
     genres = payload.get("genres", []) or []
     styles = payload.get("styles", []) or []
@@ -73,7 +76,6 @@ def assemble_7_artifacts(project_id: str, payload: Dict[str, Any]) -> List[str]:
     main_arc_raw = payload.get("main_arc", "") or ""  # 3-5 节点, 每行 1 个
     sub_plots_raw = payload.get("sub_plots", "") or ""
     seeds_raw = payload.get("seeds", "") or ""
-    reader_feeling = payload.get("reader_feeling", "") or ""
 
     # 推断 era 和 theme
     era = "现代"
@@ -92,19 +94,6 @@ def assemble_7_artifacts(project_id: str, payload: Dict[str, Any]) -> List[str]:
     ]
     if opening_scene:
         core_rules.append({"id": "R2", "statement": f"开篇场景: {opening_scene}", "enforcement": "soft", "applies_to": "all"})
-
-    # style_charter.notes: 加 styles + 开篇场景
-    notes_list = list(styles) if styles else []
-    if opening_scene:
-        notes_list.append(f"开篇场景: {opening_scene}")
-
-    # style_charter: 由 Agent 推断完整笔法 (散文/句式/段落/心理活动 密度)
-    from backend.agent.context.style_inference import infer_style_charter
-    inferred_style_charter = infer_style_charter(
-        genres=genres,
-        styles=styles,
-        tone=tone if isinstance(tone, list) else ([tone] if tone else []),
-    )
 
     # main_plot: beats 构造
     beats = []
@@ -206,19 +195,8 @@ def assemble_7_artifacts(project_id: str, payload: Dict[str, Any]) -> List[str]:
                 "opening_scene": opening_scene,
             },
         },
-        style_charter={
-            **inferred_style_charter,  #  完整笔法 (散文/句式/段落/密度/limits)
-            "taboos": [],
-            "notes": notes_list,
-            "metadata": {
-                **inferred_style_charter.get("metadata", {}),  # 推断来源记录
-                "genres": genres,
-                "styles": styles,
-                "tone": tone if isinstance(tone, list) else [tone] if tone else [],
-                # v0.7: reader_feeling 存到 style_charter.metadata
-                "reader_feeling": reader_feeling,
-            },
-        },
+        # v0.6.2: style_charter 已废弃，传空 dict 保持 save_7_artifacts 签名兼容
+        style_charter={},
         genre_resonance={
             "accept": [{"text": g, "weight": 0.8} for g in genres],
             "reject": [],
@@ -230,9 +208,8 @@ def assemble_7_artifacts(project_id: str, payload: Dict[str, Any]) -> List[str]:
             "arc_phrase": main_arc,
             "beats": beats,
             "metadata": {
-                # v0.7: 砍掉 ending_preference, 加 story_core 和 reader_feeling
+                # v0.7: story_core 存到主线 metadata
                 "story_core": story_core,
-                "reader_feeling": reader_feeling,
                 # v0.8.3: 保留 Step 4 main_arc 完整字符串 (拆成 beats 后, 原句不丢)
                 "main_arc": main_arc_raw,
             },
@@ -244,7 +221,6 @@ def assemble_7_artifacts(project_id: str, payload: Dict[str, Any]) -> List[str]:
 
     return [
         "world_tree",
-        "style_charter",
         "genre_resonance",
         "main_plot",
         "sub_plot",
