@@ -7,7 +7,12 @@ const routes: RouteRecordRaw[] = [
     component: () => import('@/views/Home.vue'),
     meta: { title: '首页' }
   },
-  // v0.6.2: /onboarding 路由已删除（项目 onboard 全部走管家 Agent 对接）
+  {
+    path: '/chat',
+    name: 'chat',
+    component: () => import('@/views/Chat.vue'),
+    meta: { title: '管家对话' }
+  },
   {
     path: '/reader/:projectId/:chapterNum?',
     name: 'reader',
@@ -26,7 +31,7 @@ const routes: RouteRecordRaw[] = [
     path: '/worlds',
     name: 'world-list',
     component: () => import('@/views/WorldList.vue'),
-    meta: { title: '全部世界' }
+    meta: { title: '我的世界' }
   }
 ]
 
@@ -38,7 +43,6 @@ const router = createRouter({
   }
 })
 
-// 路由切换时更新浏览器标签页 title
 router.afterEach((to) => {
   const sub = (to.meta?.title as string) || ''
   document.title = sub ? `${sub} · 小说 · 世界` : '小说 · 世界'

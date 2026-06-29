@@ -118,6 +118,31 @@ class OnboardingProposeStepTool(BaseTool):
 
             # ── Step 3：委托 WorldTreeManager 初始化 7 件基座 ──────────────────────
             elif input.step == 3:
+                # ── 前置校验：Step 1 核心字段必须非空，任一缺失直接熔断 ──────────
+                _missing: list[str] = []
+                if not payload.get("genres"):
+                    _missing.append("genres（题材）")
+                if not payload.get("tone"):
+                    _missing.append("tone（基调）")
+                if not payload.get("story_core"):
+                    _missing.append("story_core（故事核心）")
+                if not payload.get("characters"):
+                    _missing.append("characters（主要角色）")
+                # 笔风：检查 projects.style_pack_id 是否已由管家写入
+                from backend.persistence import ProjectRepository
+                if not ProjectRepository().get_style_pack_id(input.project_id):
+                    _missing.append("style_pack_id（写作笔风，请先调 list_style_packs + adjust_style）")
+
+                if _missing:
+                    return ToolError(
+                        code="MISSING_REQUIRED_FIELDS",
+                        message=(
+                            f"Step 3 前置校验失败，以下必填字段为空：{', '.join(_missing)}。"
+                            "请先完成 Step 1/2 并确认笔风后再调用 Step 3。"
+                        ),
+                    )
+                # ── 校验通过，开始委托 WTM ──────────────────────────────────────
+
                 log.info(
                     "onboarding_propose_step step=3: 委托 WorldTreeManager.initialize_world_tree, "
                     "project_id=%s, payload_keys=%s",

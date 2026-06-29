@@ -38,6 +38,8 @@ AGENT_TOOLS: Dict[str, List[str]] = {
         "edit_artifact",
         "generate_image",
         "update_exploration_level",    # v0.6.2 补：调整项目/全局探索度
+        "list_style_packs",            # 查询可用笔风列表（Onboarding/调整笔风时先读）
+        "adjust_style",                # 写入/更新 style_pack_id
         "onboarding_propose_step",
         "onboarding_user_confirm",
         "onboarding_generate_chapter",

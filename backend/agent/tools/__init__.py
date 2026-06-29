@@ -5,7 +5,7 @@
 - chapter_tools:      generate_chapter / read_chapter
 - base_edit_tools:    update_base / rollback_base
 - image_tools:        generate_image
-- style_tools:        adjust_style
+- style_tools:        list_style_packs / adjust_style
 - pov_tools:          switch_pov
 - character_tools:    introspect_character
 - plot_tools:         weave_plot

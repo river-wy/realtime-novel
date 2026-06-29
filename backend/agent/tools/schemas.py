@@ -19,6 +19,10 @@ class CreateProjectInput(BaseModel):
         description="探索度: conservative (严守) / standard (平衡) / wild (大胆)"
     )
     initial_prompt: Optional[str] = None
+    style_pack_id: Optional[str] = Field(
+        default=None,
+        description="写作笔风 ID（如 yanhuo_shiyi / xianxia_ranhuo），不传则 onboarding 后再设置"
+    )
 
 
 class DeleteProjectInput(BaseModel):

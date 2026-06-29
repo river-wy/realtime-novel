@@ -147,6 +147,80 @@ class NovelWriter:
         )
 
 
+# ============ 7 件基座完整性校验 ============
+
+def _validate_world_tree_completeness(project_id: str) -> Optional[str]:
+    """章节生成前的 7 件基座完整性校验（含笔风）
+
+    检查规则：
+    - world_tree:      base.core_rules 非空
+    - genre_resonance: accept 非空
+    - main_plot:       arc_phrase 或 beats 至少有一项非空
+    - sub_plot:        threads 非空
+    - character_card:  characters 非空（至少有一个角色）
+    - seed_table:      seeds 非空
+    - style_pack_id:   projects.style_pack_id 非空
+
+    Returns:
+        None     — 校验通过
+        str      — 校验失败原因（供 ChapterOutput.error 使用）
+    """
+    try:
+        from backend.agent.context._helpers import _load_project_data
+        from backend.persistence import ProjectRepository
+
+        data = _load_project_data(project_id)
+        missing: list[str] = []
+
+        # 1. world_tree
+        wt = data.get("world_tree") or {}
+        wt_base = wt.get("base") or {}
+        if not wt_base.get("core_rules"):
+            missing.append("world_tree.base.core_rules（世界树核心规则）")
+
+        # 2. genre_resonance
+        gr = data.get("genre_resonance") or {}
+        if not gr.get("accept"):
+            missing.append("genre_resonance.accept（题材共振接纳列表）")
+
+        # 3. main_plot
+        mp = data.get("main_plot") or {}
+        if not mp.get("arc_phrase") and not mp.get("beats"):
+            missing.append("main_plot.arc_phrase / beats（主线弧光）")
+
+        # 4. sub_plot
+        sp = data.get("sub_plot") or {}
+        if not (sp.get("threads") or []):
+            missing.append("sub_plot.threads（支线列表）")
+
+        # 5. character_card
+        cc = data.get("character_card") or {}
+        if not (cc.get("characters") or []):
+            missing.append("character_card.characters（角色列表）")
+
+        # 6. seed_table
+        st = data.get("seed_table") or {}
+        if not (st.get("seeds") or []):
+            missing.append("seed_table.seeds（伏笔种子）")
+
+        # 7. style_pack_id（笔风）
+        if not ProjectRepository().get_style_pack_id(project_id):
+            missing.append("style_pack_id（写作笔风，请通过 adjust_style 工具设置）")
+
+        if missing:
+            return f"以下基座数据缺失或为空：{', '.join(missing)}"
+        return None
+
+    except Exception as e:
+        # 校验本身报错，记日志但不阻断（容错：DB 读取异常不应阻止生成）
+        import logging
+        logging.getLogger(__name__).warning(
+            "_validate_world_tree_completeness: 校验异常（非阻断）project_id=%s: %s",
+            project_id, e,
+        )
+        return None
+
+
 # ============ 委托入口 ============
 
 @logger_decorator
@@ -184,6 +258,15 @@ async def delegate_chapter_generation(
         project_id, source,
         bool(intervention), bool(actor_feedback), bool(actor_character),
     )
+
+    # ── 7 件基座完整性校验（含笔风），任一缺失直接熔断，不让 LLM 用空占位符生成 ──
+    validation_error = _validate_world_tree_completeness(project_id)
+    if validation_error:
+        delegate_chapter_generation.log.error(
+            "delegate_chapter_generation BLOCKED by completeness check: project_id=%s, reason=%s",
+            project_id, validation_error,
+        )
+        return ChapterOutput(error=f"基座完整性校验失败，无法生成章节：{validation_error}")
 
     writer = get_novel_writer()
     result = await writer.generate_chapter(

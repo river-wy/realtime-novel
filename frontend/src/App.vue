@@ -1,7 +1,10 @@
 <script setup lang="ts">
-import { RouterView, RouterLink } from 'vue-router'
-import { ref } from 'vue'
-import mainImage from '@/assets/首页-主图.png'
+import { RouterView, RouterLink, useRoute } from 'vue-router'
+import { ref, computed } from 'vue'
+import logoImage from '@/assets/logo文字.png'
+
+const route = useRoute()
+const isHome = computed(() => route.name === 'home')
 
 const petals = ref(Array.from({ length: 10 }, (_, i) => ({
   id: i,
@@ -31,17 +34,22 @@ const petals = ref(Array.from({ length: 10 }, (_, i) => ({
   </div>
 
   <div class="app-root">
-    <nav class="top-nav">
+    <!-- 导航栏：仅非 home 页显示 -->
+    <nav v-if="!isHome" class="top-nav nav-glass">
       <div class="nav-inner">
         <RouterLink to="/" class="brand">
           <div class="brand-glow">
-            <img :src="mainImage" alt="realtime-novel" class="brand-logo" />
+            <img :src="logoImage" alt="realtime-novel" class="brand-logo" />
           </div>
         </RouterLink>
         <div class="nav-links">
           <RouterLink to="/" class="nav-link" active-class="active">
-            <i class="ph ph-house"></i>
+            <i class="ph ph-sparkle"></i>
             <span>首页</span>
+          </RouterLink>
+          <RouterLink to="/chat" class="nav-link" active-class="active">
+            <i class="ph ph-chats-circle"></i>
+            <span>对话</span>
           </RouterLink>
           <RouterLink to="/worlds" class="nav-link" active-class="active">
             <i class="ph ph-globe"></i>
@@ -52,9 +60,9 @@ const petals = ref(Array.from({ length: 10 }, (_, i) => ({
     </nav>
 
     <main class="app-main">
-      <RouterView v-slot="{ Component, route }">
+      <RouterView v-slot="{ Component, route: r }">
         <transition name="page-slide" mode="out-in">
-          <component :is="Component" :key="route.fullPath" />
+          <component :is="Component" :key="r.fullPath" :class="{ 'full-page': r.name === 'home' }" />
         </transition>
       </RouterView>
     </main>
@@ -95,6 +103,10 @@ const petals = ref(Array.from({ length: 10 }, (_, i) => ({
   position: sticky;
   top: 0;
   z-index: 100;
+}
+
+/* 玻璃背景 */
+.nav-glass {
   background: rgba(18, 10, 38, 0.04);
   backdrop-filter: blur(20px) saturate(150%);
   -webkit-backdrop-filter: blur(20px) saturate(150%);
@@ -191,12 +203,21 @@ const petals = ref(Array.from({ length: 10 }, (_, i) => ({
 /* 主内容区 */
 .app-main {
   flex: 1;
-  max-width: 1280px;
-  margin: 0 auto;
   padding: 0;
   position: relative;
   z-index: 1;
   width: 100%;
+}
+
+.app-main > *:not(.full-page) {
+  max-width: 1280px;
+  margin: 0 auto;
+}
+
+/* home 页全屏 */
+.full-page {
+  max-width: none !important;
+  margin: 0 !important;
 }
 
 /* 页面切换动画 */
@@ -233,19 +254,16 @@ const petals = ref(Array.from({ length: 10 }, (_, i) => ({
 /* 移动端 */
 @media (max-width: 375px) {
   .nav-inner {
-    padding: 12px 16px;
+    padding: 8px 16px;
   }
   .brand-logo {
-    height: 36px;
+    height: 32px;
   }
   .nav-link {
     font-size: 12px;
   }
   .nav-link i {
     font-size: 16px;
-  }
-  .app-main {
-    padding: var(--space-4);
   }
 }
 </style>
