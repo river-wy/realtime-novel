@@ -29,11 +29,10 @@ log = logging.getLogger(__name__)
 
 AGENT_TOOLS: Dict[str, List[str]] = {
     # ── 管家（唯一用户入口，ReAct loop）──────────────────
-    # 职责内：项目 CRUD、记忆查询、Onboarding 推进、基座编辑、图片生成、探索度
+    # 职责内：项目 CRUD、Onboarding 推进、基座编辑、图片生成、探索度
     # 职责外：通过 delegate_to_agent（同步）/ dispatch_background_task（异步）委托专家
     "novel_steward": [
         "load_project",
-        "search_memory",
         "create_project",
         "delete_project",              # v0.6.2 补：删除项目（软删 → .trash/）
         "edit_artifact",
@@ -49,7 +48,6 @@ AGENT_TOOLS: Dict[str, List[str]] = {
     # v0.6.2 重构：文笔家不再直接被外层调用解析 final_response，所有章节生成都走 ReAct loop
     # 由 LLM 自主决定调 generate_chapter / summarize_chapter 工具落盘
     "novel_writer": [
-        "search_memory",
         "load_project",
         "read_chapter",
         "generate_chapter",       # v0.6.2 新增：纯落盘（写文件 + 入 DB）
@@ -57,7 +55,6 @@ AGENT_TOOLS: Dict[str, List[str]] = {
     ],
     # ── 世界树管理（可调多 tool 自主推演）──────────────
     "world_tree_manager": [
-        "search_memory",
         "load_project",
         "edit_artifact",
         "update_base",

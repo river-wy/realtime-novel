@@ -1,21 +1,11 @@
-"""backend.persistence 包入口
-
-导出：
-- get_store / reset_store: SQLiteStore 全局单例
-- ConversationRepository / ToolCallLogRepository / AgentStateRepository
-- UserPreferenceRepository / ChapterStatusRepository / ProjectDeletedRepository
-- ProjectRepository (v0.4.1 新增)
-- ChapterRepository
-- OnboardingRepository
-"""
-from backend.persistence.agent_state_repository import AgentStateRepository
+"""backend.persistence 包入口"""
 from backend.persistence.chapter_repository import ChapterRepository
 from backend.persistence.chapter_status_repository import ChapterStatusRepository
 from backend.persistence.conversation_repository import ConversationRepository
 from backend.persistence.models import (
-    Conversation, Message, MessageRole, ToolCallLog, AgentState,
+    Conversation, Message, MessageRole, ToolCallLog,
     UserPreference, ChapterStatus, ChapterState, ProjectDeleted,
-    Project, WorldTreeRow, StyleCharterRow, GenreResonanceRow,
+    Project, WorldTreeRow, GenreResonanceRow,
     MainPlotRow, SubPlotRow, CharacterRow, CharacterRelationshipRow, SeedRow,
     CharacterRole, SeedStatus, SubplotStatus, SubplotPriority,
     ChapterRow, OnboardingStateRow,
@@ -30,9 +20,9 @@ from backend.persistence.user_preference_repository import UserPreferenceReposit
 
 __all__ = [
     # models
-    "Conversation", "Message", "MessageRole", "ToolCallLog", "AgentState",
+    "Conversation", "Message", "MessageRole", "ToolCallLog",
     "UserPreference", "ChapterStatus", "ChapterState", "ProjectDeleted",
-    "Project", "WorldTreeRow", "StyleCharterRow", "GenreResonanceRow",
+    "Project", "WorldTreeRow", "GenreResonanceRow",
     "MainPlotRow", "SubPlotRow", "CharacterRow", "CharacterRelationshipRow", "SeedRow",
     "CharacterRole", "SeedStatus", "SubplotStatus", "SubplotPriority",
     "ChapterRow", "OnboardingStateRow",
@@ -40,7 +30,7 @@ __all__ = [
     # store
     "SQLiteStore", "get_store", "reset_store",
     # repos
-    "ConversationRepository", "ToolCallLogRepository", "AgentStateRepository",
+    "ConversationRepository", "ToolCallLogRepository",
     "UserPreferenceRepository", "ChapterStatusRepository", "ProjectDeletedRepository",
     "ProjectRepository", "ChapterRepository", "OnboardingRepository",
 ]

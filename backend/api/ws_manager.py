@@ -21,8 +21,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Optional
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from typing import Optional
 
 log = logging.getLogger(__name__)
 
@@ -195,6 +195,7 @@ async def handle_user_message(ws: WebSocket, user_id: str, data: dict):
             role=MessageRole.USER,
             content=data["content"],
             project_id=project_id,
+            agent_name="novel_steward",   # 用户消息由管家接收处理
         )
 
         # 2. 推 agent_thinking
@@ -238,6 +239,7 @@ async def handle_user_message(ws: WebSocket, user_id: str, data: dict):
             role=MessageRole.ASSISTANT,
             content=result.get("response", ""),
             project_id=project_id,
+            agent_name="novel_steward",   # 回复由管家生成
             tool_calls={
                 "intent": result.get("intent", ""),
                 "downstream_called": result.get("downstream_called", ""),
@@ -270,7 +272,7 @@ async def _push_agent_trace(ws: WebSocket, result: dict):
     """把管家调用的下游 Agent 的 tool_calls trace 推送给前端
 
     适用场景：
-    - WorldTreeManager ReAct loop 调了 search_memory + edit_artifact
+    - WorldTreeManager ReAct loop 调了 edit_artifact
     - NovelWriter ReAct loop 调了 load_project + read_chapter
 
     structured_data 里如果有 tool_calls_trace 字段，则逐条推送

@@ -202,7 +202,7 @@ class AgentExecutor:
         context_message: Optional[str] = None,
         history: Optional[List[dict]] = None,
         session_key: Optional[str] = None,
-        max_iterations: int = 7,  # 18:02 拍板
+        max_iterations: int = 15,
     ) -> AgentOutput:
         """执行 Agent ReAct 推演 loop
 
@@ -216,7 +216,7 @@ class AgentExecutor:
             history: cache miss 时由调用方提供的历史 messages（用于 rebuild）
             session_key: cache key（"user_id:conv_id:agent_name"）；
                 传入时启用 session cache，hit 则复用 cache，miss 则用 history rebuild
-            max_iterations: 最大循环轮次（18:02 拍板 = 7）
+            max_iterations: 最大循环轮次（默认 15）
 
         Returns:
             AgentOutput
@@ -259,15 +259,7 @@ class AgentExecutor:
             agent.agent_name, [t.name for t in tool_instances],
         )
 
-        # 2. 拼 system_prompt（含工具清单 + context）
-        system_prompt = self._build_system_prompt(
-            agent=agent,
-            tool_instances=tool_instances,
-            project_id=project_id,
-            context=context,
-        )
-
-        # 3. 初始化 messages（cache hit / miss 两条路径）
+        # 2 & 3. 拼 system_prompt + 初始化 messages（cache hit / miss 两条路径）
         messages: List[dict]
         session_cache_obj = None
         messages_base_len = 0  # 本轮开始前 messages 的长度，用于计算 delta
@@ -281,22 +273,33 @@ class AgentExecutor:
             _user_id = _parts[0] if len(_parts) > 0 else "default"
             _conv_id = _parts[1] if len(_parts) > 1 else ""
 
-            session_cache_obj = cache_mgr.get(
-                user_id=_user_id,
-                conversation_id=_conv_id,
-                agent_name=agent.agent_name,
-                sys_prompt=system_prompt,
-            )
-
-            if session_cache_obj is not None:
-                # ── cache HIT：直接复用，只追加新 user_message ──
-                self.log.info(
-                    "AgentExecutor[%s]: session cache HIT，key=%s，cached_msgs=%d",
-                    agent.agent_name, session_key, len(session_cache_obj.messages),
+            # 先用轻量 TTL 检查判断是否命中，cache HIT 时跳过 system_prompt 组装
+            if cache_mgr.has_valid_cache(_user_id, _conv_id, agent.agent_name):
+                # ── cache HIT：直接复用，跳过 _build_system_prompt ──
+                # 不做 sys_prompt hash 校验，避免为此重新组装 prompt
+                session_cache_obj = cache_mgr.get_without_prompt_check(
+                    user_id=_user_id,
+                    conversation_id=_conv_id,
+                    agent_name=agent.agent_name,
                 )
-                messages = list(session_cache_obj.messages)  # 浅拷贝，防止污染 cache
-            else:
-                # ── cache MISS：用 history rebuild ──
+                if session_cache_obj is not None:
+                    self.log.info(
+                        "AgentExecutor[%s]: session cache HIT，key=%s，cached_msgs=%d",
+                        agent.agent_name, session_key, len(session_cache_obj.messages),
+                    )
+                    messages = list(session_cache_obj.messages)  # 浅拷贝，防止污染 cache
+                else:
+                    # has_valid_cache 与 get 之间极小概率 TTL 刚好过期，降级走 MISS
+                    session_cache_obj = None
+
+            if session_cache_obj is None:
+                # ── cache MISS：组装 system_prompt，rebuild ──
+                system_prompt = self._build_system_prompt(
+                    agent=agent,
+                    tool_instances=tool_instances,
+                    project_id=project_id,
+                    context=context,
+                )
                 self.log.info(
                     "AgentExecutor[%s]: session cache MISS，rebuild，key=%s",
                     agent.agent_name, session_key,
@@ -304,22 +307,35 @@ class AgentExecutor:
                 initial_messages: List[dict] = [{"role": "system", "content": system_prompt}]
                 if history:
                     initial_messages.extend(history)
+                # 从 agents.json 读取模型 context_window（供 token 压缩阈值计算）
+                _context_window = self._get_context_window(agent.agent_name)
                 session_cache_obj = cache_mgr.create(
                     user_id=_user_id,
                     conversation_id=_conv_id,
                     agent_name=agent.agent_name,
                     sys_prompt=system_prompt,
                     initial_messages=initial_messages,
+                    context_window=_context_window,
                 )
                 messages = list(session_cache_obj.messages)
 
-            # delta 从这里开始计算（context_message 是每轮临时注入，不持久化进 cache）
-            messages_base_len = len(messages)
+            # context_message（7 件基座快照）每轮都需要刷新，用 patch_context 原地替换
+            # 而不是追加，避免历史基座快照在 cache 里累积
             if context_message:
-                messages.append({"role": "user", "content": context_message})
+                session_cache_obj.patch_context(context_message)
+                messages = list(session_cache_obj.messages)  # 重取，含最新 context 段
+
+            # delta 基准线：patch_context 不算新增对话，只算 user_message 之后的部分
+            messages_base_len = len(messages)
             messages.append({"role": "user", "content": user_message})
         else:
             # ── 无 session_key：原有逻辑（文笔家 / 架构师） ──
+            system_prompt = self._build_system_prompt(
+                agent=agent,
+                tool_instances=tool_instances,
+                project_id=project_id,
+                context=context,
+            )
             messages = [{"role": "system", "content": system_prompt}]
             if history:
                 messages.extend(history)
@@ -353,6 +369,11 @@ class AgentExecutor:
                 )
                 total_input_tokens += llm_response.input_tokens
                 total_output_tokens += llm_response.output_tokens
+                # 每轮 LLM 调用后累加 token 到 session cache
+                if session_cache_obj is not None:
+                    session_cache_obj.add_tokens(
+                        llm_response.input_tokens + llm_response.output_tokens
+                    )
             except Exception as e:
                 self.log.error(
                     "AgentExecutor[%s]: LLM 调用失败 iteration=%d: %s",
@@ -654,6 +675,32 @@ class AgentExecutor:
         ])
 
         return "\n".join(parts)
+
+
+    def _get_context_window(self, agent_name: str) -> int:
+        """从 agents.json 查找 agent 对应模型的 context_window
+
+        查找路径：agents.json agents[agent_name].model → models[model_id].context_window
+        任一步失败则降级为 DEFAULT_CONTEXT_WINDOW。
+        """
+        from backend.agent.runtime.session_cache import DEFAULT_CONTEXT_WINDOW
+        try:
+            from backend.config.config_loader import load_agents_config
+            cfg = load_agents_config()
+            # agents.json agents 键中 agent_name 的大小写可能与代码中不同
+            # 这里用 agent.agent_name 与 agents 表做大小写不敏感匹配
+            agents_cfg = cfg.get("agents", {})
+            # agents.json key 与 agent_name 保持一致，直接索引
+            agent_cfg = agents_cfg.get(agent_name)
+            if agent_cfg is None:
+                return DEFAULT_CONTEXT_WINDOW
+            model_name = agent_cfg.get("model", "")
+            models_cfg = cfg.get("models", {})
+            model_cfg = models_cfg.get(model_name, {})
+            return model_cfg.get("context_window", DEFAULT_CONTEXT_WINDOW)
+        except Exception as e:
+            self.log.debug("_get_context_window: 查询失败 agent=%s: %s", agent_name, e)
+            return DEFAULT_CONTEXT_WINDOW
 
 
 # ============ 工厂方法 ============

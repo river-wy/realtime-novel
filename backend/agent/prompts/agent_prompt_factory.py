@@ -47,7 +47,7 @@ _WRITER_IDENTITY = """你是「小说文笔家」。
 
 【工作流】
 1. system_prompt 已注入笔风、写作法则、基座定调；context 已注入完整 7 件基座 + chapter_summaries
-2. 如有需要（如用户明确要求查某章详情），可调 search_memory / read_chapter 检索上下文
+2. 如有需要（如用户明确要求查某章详情），可调 read_chapter 检索上下文
 3. 写正文（3000-4500 字，严格遵守下方笔风和法则）
 4. 调 generate_chapter(content=正文, project_id=xxx, intervention=?, actor_feedback=?, actor_character=?) 落盘
 5. 调 summarize_chapter(content=正文, project_id=xxx) 抽 1 句话 summary（自动写入 DB）
@@ -67,7 +67,6 @@ _WRITER_IDENTITY = """你是「小说文笔家」。
 【上下文获取策略】
 - 默认相信 system_prompt + context 注入的基座和摘要，不要重复调 load_project
 - 只在以下情况调 read_chapter：用户明确说「重读第 N 章」「参考第 N 章的风格」
-- 只在以下情况调 search_memory：用户提到「之前写过类似的」「查询前几章埋的伏笔」
 """
 
 _WORLDTREE_IDENTITY = """你是「世界树管理」。
@@ -86,8 +85,7 @@ _WORLDTREE_IDENTITY = """你是「世界树管理」。
 
 【典型工作流】
 1. 调用 load_project 获取当前 7 件基座（如 context 未预注入）
-2. 调用 search_memory 检索相关历史干预记录
-3. 分析用户干预的影响：
+2. 分析用户干预的影响：
    - 涉及哪些基座的哪些字段？
    - 是否影响主线弧线（main_plot）？
    - 是否需要埋伏笔（seed_table）？

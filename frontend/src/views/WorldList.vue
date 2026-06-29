@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * WorldList 全量世界列表页
+ * WorldList 全量世界列表页 · 琉璃宫升级版
  */
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
@@ -14,14 +14,14 @@ onMounted(async () => {
   await projectsStore.loadList(200)
 })
 
-function goToProject(p: api.ProjectInfo) {
-  // v0.6.2: 项目 onboard 全部走管家 Agent 对接，不判断 onboarding_step
+function goToReader(p: api.ProjectInfo) {
   if (p.chapter_count > 0) {
     router.push({ name: 'reader', params: { projectId: p.id, chapterNum: 1 } })
-  } else {
-    // 未生成章节的项目也跳到世界页（对话或生成入口在 World 页）
-    router.push({ name: 'world', params: { projectId: p.id } })
   }
+}
+
+function goToWorld(p: api.ProjectInfo) {
+  router.push({ name: 'world', params: { projectId: p.id } })
 }
 
 // ============ 删除菜单 ============
@@ -58,16 +58,15 @@ onUnmounted(() => document.removeEventListener('click', onDocClick))
 
 // ============ 辅助函数 ============
 function explorationIcon(level: string): string {
-  return { conservative: '🛡️', standard: '⚖️', wild: '🌌' }[level] || '⚖️'
+  return { conservative: 'shield', standard: 'scales', wild: 'planet' }[level] || 'scales'
 }
 function explorationLabel(level: string): string {
   return { conservative: '保守', standard: '标准', wild: '狂野' }[level] || '标准'
 }
 function statusIcon(status: string): string {
-  return { not_started: '⚪', in_progress: '🟡', completed: '🟢' }[status] || '⚪'
+  return { not_started: 'circle', in_progress: 'circle-half', completed: 'check-circle' }[status] || 'circle'
 }
 function statusLabel(status: string): string {
-  // v0.6.2: 简化状态标签（项目 onboard 由管家 Agent 对接，不区分引导中/大纲中）
   if (status === 'completed') return '已完成'
   if (status === 'in_progress') return '进行中'
   return '未启动'
@@ -77,71 +76,93 @@ function statusLabel(status: string): string {
 <template>
   <div class="world-list">
     <header class="list-header">
-      <button class="back-btn" @click="router.push({ name: 'home' })">←</button>
-      <h1>全部世界</h1>
+      <button class="back-btn" @click="router.push({ name: 'home' })">
+        <i class="ph ph-arrow-left"></i>
+      </button>
+      <h1>我的世界</h1>
       <span class="count">{{ projectsStore.total }}</span>
     </header>
 
-    <div v-if="projectsStore.loading" class="loading">加载中...</div>
+    <!-- 加载骨架屏 -->
+    <div v-if="projectsStore.loading" class="skeleton-grid">
+      <div v-for="i in 3" :key="i" class="skeleton-card">
+        <div class="skeleton-inner">
+          <div class="skeleton-thumb"></div>
+          <div class="skeleton-body">
+            <div class="skeleton-line"></div>
+            <div class="skeleton-line"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 空状态 -->
     <div v-else-if="projectsStore.projects.length === 0" class="empty">
+      <i class="ph ph-book-open empty-icon"></i>
       <p>还没有世界</p>
       <button class="btn btn-primary" @click="router.push({ name: 'home' })">去首页对话启动</button>
     </div>
+
+    <!-- 项目卡片网格 -->
     <div v-else class="project-grid">
       <article
-        v-for="p in projectsStore.projects"
+        v-for="(p, i) in projectsStore.projects"
         :key="p.id"
         class="project-card"
-        @click="goToProject(p)"
+        :style="{ animationDelay: `${i * 40}ms` }"
+        @click="p.chapter_count > 0 ? goToReader(p) : goToWorld(p)"
       >
-        <!-- v0.9: 左图右字布局（与 Home.vue 一致） -->
         <div class="card-inner">
-          <!-- 左：封面缩略图 -->
+          <!-- 封面缩略图 -->
           <div
             class="card-thumb"
             :class="p.cover_image_url ? 'card-thumb-image' : 'card-thumb-placeholder'"
             :style="p.cover_image_url ? { backgroundImage: `url(${p.cover_image_url})` } : {}"
           >
-            <span v-if="!p.cover_image_url" class="card-thumb-icon">📖</span>
+            <i v-if="!p.cover_image_url" class="ph ph-book-open thumb-icon"></i>
           </div>
-          <!-- 右：标题 + 标签 + 章节 -->
+          <!-- 内容 -->
           <div class="card-content">
-            <h3 class="card-title">{{ p.name }}</h3>
+            <h3 class="card-title" :title="p.name">{{ p.name }}</h3>
             <div class="card-meta">
               <span class="palette">{{ p.palette }}</span>
-              <span
-                class="exploration-badge"
-                :class="`exploration-${p.exploration_level || 'standard'}`"
-              >
-                {{ explorationIcon(p.exploration_level || 'standard') }}
+              <span class="badge" :class="`exploration-${p.exploration_level || 'standard'}`">
+                <i :class="`ph ph-${explorationIcon(p.exploration_level || 'standard')}`"></i>
                 {{ explorationLabel(p.exploration_level || 'standard') }}
               </span>
-              <span
-                class="status-badge"
-                :class="`status-${p.status || 'not_started'}`"
-              >
-                {{ statusIcon(p.status || 'not_started') }}
+              <span class="badge" :class="`status-${p.status || 'not_started'}`">
+                <i :class="`ph ph-${statusIcon(p.status || 'not_started')}`"></i>
                 {{ statusLabel(p.status || 'not_started') }}
               </span>
             </div>
             <div class="card-chapter-count">{{ p.chapter_count }} 章</div>
           </div>
         </div>
-        <!-- "..." 操作菜单 -->
-        <div class="card-menu" @click="toggleMenu($event, p.id)">
-          <span class="card-menu-icon">⋯</span>
+        <!-- 操作按钮 -->
+        <div class="card-actions">
+          <button class="btn-view" @click.stop="goToWorld(p)">
+            <i class="ph ph-eye"></i>查看
+          </button>
+          <button
+            class="btn-read"
+            :disabled="p.chapter_count === 0"
+            @click.stop="goToReader(p)"
+          >
+            <i class="ph ph-book-open"></i>立即阅读
+          </button>
         </div>
-        <div
-          v-if="openMenuId === p.id"
-          class="card-menu-dropdown"
-          @click.stop
-        >
+        <!-- "..." 菜单 -->
+        <div class="card-menu" @click="toggleMenu($event, p.id)">
+          <i class="ph ph-dots-three-vertical"></i>
+        </div>
+        <div v-if="openMenuId === p.id" class="card-menu-dropdown" @click.stop>
           <button
             class="menu-item menu-danger"
             :disabled="deleting === p.id"
             @click="handleDelete($event, p)"
           >
-            {{ deleting === p.id ? '删除中...' : '🗑 删除' }}
+            <i class="ph ph-trash"></i>
+            {{ deleting === p.id ? '删除中...' : '删除' }}
           </button>
         </div>
       </article>
@@ -151,7 +172,7 @@ function statusLabel(status: string): string {
 
 <style scoped>
 .world-list {
-  padding: var(--space-5) 0;
+  padding: var(--space-5);
   max-width: 1200px;
   margin: 0 auto;
 }
@@ -161,44 +182,75 @@ function statusLabel(status: string): string {
   align-items: center;
   gap: var(--space-3);
   margin-bottom: var(--space-6);
+  animation: fadeInDown 300ms var(--ease-spring);
 }
 .list-header h1 {
+  font-family: var(--font-display);
   font-size: var(--text-2xl);
-  color: var(--color-accent-1);
+  color: var(--color-sakura);
   margin: 0;
 }
 .back-btn {
-  width: 36px;
-  height: 36px;
+  width: 36px; height: 36px;
   border-radius: 50%;
-  background: var(--color-night-2);
-  border: 1px solid var(--color-night-3);
-  color: var(--color-text);
-  cursor: pointer;
-  font-size: 18px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  color: var(--color-text-primary);
+  display: flex; align-items: center; justify-content: center;
+  transition: all var(--dur-fast) var(--ease-out);
 }
-.back-btn:hover {
-  background: var(--color-night-3);
-}
+.back-btn:hover { background: var(--glass-bg-hover); }
+.back-btn:active { transform: scale(0.96); }
+.back-btn i { font-size: 20px; }
 .count {
   font-size: var(--text-sm);
-  color: var(--color-text-dim);
-  background: var(--color-night-2);
+  color: var(--color-text-secondary);
+  background: var(--glass-bg);
   padding: 2px 10px;
   border-radius: var(--radius-full);
+  border: 1px solid var(--glass-border);
 }
 
-.loading, .empty {
+/* 骨架屏 */
+.skeleton-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: var(--space-4);
+}
+.skeleton-card {
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+.skeleton-inner { display: flex; min-height: 100px; }
+.skeleton-thumb {
+  width: 100px; flex-shrink: 0;
+  background: linear-gradient(90deg, var(--color-bg-elevated) 25%, var(--glass-bg) 50%, var(--color-bg-elevated) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.8s linear infinite;
+}
+.skeleton-body { flex: 1; padding: 16px; }
+.skeleton-line {
+  height: 12px; border-radius: 4px; margin-bottom: 8px;
+  background: linear-gradient(90deg, var(--color-bg-elevated) 25%, var(--glass-bg) 50%, var(--color-bg-elevated) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.8s linear infinite;
+}
+.skeleton-line:nth-child(2) { width: 60%; }
+
+/* 空状态 */
+.empty {
   text-align: center;
   padding: var(--space-6);
-  color: var(--color-text-dim);
+  color: var(--color-text-tertiary);
 }
-.empty .btn {
-  margin-top: var(--space-4);
+.empty-icon {
+  font-size: 48px;
+  opacity: 0.2;
+  margin-bottom: var(--space-4);
 }
+.empty .btn { margin-top: var(--space-4); }
 .btn {
   padding: var(--space-3) var(--space-5);
   border-radius: var(--radius-md);
@@ -207,10 +259,11 @@ function statusLabel(status: string): string {
   cursor: pointer;
 }
 .btn-primary {
-  background: linear-gradient(135deg, var(--color-accent-1), var(--color-accent-3));
+  background: linear-gradient(135deg, var(--color-sakura), var(--color-violet));
   color: white;
 }
 
+/* 卡片网格 */
 .project-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
@@ -218,21 +271,35 @@ function statusLabel(status: string): string {
 }
 
 .project-card {
-  background: var(--color-night-2);
-  border: 1px solid var(--color-night-3);
+  position: relative;
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
   border-radius: var(--radius-md);
   overflow: hidden;
   cursor: pointer;
-  transition: all var(--motion-base) var(--ease-out);
-  position: relative;
+  transition: all var(--dur-base) var(--ease-spring);
+  backdrop-filter: blur(12px);
+  animation: cardIn 300ms var(--ease-spring) both;
+}
+.project-card::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, transparent 30%, rgba(255,255,255,0.06) 50%, transparent 70%);
+  transform: translateX(-100%);
+  transition: transform 600ms var(--ease-out);
+  pointer-events: none;
+  z-index: 1;
 }
 .project-card:hover {
-  transform: translateY(-3px);
-  border-color: var(--color-accent-3);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+  transform: translateY(-4px);
+  border-color: rgba(255, 143, 177, 0.3);
+  box-shadow: 0 8px 24px rgba(255, 143, 177, 0.15);
+}
+.project-card:hover::before {
+  transform: translateX(100%);
 }
 
-/* v0.9: 左图右字 */
 .card-inner {
   display: flex;
   align-items: stretch;
@@ -247,14 +314,15 @@ function statusLabel(status: string): string {
   overflow: hidden;
 }
 .card-thumb-placeholder {
-  background: linear-gradient(160deg, var(--color-night-1), var(--color-night-3));
+  background: linear-gradient(160deg, var(--color-bg-surface), var(--color-bg-elevated));
   display: flex;
   align-items: center;
   justify-content: center;
 }
-.card-thumb-icon {
+.thumb-icon {
   font-size: 36px;
   opacity: 0.35;
+  color: var(--color-text-secondary);
 }
 .card-content {
   flex: 1;
@@ -265,15 +333,15 @@ function statusLabel(status: string): string {
   justify-content: space-between;
 }
 .card-title {
+  font-family: var(--font-display);
   font-size: var(--text-base);
   font-weight: 600;
-  color: var(--color-text);
+  color: var(--color-text-primary);
   margin-bottom: var(--space-2);
   line-height: 1.4;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
+  white-space: nowrap;
   overflow: hidden;
+  text-overflow: ellipsis;
 }
 .card-meta {
   display: flex;
@@ -289,11 +357,11 @@ function statusLabel(status: string): string {
 }
 .card-chapter-count {
   font-size: var(--text-xs);
-  color: var(--color-accent-2);
+  color: var(--color-moon);
   font-weight: 500;
 }
 
-.exploration-badge, .status-badge {
+.badge {
   padding: 2px 8px;
   border-radius: var(--radius-sm);
   font-size: var(--text-xs);
@@ -302,6 +370,7 @@ function statusLabel(status: string): string {
   align-items: center;
   gap: 4px;
 }
+.badge i { font-size: 12px; }
 .exploration-conservative { background: rgba(99,102,241,.2); color: #a5b4fc; border: 1px solid rgba(99,102,241,.4); }
 .exploration-standard { background: rgba(139,92,246,.2); color: #c4b5fd; border: 1px solid rgba(139,92,246,.4); }
 .exploration-wild { background: rgba(236,72,153,.2); color: #f9a8d4; border: 1px solid rgba(236,72,153,.4); }
@@ -309,13 +378,50 @@ function statusLabel(status: string): string {
 .status-in_progress { background: rgba(251,191,36,.2); color: #fde68a; border: 1px solid rgba(251,191,36,.4); }
 .status-completed { background: rgba(34,197,94,.2); color: #86efac; border: 1px solid rgba(34,197,94,.4); }
 
+/* 操作按钮 */
+.card-actions {
+  display: flex;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4) var(--space-3);
+}
+.btn-view {
+  padding: 6px 12px;
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  transition: all var(--dur-fast) var(--ease-out);
+}
+.btn-view:hover { border-color: var(--color-violet); color: var(--color-violet); }
+.btn-view:active { transform: scale(0.96); }
+.btn-view i { font-size: 14px; }
+.btn-read {
+  padding: 6px 12px;
+  background: linear-gradient(135deg, var(--color-sakura), var(--color-violet));
+  border: none;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  transition: all var(--dur-fast) var(--ease-out);
+  box-shadow: 0 2px 8px rgba(255, 143, 177, 0.2);
+}
+.btn-read:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(255, 143, 177, 0.3); }
+.btn-read:active:not(:disabled) { transform: scale(0.96); }
+.btn-read:disabled { opacity: 0.4; cursor: not-allowed; }
+.btn-read i { font-size: 14px; }
+
 /* "..." 菜单 */
 .card-menu {
   position: absolute;
-  top: 8px;
-  right: 8px;
-  width: 32px;
-  height: 32px;
+  top: 8px; right: 8px;
+  width: 32px; height: 32px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -323,46 +429,52 @@ function statusLabel(status: string): string {
   cursor: pointer;
   z-index: 2;
   opacity: 0;
-  transition: opacity var(--motion-fast);
+  transition: opacity var(--dur-fast);
   background: rgba(0, 0, 0, 0.3);
   backdrop-filter: blur(4px);
 }
-.project-card:hover .card-menu {
-  opacity: 1;
-}
-.card-menu-icon {
-  font-size: 20px;
-  color: var(--color-text-dim);
-  line-height: 1;
-  transform: rotate(90deg);
-  letter-spacing: -2px;
-}
+.project-card:hover .card-menu { opacity: 1; }
+.card-menu i { font-size: 18px; color: var(--color-text-secondary); }
+
 .card-menu-dropdown {
   position: absolute;
-  top: 42px;
-  right: 8px;
+  top: 42px; right: 8px;
   z-index: 10;
-  background: var(--color-night-1);
-  border: 1px solid var(--color-night-3);
+  background: rgba(18, 10, 38, 0.95);
+  border: 1px solid var(--glass-border);
   border-radius: var(--radius-sm);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  box-shadow: var(--shadow-md);
   min-width: 120px;
   overflow: hidden;
+  animation: menuIn 200ms var(--ease-spring);
 }
 .menu-item {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 6px;
   width: 100%;
   padding: var(--space-2) var(--space-4);
   background: none;
   border: none;
   text-align: left;
   font-size: var(--text-sm);
-  color: var(--color-text);
+  color: var(--color-text-primary);
   cursor: pointer;
-  transition: background var(--motion-fast);
+  transition: background var(--dur-fast);
 }
-.menu-item:hover:not(:disabled) { background: var(--color-night-2); }
+.menu-item:hover:not(:disabled) { background: var(--glass-bg-hover); }
 .menu-item:disabled { opacity: 0.5; cursor: not-allowed; }
-.menu-danger { color: #f87171; }
+.menu-danger { color: var(--color-error); }
 .menu-danger:hover:not(:disabled) { background: rgba(248, 113, 113, 0.1); }
+
+@media (prefers-reduced-motion: reduce) {
+  .project-card { animation: none; opacity: 1; }
+  .project-card::before { display: none; }
+  .list-header { animation: none; }
+  .skeleton-thumb, .skeleton-line { animation: none; }
+}
+@media (max-width: 375px) {
+  .project-grid { grid-template-columns: 1fr; }
+  .list-header h1 { font-size: var(--text-lg); }
+}
 </style>

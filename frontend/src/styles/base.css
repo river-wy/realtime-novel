@@ -1,4 +1,4 @@
-/* 全局 reset + 基础样式 */
+/* 全局 reset + 基础样式 · 月光樱花琉璃宫 */
 
 *, *::before, *::after {
   box-sizing: border-box;
@@ -10,27 +10,56 @@ html, body {
   font-family: var(--font-body);
   font-size: var(--text-base);
   line-height: 1.6;
-  color: var(--color-text);
-  background: var(--color-night-1);
+  color: var(--color-text-primary);
+  background: var(--color-bg-base);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  height: 100%;
 }
 
-/* 始终显示垂直滚动条占位，避免路由切换时 header 左右抖动
-   (长内容页有滚动条，短内容页没滚动条 → 切换时 body 居中内容左右偏移)
-   overflow-y: scroll 强制 html 一直有滚动条，body 宽度永远稳定
-   视觉上短内容页的滚动条是空的，但不抖动 */
 html {
-  overflow-y: scroll;
+  overflow-y: auto;
+  height: 100%;
 }
 
 body {
-  min-height: 100vh;
-  background:
-    radial-gradient(ellipse at top, rgba(139, 92, 246, 0.15), transparent 60%),
-    radial-gradient(ellipse at bottom right, rgba(255, 143, 177, 0.1), transparent 50%),
-    var(--color-night-1);
-  background-attachment: fixed;
+  position: relative;
+  overflow-x: hidden;
+}
+
+/* 月光流动光斑：body 伪元素 */
+body::before {
+  content: '';
+  position: fixed;
+  top: -10%; left: -10%;
+  width: 600px; height: 600px;
+  background: radial-gradient(ellipse, rgba(255, 143, 177, 0.06) 0%, transparent 70%);
+  border-radius: 50%;
+  z-index: 0;
+  animation: drift1 28s ease-in-out infinite alternate;
+  pointer-events: none;
+}
+
+body::after {
+  content: '';
+  position: fixed;
+  bottom: -10%; right: -10%;
+  width: 500px; height: 500px;
+  background: radial-gradient(ellipse, rgba(139, 92, 246, 0.05) 0%, transparent 70%);
+  border-radius: 50%;
+  z-index: 0;
+  animation: drift2 32s ease-in-out infinite alternate;
+  pointer-events: none;
+}
+
+@keyframes drift1 {
+  0% { transform: translate(0, 0); }
+  100% { transform: translate(200px, 150px); }
+}
+
+@keyframes drift2 {
+  0% { transform: translate(0, 0); }
+  100% { transform: translate(-180px, -120px); }
 }
 
 h1, h2, h3, h4, h5, h6 {
@@ -45,13 +74,13 @@ p {
 }
 
 a {
-  color: var(--color-accent-1);
+  color: var(--color-sakura);
   text-decoration: none;
-  transition: color var(--motion-fast) var(--ease-out);
+  transition: color var(--dur-fast) var(--ease-out);
 }
 
 a:hover {
-  color: var(--color-accent-2);
+  color: var(--color-moon);
 }
 
 button {
@@ -66,16 +95,16 @@ input, textarea, select {
   font-family: inherit;
   font-size: inherit;
   color: inherit;
-  background: var(--color-night-2);
-  border: 1px solid var(--color-night-3);
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--glass-border);
   border-radius: var(--radius-md);
   padding: var(--space-3) var(--space-4);
   outline: none;
-  transition: border-color var(--motion-fast) var(--ease-out);
+  transition: border-color var(--dur-fast) var(--ease-out);
 }
 
 input:focus, textarea:focus, select:focus {
-  border-color: var(--color-accent-1);
+  border-color: var(--color-sakura);
 }
 
 ::selection {
@@ -91,9 +120,19 @@ input:focus, textarea:focus, select:focus {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: var(--color-night-3);
+  background: var(--color-bg-elevated);
   border-radius: var(--radius-full);
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--color-accent-3);
+  background: var(--color-violet);
+}
+
+/* reduced-motion 全局兜底 */
+@media (prefers-reduced-motion: reduce) {
+  body::before, body::after {
+    animation: none !important;
+  }
+  .petal-container {
+    display: none !important;
+  }
 }

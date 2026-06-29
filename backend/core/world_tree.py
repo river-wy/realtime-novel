@@ -3,17 +3,11 @@
 职责（来自 docs/roadmap/v0.3-product-skeleton.md §3 S2）:
 - 内存中聚合 7 件 Schema
 - to_dict / from_dict 序列化
-- 树形操作（add_node / rollback_to）
-
-关键设计（来自 docs/design/01-world-tree.md §1.4）:
-- 单线树 —— 永远只保留一条主干
-- 回档硬 reset —— 从回档点起，原先生成的所有枝叶全部删除
-- Node 保留 —— 回档点之前的 Node 仍可回看
+v007: 删除 branches 树形操作（add_node/rollback_to），branches_json DB 列已删
 """
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import List, Optional, Dict
 
 from .schemas import (
@@ -68,67 +62,14 @@ class WorldTree:
             seed_table=SeedTableSchema.model_validate(data["seed_table"]),
         )
 
-    # === 树形操作 ===
-    # v0.8.2 删除了 from_project_dir / to_project_dir (v0.3 落盘式序列化, v0.4.1 入库后已不适用)
-    # 7 件现在走 project_repository.load_all_artifacts / save_7_artifacts
-
-    def add_node(self, node) -> None:
-        """添加节点到 WorldTree.branches（支持 dict 或 TreeNode）"""
-        from .schemas.world_tree import TreeNode
-        if isinstance(node, dict):
-            node = TreeNode.model_validate(node)
-        self.world_tree.branches.append(node)
-
-    def list_nodes(self) -> List[dict]:
-        """列出所有节点"""
-        return list(self.world_tree.branches)
-
-    def find_node(self, node_id: str) -> Optional[dict]:
-        """按 ID 找节点"""
-        for node in self.world_tree.branches:
-            if node.id == node_id:
-                return node
-        return None
-
-    def rollback_to(self, node_id: str) -> int:
-        """硬 reset 到指定 Node
-
-        规则（来自 01 §1.4）:
-        - 找到目标 Node
-        - 目标之后的节点全部删除
-        - 目标之前的节点保留
-
-        Args:
-            node_id: 回档目标 Node ID
-
-        Returns:
-            删除的节点数
-
-        Raises:
-            ValueError: 目标 Node 不存在
-        """
-        target_idx = None
-        for i, node in enumerate(self.world_tree.branches):
-            if node.id == node_id:
-                target_idx = i
-                break
-
-        if target_idx is None:
-            raise ValueError(f"目标 Node 不存在: {node_id}")
-
-        # 硬 reset: 保留 [0..target_idx]，删除 (target_idx, end]
-        kept = self.world_tree.branches[: target_idx + 1]
-        deleted_count = len(self.world_tree.branches) - len(kept)
-        self.world_tree.branches = kept
-
-        return deleted_count
-
     # === 统计/自检 ===
+    # v0.8.2 删除了 from_project_dir / to_project_dir (v0.3 落盘式序列化, v0.4.1 入库后已不适用)
+    # v0.9 (v007) 删除了 add_node/list_nodes/find_node/rollback_to (branches_json 列已删，ReAct 架构下无持久化)
+    # 7 件现在走 project_repository.load_all_artifacts / save_7_artifacts
 
     def summary(self) -> Dict[str, int]:
         """返回各 Schema 的关键统计"""
         return {
-            "world_tree_branches": len(self.world_tree.branches),
             "main_plot_beats": len(self.main_plot.beats),
             "main_plot_current_beat": self.main_plot.current_beat,
             "character_card_characters": len(self.character_card.characters),

@@ -1,15 +1,7 @@
 <script setup lang="ts">
 /**
- * ChatBox — 通用管家对话组件（v0.6 s5）
- *
- * 用于首页（Home.vue）和阅读页（Reader.vue）的右栏
- * props:
- *   - placeholder: 输入框 placeholder
- *   - projectId: 可选，关联到具体项目
- *   - initialMessages: 可选，预填消息
- * events:
- *   - jump: 跳转 URL（structured_data.jump_url 触发）
- *   - require-confirm: 需要二次确认（confirm_required 事件触发）
+ * ChatBox — 通用管家对话组件（琉璃宫升级版）
+ * 前端不展示 tool_call / tool_result 消息
  */
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useStewardChat } from '@/composables/useStewardChat'
@@ -32,7 +24,6 @@ const emit = defineEmits<{
 const chat = useStewardChat()
 const inputText = ref('')
 const chatContainer = ref<HTMLElement | null>(null)
-const expandedTools = ref<Set<number>>(new Set())
 
 // 监听 agent_message 触发 jump
 chat.setOnAgentMessage((msg) => {
@@ -62,7 +53,7 @@ onMounted(() => {
 watch(() => chat.messages.value.length, async () => {
   await nextTick()
   if (chatContainer.value) {
-    chatContainer.value.scrollTop = chatContainer.value.scrollHeight
+    chatContainer.value.scrollTo({ top: chatContainer.value.scrollHeight, behavior: 'smooth' })
   }
 })
 
@@ -73,45 +64,41 @@ function send() {
   chat.send(text, props.projectId)
 }
 
-function toggleTool(idx: number) {
-  if (expandedTools.value.has(idx)) {
-    expandedTools.value.delete(idx)
-  } else {
-    expandedTools.value.add(idx)
-  }
-}
-
 function onConfirm(action: string, confirmed: boolean) {
   chat.sendConfirm(action, confirmed)
 }
 </script>
 
 <template>
-  <div class="chat-box">
-    <div ref="chatContainer" class="chat-container">
+  <div class="chatbox">
+    <div ref="chatContainer" class="chatbox-messages">
       <div
         v-for="(msg, idx) in chat.messages.value"
         :key="idx"
         :class="['message', msg.role]"
       >
         <!-- 用户消息 -->
-        <div v-if="msg.role === 'user'" class="user-bubble">
+        <div v-if="msg.role === 'user'" class="bubble-user">
           {{ msg.content }}
         </div>
 
         <!-- 管家消息 -->
-        <div v-else-if="msg.role === 'agent'" class="agent-bubble">
+        <div v-else-if="msg.role === 'agent'" class="bubble-agent">
           <div v-if="msg.thinking" class="thinking">
-            <span class="dot-flashing"></span> {{ msg.content }}
+            <span class="typing-cursor">▋</span>
+            <span class="thinking-text">{{ msg.content }}</span>
           </div>
           <div v-else class="agent-content">
             <pre>{{ msg.content }}</pre>
-            <!-- 项目卡片（structured_data.projects） -->
-            <div v-if="msg.structuredData && msg.structuredData.projects && msg.structuredData.projects.length" class="project-cards">
+            <!-- 项目卡片（structured_data.projects / cards） -->
+            <div
+              v-if="msg.structuredData && (msg.structuredData.projects || msg.structuredData.cards) && (msg.structuredData.projects || msg.structuredData.cards).length"
+              class="project-cards"
+            >
               <div
-                v-for="p in msg.structuredData.projects"
+                v-for="p in (msg.structuredData.projects || msg.structuredData.cards)"
                 :key="p.id"
-                class="project-card"
+                class="mini-card"
                 @click="$emit('jump', `/reader/${p.id}/1`)"
               >
                 <div class="card-name">《{{ p.name }}》</div>
@@ -121,17 +108,21 @@ function onConfirm(action: string, confirmed: boolean) {
                 </div>
               </div>
             </div>
-            <!-- 跳转按钮（structured_data.jump_url） -->
+            <!-- 跳转按钮 -->
             <button
               v-if="msg.structuredData && msg.structuredData.jump_url"
               class="jump-btn"
               @click="$emit('jump', msg.structuredData.jump_url)"
             >
-              打开项目 →
+              <i class="ph ph-arrow-right"></i>
+              打开项目
             </button>
-            <!-- 候选项目（OPEN_PROJECT 多匹配时） -->
-            <div v-if="msg.structuredData && msg.structuredData.candidates && msg.structuredData.candidates.length > 1" class="candidates">
-              <div class="candidates-label">选择项目：</div>
+            <!-- 候选项目 -->
+            <div
+              v-if="msg.structuredData && msg.structuredData.candidates && msg.structuredData.candidates.length > 1"
+              class="candidate-list"
+            >
+              <div class="candidate-label">选择项目：</div>
               <div
                 v-for="c in msg.structuredData.candidates"
                 :key="c.id"
@@ -144,82 +135,82 @@ function onConfirm(action: string, confirmed: boolean) {
           </div>
         </div>
 
-        <!-- Tool 消息（可折叠） -->
-        <div v-else-if="msg.role === 'tool'" class="tool-bubble">
-          <div class="tool-header" @click="toggleTool(idx)">
-            🔧 {{ msg.toolName }}
-            <span class="tool-toggle">{{ expandedTools.has(idx) ? '▾' : '▸' }}</span>
-          </div>
-          <div v-if="expandedTools.has(idx)" class="tool-detail">
-            <div class="tool-args">
-              <strong>参数:</strong>
-              <pre>{{ JSON.stringify(msg.toolArgs, null, 2) }}</pre>
-            </div>
-            <div class="tool-result">
-              <strong>结果:</strong>
-              <pre>{{ JSON.stringify(msg.toolResult, null, 2).slice(0, 500) }}</pre>
-            </div>
-          </div>
-        </div>
+        <!-- tool 消息不展示（前端不对外展示 TOOL 调用信息） -->
       </div>
 
+      <!-- "正在思考"指示器 -->
       <div v-if="chat.thinking.value" class="thinking-indicator">
-        <span class="dot-flashing"></span> 管家正在思考...
+        <span class="typing-cursor">▋</span>
+        <span>管家正在思考...</span>
       </div>
     </div>
 
     <!-- 二次确认对话框 -->
-    <div v-if="chat.requireConfirm.value" class="confirm-overlay">
-      <div class="confirm-dialog">
-        <div class="confirm-title">⚠️ 需要二次确认</div>
-        <div class="confirm-message">这是一次危险操作，请确认是否继续？</div>
-        <div class="confirm-actions">
-          <button class="btn-cancel" @click="onConfirm('danger', false)">取消</button>
-          <button class="btn-confirm" @click="onConfirm('danger', true)">确认</button>
+    <transition name="confirm-fade">
+      <div v-if="chat.requireConfirm.value" class="confirm-backdrop">
+        <div class="confirm-panel">
+          <div class="confirm-title">
+            <i class="ph ph-warning"></i>
+            需要二次确认
+          </div>
+          <div class="confirm-message">这是一次危险操作，请确认是否继续？</div>
+          <div class="confirm-actions">
+            <button class="btn-cancel" @click="onConfirm('danger', false)">取消</button>
+            <button class="btn-confirm-danger" @click="onConfirm('danger', true)">确认</button>
+          </div>
         </div>
       </div>
-    </div>
+    </transition>
 
     <!-- 输入框 -->
-    <div class="chat-input">
+    <div class="chatbox-input">
       <textarea
         v-model="inputText"
         :placeholder="placeholder"
         :disabled="chat.thinking.value || !chat.connected.value"
         @keydown.enter.exact.prevent="send"
-      />
+      ></textarea>
       <button
         class="send-btn"
         :disabled="!inputText.trim() || chat.thinking.value || !chat.connected.value"
         @click="send"
       >
-        发送
+        <i class="ph ph-paper-plane-tilt"></i>
+        <span>发送</span>
       </button>
     </div>
 
     <div v-if="chat.error.value" class="error-bar">
-      ❌ {{ chat.error.value }}
+      <i class="ph ph-warning-circle"></i>
+      {{ chat.error.value }}
     </div>
   </div>
 </template>
 
 <style scoped>
-.chat-box {
+.chatbox {
   display: flex;
   flex-direction: column;
-  height: 100%;
+  height: 600px;
+  max-height: 700px;
+  min-height: 300px;
   background: rgba(20, 20, 30, 0.6);
-  border-radius: 12px;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
   overflow: hidden;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  position: relative;
 }
 
-.chat-container {
+.chatbox-messages {
   flex: 1;
   overflow-y: auto;
   padding: 16px;
   display: flex;
   flex-direction: column;
   gap: 12px;
+  scroll-behavior: smooth;
 }
 
 .message {
@@ -227,36 +218,74 @@ function onConfirm(action: string, confirmed: boolean) {
   flex-direction: column;
 }
 
-.user-bubble {
+/* User 气泡 */
+.bubble-user {
   align-self: flex-end;
-  background: linear-gradient(135deg, #5b6cff, #8a5bff);
-  color: white;
-  padding: 10px 16px;
-  border-radius: 18px 18px 4px 18px;
   max-width: 70%;
-  word-wrap: break-word;
+  padding: 10px 16px;
+  background: linear-gradient(135deg, var(--color-sakura), var(--color-violet));
+  color: #fff;
+  border-radius: 18px 18px 4px 18px;
+  font-size: var(--text-sm);
+  line-height: 1.55;
+  box-shadow: var(--glow-sakura);
+  animation: slideInRight 300ms var(--ease-spring);
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
-.agent-bubble {
+/* Agent 气泡 */
+.bubble-agent {
   align-self: flex-start;
-  background: rgba(255, 255, 255, 0.08);
-  padding: 12px 16px;
-  border-radius: 18px 18px 18px 4px;
   max-width: 85%;
-  word-wrap: break-word;
+  padding: 12px 16px;
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  color: var(--color-text-primary);
+  border-radius: 18px 18px 18px 4px;
+  animation: slideInLeft 300ms var(--ease-spring);
 }
 
 .agent-content pre {
   white-space: pre-wrap;
   font-family: inherit;
   margin: 0;
+  font-size: var(--text-sm);
 }
 
+/* 思考状态 */
 .thinking {
-  color: rgba(255, 255, 255, 0.6);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--color-text-secondary);
   font-style: italic;
+  opacity: 0.6;
 }
 
+.typing-cursor {
+  display: inline-block;
+  color: var(--color-sakura);
+  animation: blink 1s step-end infinite;
+}
+
+.thinking-text {
+  font-size: var(--text-sm);
+}
+
+/* "正在思考"指示器 */
+.thinking-indicator {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--color-text-secondary);
+  font-style: italic;
+  opacity: 0.5;
+  animation: thinking-pulse 2s ease-in-out infinite;
+}
+
+/* 项目卡片 */
 .project-cards {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
@@ -264,136 +293,190 @@ function onConfirm(action: string, confirmed: boolean) {
   margin-top: 12px;
 }
 
-.project-card {
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+.mini-card {
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
   padding: 10px 12px;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
-  transition: all 0.2s;
+  transition: all var(--dur-fast) var(--ease-out);
 }
-.project-card:hover {
-  background: rgba(255, 255, 255, 0.12);
-  border-color: rgba(140, 100, 255, 0.4);
+
+.mini-card:hover {
+  background: var(--glass-bg-hover);
+  border-color: rgba(255, 143, 177, 0.3);
+  transform: translateY(-2px);
+  box-shadow: var(--glow-sakura);
 }
 
 .card-name {
   font-weight: 600;
   margin-bottom: 4px;
+  font-size: var(--text-sm);
 }
 
 .card-meta {
-  font-size: 12px;
-  color: rgba(255, 255, 255, 0.6);
+  font-size: var(--text-xs);
+  color: var(--color-text-tertiary);
 }
 
+/* 跳转按钮 */
 .jump-btn {
   margin-top: 12px;
   padding: 8px 16px;
-  background: linear-gradient(135deg, #5b6cff, #8a5bff);
+  background: linear-gradient(135deg, var(--color-violet), var(--color-sakura));
   border: none;
-  border-radius: 8px;
-  color: white;
+  border-radius: var(--radius-sm);
+  color: #fff;
   cursor: pointer;
+  font-size: var(--text-sm);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: all var(--dur-fast) var(--ease-out);
 }
 
-.candidates {
+.jump-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--glow-sakura);
+}
+
+.jump-btn:active {
+  transform: scale(0.96);
+}
+
+/* 候选项目 */
+.candidate-list {
   margin-top: 12px;
   display: flex;
   flex-direction: column;
   gap: 4px;
 }
 
-.candidates-label {
-  font-size: 12px;
-  color: rgba(255, 255, 255, 0.6);
+.candidate-label {
+  font-size: var(--text-xs);
+  color: var(--color-text-tertiary);
 }
 
 .candidate-item {
   padding: 8px 12px;
-  background: rgba(255, 255, 255, 0.06);
-  border-radius: 6px;
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
   cursor: pointer;
+  font-size: var(--text-sm);
+  transition: all var(--dur-fast);
 }
+
 .candidate-item:hover {
-  background: rgba(255, 255, 255, 0.12);
+  background: var(--glass-bg-hover);
 }
 
-.tool-bubble {
-  align-self: stretch;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 8px;
+/* 输入区 */
+.chatbox-input {
+  display: flex;
+  padding: 12px;
+  gap: 8px;
+  border-top: 1px solid var(--glass-border);
+}
+
+.chatbox-input textarea {
+  flex: 1;
+  height: 60px;
+  resize: none;
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
   padding: 8px 12px;
-  font-size: 13px;
-  font-family: monospace;
+  color: var(--color-text-primary);
+  font-family: inherit;
+  font-size: var(--text-sm);
+  outline: none;
+  transition: border-color var(--dur-base) var(--ease-spring), box-shadow var(--dur-base) var(--ease-spring);
 }
 
-.tool-header {
+.chatbox-input textarea:focus {
+  border-color: var(--color-sakura);
+  box-shadow: 0 0 0 3px rgba(255, 143, 177, 0.15);
+}
+
+.chatbox-input textarea:disabled {
+  opacity: 0.5;
+}
+
+/* 发送按钮 */
+.send-btn {
+  padding: 8px 20px;
+  background: linear-gradient(135deg, var(--color-violet), var(--color-sakura));
+  border: none;
+  border-radius: var(--radius-md);
+  color: #fff;
   cursor: pointer;
-  user-select: none;
+  font-weight: 600;
+  font-size: var(--text-sm);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transition: all var(--dur-fast) var(--ease-out);
 }
 
-.tool-detail {
-  margin-top: 8px;
-  font-size: 11px;
-  color: rgba(255, 255, 255, 0.7);
+.send-btn:hover:not(:disabled) {
+  box-shadow: var(--glow-sakura);
 }
 
-.tool-detail pre {
-  white-space: pre-wrap;
-  margin: 4px 0;
-  background: rgba(0, 0, 0, 0.3);
-  padding: 6px;
-  border-radius: 4px;
+.send-btn:active:not(:disabled) {
+  transform: scale(0.96);
 }
 
-.thinking-indicator {
-  align-self: flex-start;
-  color: rgba(255, 255, 255, 0.5);
-  font-style: italic;
+.send-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
-.dot-flashing {
-  display: inline-block;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: rgba(255, 255, 255, 0.6);
-  animation: dot-flashing 1.4s infinite linear;
-}
-@keyframes dot-flashing {
-  0%, 60%, 100% { opacity: 0.2; }
-  30% { opacity: 1; }
+.send-btn i {
+  font-size: 16px;
 }
 
-.confirm-overlay {
+/* 确认对话框 */
+.confirm-backdrop {
   position: absolute;
   inset: 0;
   background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 100;
 }
 
-.confirm-dialog {
-  background: rgba(30, 30, 45, 0.95);
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  border-radius: 12px;
+.confirm-panel {
+  background: rgba(27, 16, 53, 0.95);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
   padding: 24px;
   max-width: 400px;
+  width: 90%;
 }
 
 .confirm-title {
-  font-size: 18px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--text-lg);
   font-weight: 600;
   margin-bottom: 12px;
+  color: var(--color-warning);
+}
+
+.confirm-title i {
+  font-size: 20px;
 }
 
 .confirm-message {
   margin-bottom: 20px;
-  color: rgba(255, 255, 255, 0.8);
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
 }
 
 .confirm-actions {
@@ -402,62 +485,85 @@ function onConfirm(action: string, confirmed: boolean) {
   justify-content: flex-end;
 }
 
-.btn-cancel, .btn-confirm {
-  padding: 8px 16px;
-  border-radius: 6px;
-  border: none;
-  cursor: pointer;
-}
-
 .btn-cancel {
-  background: rgba(255, 255, 255, 0.1);
-  color: white;
-}
-
-.btn-confirm {
-  background: linear-gradient(135deg, #ff5b5b, #ff8a5b);
-  color: white;
-}
-
-.chat-input {
-  display: flex;
-  padding: 12px;
-  gap: 8px;
-  border-top: 1px solid rgba(255, 255, 255, 0.1);
-}
-
-.chat-input textarea {
-  flex: 1;
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 8px;
-  padding: 8px 12px;
-  color: white;
-  resize: none;
-  height: 60px;
-  font-family: inherit;
-}
-
-.send-btn {
-  padding: 8px 20px;
-  background: linear-gradient(135deg, #5b6cff, #8a5bff);
-  border: none;
-  border-radius: 8px;
-  color: white;
+  padding: 8px 16px;
+  border-radius: var(--radius-sm);
+  background: var(--glass-bg);
+  color: var(--color-text-primary);
   cursor: pointer;
-  font-weight: 600;
+  font-size: var(--text-sm);
+  transition: background var(--dur-fast);
 }
 
-.send-btn:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
+.btn-cancel:hover {
+  background: var(--glass-bg-hover);
 }
 
+.btn-confirm-danger {
+  padding: 8px 16px;
+  border-radius: var(--radius-sm);
+  background: linear-gradient(135deg, #ff5b5b, #ff8a5b);
+  color: #fff;
+  cursor: pointer;
+  font-size: var(--text-sm);
+  border: none;
+  transition: all var(--dur-fast);
+}
+
+.btn-confirm-danger:hover {
+  box-shadow: 0 0 12px rgba(255, 91, 91, 0.4);
+}
+
+.btn-confirm-danger:active {
+  transform: scale(0.96);
+}
+
+/* 确认对话框过渡 */
+.confirm-fade-enter-active .confirm-panel {
+  animation: dialogIn 300ms var(--ease-spring);
+}
+.confirm-fade-enter-active {
+  transition: opacity 200ms;
+}
+.confirm-fade-leave-active {
+  transition: opacity 150ms var(--ease-in);
+}
+.confirm-fade-enter-from,
+.confirm-fade-leave-to {
+  opacity: 0;
+}
+
+/* 错误栏 */
 .error-bar {
   background: rgba(255, 80, 80, 0.2);
-  color: #ffaaaa;
+  color: var(--color-error);
   padding: 8px 16px;
-  font-size: 13px;
+  font-size: var(--text-sm);
   border-top: 1px solid rgba(255, 80, 80, 0.3);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.error-bar i {
+  font-size: 16px;
+}
+
+/* reduced-motion */
+@media (prefers-reduced-motion: reduce) {
+  .bubble-user, .bubble-agent, .thinking-indicator {
+    animation: none;
+    opacity: 1;
+  }
+  .typing-cursor {
+    animation: none;
+  }
+}
+
+/* 移动端 */
+@media (max-width: 375px) {
+  .bubble-user { max-width: 85%; }
+  .bubble-agent { max-width: 95%; }
+  .send-btn span { display: none; }
 }
 </style>

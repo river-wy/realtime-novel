@@ -37,6 +37,7 @@
         "temperature": 0.7,
         "max_tokens": 8192
       },
+      "context_window": 128000,
       "supports_thinking": true
     },
     "friday/gemini-3.1-flash-image-preview": {
@@ -52,20 +53,20 @@
     }
   },
   "agents": {
-    "_comment": "v0.6.1: StewardChatAgent 改为 NovelSteward (实际类名), 删 OnboardingAgent (类已删, controller 走 specialist 模型)",
-    "NovelSteward": {
+    "_comment": "key 与代码侧 AgentConfig.agent_name 保持一致，供 _get_context_window 等函数直接索引",
+    "novel_steward": {
       "model": "friday/deepseek-v4-pro-tencent"
     },
-    "ChapterGeneratorSpecialist": {
+    "novel_writer": {
       "model": "friday/deepseek-v4-pro-tencent"
     },
-    "WorldTreeKeeperSpecialist": {
+    "world_tree_manager": {
       "model": "friday/deepseek-v4-pro-tencent"
     },
-    "MemoryKeeperSpecialist": {
+    "memory_keeper": {
       "model": "friday/deepseek-v4-pro-tencent"
     },
-    "ImageGeneratorStub": {
+    "image_generator": {
       "model": "friday/gemini-3.1-flash-image-preview"
     }
   }

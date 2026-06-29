@@ -1,8 +1,6 @@
-"""pov_tools.py — switch_pov 工具
+"""pov_tools.py：switch_pov 工具
 
-v0.6 重构：从 v0_4_new_tools.py 拆出
-v0.4 原版 broken：写 7_artifacts.yaml 文件
-v0.6 修复：改用 ProjectRepository.update_current_pov 写 DB
+current_pov 存 char_id，写入前校验角色存在，返回包含 name。
 """
 from __future__ import annotations
 
@@ -14,12 +12,9 @@ from backend.persistence import ProjectRepository
 
 
 class SwitchPovTool(BaseTool):
-    """切换 POV 角色（下一章节开始用新 POV）
-
-    v0.6 实现：调 ProjectRepository.update_current_pov
-    """
+    """切换 POV 角色（下一章节开始用新 POV）。传入 new_pov_char_id（格式: char-xxxxxxxx）"""
     name = "switch_pov"
-    description = "切换 POV 角色（下一章节开始用新 POV）"
+    description = "切换 POV 角色（下一章节开始用新 POV）。传入 new_pov_char_id（格式: char-xxxxxxxx）"
     input_schema = SwitchPovInput
     output_schema = SwitchPovResult
 
@@ -30,24 +25,36 @@ class SwitchPovTool(BaseTool):
         self, input: SwitchPovInput, progress_callback=None
     ) -> SwitchPovResult:
         try:
-            # 读 previous_pov
+            # 1. 校验项目存在
             project = self._project_repo.get(input.project_id)
             if project is None:
                 return ToolError(
                     code="NOT_FOUND",
                     message=f"Project not found: {input.project_id}",
                 )
-            previous_pov = project.current_pov or ""
 
-            # 写新 POV 到 DB
-            self._project_repo.update_current_pov(input.project_id, input.new_pov_character)
+            # 2. 校验目标角色存在，取 name
+            char = self._project_repo.get_character(input.project_id, input.new_pov_char_id)
+            if char is None:
+                return ToolError(
+                    code="CHAR_NOT_FOUND",
+                    message=f"Character not found: {input.new_pov_char_id}（请先用 edit_artifact 创建角色）",
+                )
+            new_pov_name = char.get("name", "") if isinstance(char, dict) else getattr(char, "name", "")
+
+            # 3. 记录前 POV char_id
+            previous_pov_char_id = project.current_pov or ""
+
+            # 4. 写新 POV
+            self._project_repo.update_current_pov(input.project_id, input.new_pov_char_id)
 
             if progress_callback:
                 await progress_callback({"step": "done", "percentage": 100})
             return SwitchPovResult(
                 project_id=input.project_id,
-                previous_pov=previous_pov,
-                new_pov=input.new_pov_character,
+                previous_pov_char_id=previous_pov_char_id,
+                new_pov_char_id=input.new_pov_char_id,
+                new_pov_name=new_pov_name,
             )
         except Exception as e:
             return ToolError(code="SWITCH_POV_FAILED", message=str(e))

@@ -1,12 +1,4 @@
-"""ConversationRepository: conversations + messages 表的 CRUD (v0.5)
-
-v0.5 落地：
-- 1.1 小说家 = 全局管家，不绑 project（conversations.project_id 移除）
-- 1.2 user-valid conversation 一对一（status + invalidate 机制）
-- messages.project_id 新增（每条消息绑 project，是"操作目标"）
-
-对应 spec.md §4.1 + infra.md §B.3.2
-"""
+"""ConversationRepository：conversations + messages 表 CRUD"""
 from __future__ import annotations
 
 import json
@@ -21,15 +13,12 @@ from backend.persistence.sqlite_store import get_store
 
 
 class ConversationRepository:
-    """conversations + messages Repository (v0.5 完整版)"""
+    """conversations + messages Repository"""
 
     # ============ Conversation CRUD ============
 
     async def get_active_conversation(self, user_id: str) -> Optional[Conversation]:
-        """获取 user 当前 active conversation（v0.5: 一对一）
-
-        Returns: 当前 active conversation（最多 1 条），None 表示无 active
-        """
+        """获取 user 当前 active conversation（最多 1 条）"""
         with get_store().connection() as conn:
             row = conn.execute(
                 """SELECT * FROM conversations
@@ -40,7 +29,7 @@ class ConversationRepository:
         return self._row_to_conversation(row) if row else None
 
     async def get_or_create_active_conversation(self, user_id: str) -> Conversation:
-        """获取或创建 active conversation（一对一铁律）"""
+        """获取或创建 active conversation"""
         conv = await self.get_active_conversation(user_id)
         if conv:
             return conv
@@ -49,36 +38,30 @@ class ConversationRepository:
     async def get_or_refresh_active_conversation(
         self, user_id: str, session_window_hours: int = 24
     ) -> Conversation:
-        """v0.6.1: 24h 滑窗的 active conversation 管理
+        """24h 滑窗管理：距最后一条消息超过 24h 则 invalidate 旧 active 并新建
 
-        - 查 user 当前 active conv + 看 created_at
-        - 距今 < session_window_hours → 复用 (返回)
-        - 距今 >= session_window_hours → invalidate 旧 active (reason='stale_24h') + 新建
-
-        用途: ws_manager 每次新连接时调, 实现「用户刷新页面 = 新一次进入动作」。
+        使用 last_active_at（最后一次消息时间）而非 created_at，实现真正的滑动窗口：
+        只要用户在 24h 内有消息活动，conversation 就持续有效。
+        add_message 在每次写消息时会自动更新 last_active_at。
         """
         active = await self.get_active_conversation(user_id)
         if active:
-            age = datetime.now() - active.created_at
+            age = datetime.now() - active.last_active_at
             if age < timedelta(hours=session_window_hours):
                 return active
-            # 超过窗口, invalidate 旧 active
             await self.invalidate_conversation(active.id, reason="stale_24h")
-        # 新建
         return await self.create_conversation(user_id)
 
     async def create_conversation(self, user_id: str) -> Conversation:
         """创建新 active conversation（先 invalidate 旧 active）"""
         now = datetime.now()
-        # 1. 先把当前 user 的所有 active conversation 标 invalidated
         with get_store().connection() as conn:
             conn.execute(
                 """UPDATE conversations
-                SET status = 'invalidated', invalidated_at = ?, reason = 'auto'
+                SET status = 'invalidated', invalidated_at = ?
                 WHERE user_id = ? AND status = 'active'""",
                 (now, user_id),
             )
-        # 2. 创建新 active
         conv = Conversation(
             id=str(uuid.uuid4()),
             user_id=user_id,
@@ -98,13 +81,13 @@ class ConversationRepository:
     async def invalidate_conversation(
         self, conversation_id: str, reason: str = "user_new_chat"
     ) -> None:
-        """把对话标 invalidated（"新建对话"触发）"""
+        """把对话标 invalidated"""
         with get_store().connection() as conn:
             conn.execute(
                 """UPDATE conversations
-                SET status = 'invalidated', invalidated_at = ?, reason = ?
+                SET status = 'invalidated', invalidated_at = ?
                 WHERE id = ?""",
-                (datetime.now(), reason, conversation_id),
+                (datetime.now(), conversation_id),
             )
 
     async def get_conversation(self, conversation_id: str) -> Optional[Conversation]:
@@ -136,10 +119,8 @@ class ConversationRepository:
                 ).fetchall()
         return [self._row_to_conversation(r) for r in rows]
 
-    async def update_summary(
-        self, conversation_id: str, summary: str
-    ) -> None:
-        """更新对话 summary（v0.5 新增：对话压缩）"""
+    async def update_summary(self, conversation_id: str, summary: str) -> None:
+        """更新对话 summary"""
         with get_store().connection() as conn:
             conn.execute(
                 "UPDATE conversations SET summary = ? WHERE id = ?",
@@ -155,8 +136,8 @@ class ConversationRepository:
         content: Optional[str] = None,
         tool_calls: Optional[dict] = None,
         tool_results: Optional[dict] = None,
-        thinking: Optional[dict] = None,
-        project_id: Optional[str] = None,  # v0.5 新增
+        project_id: Optional[str] = None,
+        agent_name: Optional[str] = None,
     ) -> Message:
         """添加消息 + 自动更新 last_active_at + message_count"""
         now = datetime.now()
@@ -168,24 +149,23 @@ class ConversationRepository:
             content=content,
             tool_calls=tool_calls,
             tool_results=tool_results,
-            thinking=thinking,
+            agent_name=agent_name,
             created_at=now,
         )
         with get_store().connection() as conn:
             conn.execute(
                 """INSERT INTO messages (
                     id, conversation_id, project_id, role, content,
-                    tool_calls, tool_results, thinking, created_at
+                    tool_calls, tool_results, agent_name, created_at
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     msg.id, msg.conversation_id, msg.project_id, msg.role.value, msg.content,
                     json.dumps(msg.tool_calls) if msg.tool_calls else None,
                     json.dumps(msg.tool_results) if msg.tool_results else None,
-                    json.dumps(msg.thinking) if msg.thinking else None,
+                    msg.agent_name,
                     msg.created_at,
                 ),
             )
-            # 自动更新 last_active_at + message_count
             conn.execute(
                 """UPDATE conversations
                 SET last_active_at = ?,
@@ -210,7 +190,7 @@ class ConversationRepository:
     async def get_messages_by_project(
         self, project_id: str, limit: int = 100
     ) -> list[Message]:
-        """按 project_id 取历史（v0.5 章节生成时用）"""
+        """按 project_id 取历史"""
         with get_store().connection() as conn:
             rows = conn.execute(
                 "SELECT * FROM messages WHERE project_id = ? "
@@ -222,7 +202,7 @@ class ConversationRepository:
     async def query_messages(
         self, conversation_id: str, keyword: str, limit: int = 1000
     ) -> list[Message]:
-        """SQLite LIKE 关键词搜索（验收点 A5）"""
+        """SQLite LIKE 关键词搜索"""
         with get_store().connection() as conn:
             rows = conn.execute(
                 "SELECT * FROM messages WHERE conversation_id = ? "
@@ -237,7 +217,6 @@ class ConversationRepository:
         if row is None:
             return None
         d = dict(row)
-        # v0.5 字段可能不存在（v001/v002 老数据）— 兜底
         return Conversation(
             id=d["id"],
             user_id=d["user_id"],
@@ -245,7 +224,6 @@ class ConversationRepository:
             last_active_at=datetime.fromisoformat(d["last_active_at"]) if isinstance(d["last_active_at"], str) else d["last_active_at"],
             status=ConversationStatus(d.get("status", "active")),
             invalidated_at=datetime.fromisoformat(d["invalidated_at"]) if d.get("invalidated_at") and isinstance(d["invalidated_at"], str) else d.get("invalidated_at"),
-            reason=d.get("reason"),
             summary=d.get("summary"),
             message_count=d.get("message_count", 0),
         )
@@ -260,6 +238,6 @@ class ConversationRepository:
             content=d.get("content"),
             tool_calls=json.loads(d["tool_calls"]) if d.get("tool_calls") else None,
             tool_results=json.loads(d["tool_results"]) if d.get("tool_results") else None,
-            thinking=json.loads(d["thinking"]) if d.get("thinking") else None,
+            agent_name=d.get("agent_name"),
             created_at=datetime.fromisoformat(d["created_at"]) if isinstance(d["created_at"], str) else d["created_at"],
         )

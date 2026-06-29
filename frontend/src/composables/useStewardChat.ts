@@ -106,12 +106,8 @@ export function useStewardChat() {
     if (t === 'agent_thinking') {
       thinking.value = true
       addAgentMessage(msg.content || '思考中...', true)
-    } else if (t === 'tool_calling') {
-      // 工具调用中（前端可展示「正在调用 search_memory...」）
-      addAgentMessage(`🔧 调用工具：${msg.tool}（参数：${JSON.stringify(msg.args || {}).slice(0, 80)}...）`)
-    } else if (t === 'tool_result') {
-      // 工具结果（前端可折叠/隐藏）
-      addToolMessage(msg.tool, msg.args, msg.result)
+    } else if (t === 'tool_calling' || t === 'tool_result') {
+      // 前端不展示 tool 调用信息，静默忽略
     } else if (t === 'agent_message') {
       // 最终回复
       thinking.value = false

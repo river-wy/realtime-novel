@@ -1,9 +1,8 @@
-"""onboarding_artifacts — 7 件基座拼装 helper
+"""onboarding_artifacts：7 件基座拼装 helper
 
 stateless helper：输入 project_id + state_json.payload，调 save_7_artifacts 合并写入。
 
-链路：
-  管家 ReAct → onboarding_user_confirm 工具（Step 3/4）→ assemble_7_artifacts
+链路：管家 ReAct → onboarding_user_confirm 工具（Step 3/4）→ assemble_7_artifacts
 """
 from __future__ import annotations
 
@@ -38,35 +37,32 @@ ROLE_MAP = {
 # ============ 7 件拼装核心 ============
 
 def assemble_7_artifacts(project_id: str, payload: Dict[str, Any]) -> List[str]:
-    """从 state_json.payload 拼装 7 件基座，调 save_7_artifacts 合并写入。
+    """从 state_json.payload 拼装 6 件基座，调 save_7_artifacts 合并写入。
 
     Args:
         project_id: 项目 ID
         payload: onboarding_state.state_json.payload（含 Step 1-4 全部字段）
 
     Returns:
-        已写入的 7 件名称列表
+        已写入的 6 件名称列表
 
     字段映射：
         Step 1: genres / styles / tone → world_tree + genre_resonance
         Step 3: story_core / characters / opening_scene → world_tree（core_rules）+ character_card + main_plot（arc_phrase）
         Step 4: main_arc / sub_plots / seeds → main_plot（beats）+ sub_plot + seed_table
 
-    笔风由 projects.style_pack_id 承载，不写入 7 件。
+    笔风由 projects.style_pack_id 承载，不写入 6 件。
     """
     genres = payload.get("genres", []) or []
     styles = payload.get("styles", []) or []
     tone = payload.get("tone", "冷叙述")
-    # Step 3 字段
     story_core = payload.get("story_core", "") or ""
     characters_step3 = payload.get("characters", "") or ""
     opening_scene = payload.get("opening_scene", "") or ""
-    # Step 4 字段
     main_arc_raw = payload.get("main_arc", "") or ""
     sub_plots_raw = payload.get("sub_plots", "") or ""
     seeds_raw = payload.get("seeds", "") or ""
 
-    # 推断 era 和 theme
     era = "现代"
     for g in genres:
         if g in ERA_MAP:
@@ -74,17 +70,14 @@ def assemble_7_artifacts(project_id: str, payload: Dict[str, Any]) -> List[str]:
             break
     theme = genres[0] if genres else "都市"
 
-    # 主线核心：用 story_core 作为主线信号
     main_arc = story_core or f"{theme}题材下主角的成长与命运"
 
-    # core_rules：从主线 + 开篇场景推断
     core_rules = [
         {"id": "R1", "statement": f"主线: {main_arc}", "enforcement": "hard", "applies_to": "all"},
     ]
     if opening_scene:
         core_rules.append({"id": "R2", "statement": f"开篇场景: {opening_scene}", "enforcement": "soft", "applies_to": "all"})
 
-    # main_plot beats：从 main_arc_raw 按行拆
     beats = []
     if main_arc_raw:
         for i, line in enumerate(main_arc_raw.split("\n")):
@@ -106,7 +99,6 @@ def assemble_7_artifacts(project_id: str, payload: Dict[str, Any]) -> List[str]:
             {"id": "beat-3", "sequence": 3, "title": "高潮", "description": "高潮与转折", "status": "pending", "chapter_range": {"start": 16, "end": 25}},
         ]
 
-    # sub_plot threads：按行拆
     sub_plot_threads = []
     for line in sub_plots_raw.split("\n"):
         line = line.strip()
@@ -119,7 +111,6 @@ def assemble_7_artifacts(project_id: str, payload: Dict[str, Any]) -> List[str]:
                 "priority": "side",
             })
 
-    # character_card：Step 3 的 '名字 - 身份/角色 - 特点/目的' 格式
     characters = []
     for line in characters_step3.split("\n"):
         line = line.strip()
@@ -139,7 +130,6 @@ def assemble_7_artifacts(project_id: str, payload: Dict[str, Any]) -> List[str]:
             "traits": [],
         })
 
-    # story_core 兜底：没有 Step 3 角色时建一个主角
     if not characters and story_core:
         characters.append({
             "id": "char-000",
@@ -149,7 +139,6 @@ def assemble_7_artifacts(project_id: str, payload: Dict[str, Any]) -> List[str]:
             "traits": [],
         })
 
-    # seed_table：按行拆
     seeds = []
     for i, line in enumerate(seeds_raw.split("\n")):
         line = line.strip()
@@ -157,6 +146,11 @@ def assemble_7_artifacts(project_id: str, payload: Dict[str, Any]) -> List[str]:
             seeds.append({
                 "id": i + 1,
                 "content": line,
+                "name": line[:30],
+                "trigger": None,
+                "payoff": None,
+                "estimated_chapter": None,
+                "payoff_chapter": None,
                 "importance": {"primary": "小巧思"},
                 "size": "中线",
                 "orientation": "氛围营造",
@@ -164,7 +158,6 @@ def assemble_7_artifacts(project_id: str, payload: Dict[str, Any]) -> List[str]:
                 "status": "planted",
             })
 
-    # 写 7 件（save_7_artifacts 是合并式写入）
     repo = ProjectRepository()
     repo.save_7_artifacts(
         project_id=project_id,
@@ -174,13 +167,10 @@ def assemble_7_artifacts(project_id: str, payload: Dict[str, Any]) -> List[str]:
                 "geography": {"primary": f"{theme}题材下的故事舞台"},
                 "core_rules": core_rules,
             },
-            "branches": [],
             "metadata": {
                 "opening_scene": opening_scene,
             },
         },
-        # style_charter 表结构保留（DB 兼容），传空 dict
-        style_charter={},
         genre_resonance={
             "accept": [{"text": g, "weight": 0.8} for g in genres],
             "reject": [],
@@ -214,10 +204,10 @@ def assemble_7_artifacts(project_id: str, payload: Dict[str, Any]) -> List[str]:
 # ============ 工具函数 ============
 
 def merge_payload_to_state(project_id: str, step: int, fields: Dict[str, Any]) -> Dict[str, Any]:
-    """把 confirm 的字段合并到 onboarding_state.state_json.payload（合并而非覆盖）"""
+    """把 confirm 的字段合并到 onboarding_state.state_json.payload"""
     return OnboardingRepository().merge_payload(project_id, step, fields)
 
 
 def load_payload(project_id: str) -> Dict[str, Any]:
-    """从 onboarding_state.state_json 读完整 payload（Step 1-4 合并后）"""
+    """从 onboarding_state.state_json 读完整 payload"""
     return OnboardingRepository().get_payload(project_id)

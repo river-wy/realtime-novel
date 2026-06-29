@@ -15,7 +15,6 @@ from . import exceptions
 from .event_bus import event_bus
 from .schemas import (
     WorldTreeSchema,
-    StyleCharterSchema,
     GenreResonanceSchema,
     MainPlotSchema,
     SubPlotSchema,
@@ -29,7 +28,6 @@ __all__ = [
     "WorldTree",
     "event_bus",
     "WorldTreeSchema",
-    "StyleCharterSchema",
     "GenreResonanceSchema",
     "MainPlotSchema",
     "SubPlotSchema",

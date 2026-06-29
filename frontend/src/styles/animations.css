@@ -1,8 +1,38 @@
-/* 灵动 motion 关键帧 */
+/* 灵动 motion 关键帧 · 月光樱花琉璃宫 */
 
 @keyframes fadeIn {
   from { opacity: 0; transform: translateY(8px); }
   to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes fadeInDown {
+  from { opacity: 0; transform: translateY(-12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(16px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes fadeInLeft {
+  from { opacity: 0; transform: translateX(-20px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes fadeInRight {
+  from { opacity: 0; transform: translateX(20px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes slideInRight {
+  from { opacity: 0; transform: translateX(20px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes slideInLeft {
+  from { opacity: 0; transform: translateX(-20px); }
+  to   { opacity: 1; transform: translateX(0); }
 }
 
 @keyframes sparkle {
@@ -13,11 +43,6 @@
 @keyframes glow {
   0%, 100% { box-shadow: 0 0 12px rgba(255, 143, 177, 0.2); }
   50%      { box-shadow: 0 0 24px rgba(255, 143, 177, 0.6); }
-}
-
-@keyframes slideUp {
-  from { opacity: 0; transform: translateY(20px); }
-  to   { opacity: 1; transform: translateY(0); }
 }
 
 @keyframes drift {
@@ -36,13 +61,67 @@
   to   { transform: rotate(360deg); }
 }
 
+@keyframes blink {
+  50% { opacity: 0; }
+}
+
+@keyframes thinking-pulse {
+  50% { opacity: 0.5; }
+}
+
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+@keyframes petal-fall {
+  0% { transform: translateY(0) rotate(0deg); }
+  100% { transform: translateY(110vh) rotate(360deg); }
+}
+
+@keyframes indicator-slide {
+  from { transform: scaleX(0); }
+  to   { transform: scaleX(1); }
+}
+
+@keyframes menuIn {
+  from { transform: scale(0.95); opacity: 0; }
+  to   { transform: scale(1); opacity: 1; }
+}
+
+@keyframes dialogIn {
+  from { transform: scale(0.92); opacity: 0; }
+  to   { transform: scale(1); opacity: 1; }
+}
+
+@keyframes cardIn {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes bannerIn {
+  from { transform: scale(1.05); opacity: 0; }
+  to   { transform: scale(1); opacity: 1; }
+}
+
 /* 工具类 */
 .fade-in {
-  animation: fadeIn var(--motion-base) var(--ease-out) both;
+  animation: fadeIn var(--dur-base) var(--ease-out) both;
 }
 .glow {
   animation: glow 2s ease-in-out infinite;
 }
 .sparkle {
   animation: sparkle 2s ease-in-out infinite;
+}
+
+/* skeleton shimmer 工具类 */
+.skeleton-shimmer {
+  background: linear-gradient(90deg,
+    var(--color-bg-elevated) 25%,
+    var(--glass-bg) 50%,
+    var(--color-bg-elevated) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.8s linear infinite;
 }

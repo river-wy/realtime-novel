@@ -1,16 +1,6 @@
-"""ProjectRepository — projects 表 + 7 件基座 CRUD
+"""ProjectRepository：projects 表 + 6 件基座 CRUD
 
-v0.4.1 落地：所有 7 件基座操作走 DB，不再走文件
-- Project: 项目元数据
-- WorldTreeRow: 世界树
-- StyleCharterRow: 风格宪法
-- GenreResonanceRow: 题材共鸣
-- MainPlotRow: 主线
-- SubPlotRow: 支线
-- CharacterRow + CharacterRelationshipRow: 人物 + 关系
-- SeedRow: 种子
-
-所有 JSON 字段在 Repository 边界做序列化/反序列化
+所有 JSON 字段在 Repository 边界做序列化/反序列化。
 """
 from __future__ import annotations
 
@@ -30,14 +20,12 @@ def _now() -> datetime:
 
 
 def _to_json(value: Any) -> Optional[str]:
-    """序列化为 JSON 字符串（DB 存储），None → None"""
     if value is None:
         return None
     return json.dumps(value, ensure_ascii=False)
 
 
 def _from_json(value: Optional[str]) -> Any:
-    """反序列化 JSON 字符串 → Python 对象，None → None"""
     if value is None:
         return None
     return json.loads(value)
@@ -47,18 +35,14 @@ def _from_json(value: Optional[str]) -> Any:
 
 @logger
 class ProjectRepository:
-    """projects 表 CRUD + 7 件基座"""
+    """projects 表 CRUD + 6 件基座"""
 
     # ----- Project 元数据 -----
 
     def create(self, project_id: str, name: str, palette: str = "",
                exploration_level: str = "standard",
                style_pack_id: Optional[str] = None) -> Project:
-        """创建项目（projects 表）
-
-        v0.8: exploration_level 默认 standard
-        v0.6.2: style_pack_id 可选，为空时用默认笔风
-        """
+        """创建项目"""
         now = _now()
         with get_store().connection() as conn:
             conn.execute(
@@ -78,7 +62,7 @@ class ProjectRepository:
         )
 
     def update_style_pack_id(self, project_id: str, style_pack_id: str) -> None:
-        """更新项目的写作笔风 id"""
+        """更新写作笔风 id"""
         with get_store().connection() as conn:
             conn.execute(
                 "UPDATE projects SET style_pack_id = ?, updated_at = ? WHERE id = ?",
@@ -87,7 +71,7 @@ class ProjectRepository:
         self.log.info("DB project UPDATE style_pack_id: id=%s, style_pack_id=%s", project_id, style_pack_id)
 
     def get_style_pack_id(self, project_id: str) -> Optional[str]:
-        """读取项目的写作笔风 id（为空返回 None）"""
+        """读取写作笔风 id，不存在返回 None"""
         with get_store().connection() as conn:
             row = conn.execute(
                 "SELECT style_pack_id FROM projects WHERE id = ?",
@@ -132,7 +116,7 @@ class ProjectRepository:
             )
 
     def update_exploration_level(self, project_id: str, new_level: str) -> None:
-        """v0.8: 切换项目的探索度 (conservative/standard/wild)"""
+        """切换探索度 (conservative/standard/wild)"""
         if new_level not in ("conservative", "standard", "wild"):
             raise ValueError(f"exploration_level 必须是 conservative/standard/wild, 收到: {new_level!r}")
         with get_store().connection() as conn:
@@ -143,6 +127,7 @@ class ProjectRepository:
         self.log.info("DB project UPDATE exploration_level: id=%s, level=%s", project_id, new_level)
 
     def update_current_pov(self, project_id: str, new_pov: Optional[str]) -> None:
+        """更新 POV 角色 char_id"""
         with get_store().connection() as conn:
             conn.execute(
                 "UPDATE projects SET current_pov = ?, updated_at = ? WHERE id = ?",
@@ -150,7 +135,6 @@ class ProjectRepository:
             )
 
     def update_cover_image_url(self, project_id: str, cover_image_url: Optional[str]) -> None:
-        """v0.9: 更新世界封面图 URL"""
         with get_store().connection() as conn:
             conn.execute(
                 "UPDATE projects SET cover_image_url = ?, updated_at = ? WHERE id = ?",
@@ -167,13 +151,13 @@ class ProjectRepository:
         self.log.info("DB project SOFT DELETE: id=%s", project_id)
 
     def hard_delete(self, project_id: str) -> None:
-        """物理删除（cascade 删 7 件基座）"""
+        """物理删除（cascade 删 6 件基座）"""
         with get_store().connection() as conn:
             conn.execute("DELETE FROM projects WHERE id = ?", (project_id,))
         self.log.info("DB project HARD DELETE: id=%s", project_id)
 
     def restore_delete(self, project_id: str) -> None:
-        """取消软删标记（用于 trash 恢复）"""
+        """取消软删标记"""
         with get_store().connection() as conn:
             conn.execute(
                 "UPDATE projects SET deleted_at = NULL WHERE id = ?",
@@ -181,76 +165,38 @@ class ProjectRepository:
             )
         self.log.info("DB project RESTORE: id=%s", project_id)
 
-    # ----- 7 件基座 upsert -----
+    # ----- 6 件基座 upsert -----
 
     def _upsert_world_tree(self, project_id: str, data: Dict[str, Any]) -> None:
         base = data.get("base", {}) or {}
         timeline = base.get("timeline", {}) or {}
         geography = base.get("geography", {}) or {}
-        year_range = timeline.get("year_range", {}) or {}
         with get_store().connection() as conn:
             conn.execute(
                 """
                 INSERT INTO world_tree (
-                    project_id, timeline_era, year_range_start, year_range_end, anchor_event,
+                    project_id, timeline_era, anchor_event,
                     geography_primary, geography_secondary_json, geography_spatial_rules_json,
-                    core_rules_json, branches_json, metadata_json, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    core_rules_json, metadata_json, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(project_id) DO UPDATE SET
                     timeline_era=excluded.timeline_era,
-                    year_range_start=excluded.year_range_start,
-                    year_range_end=excluded.year_range_end,
                     anchor_event=excluded.anchor_event,
                     geography_primary=excluded.geography_primary,
                     geography_secondary_json=excluded.geography_secondary_json,
                     geography_spatial_rules_json=excluded.geography_spatial_rules_json,
                     core_rules_json=excluded.core_rules_json,
-                    branches_json=excluded.branches_json,
                     metadata_json=excluded.metadata_json,
                     updated_at=excluded.updated_at
                 """,
                 (
                     project_id,
                     timeline.get("era"),
-                    year_range.get("start"),
-                    year_range.get("end"),
                     timeline.get("anchor_event"),
                     geography.get("primary"),
                     _to_json(geography.get("secondary", [])),
                     _to_json(geography.get("spatial_rules")),
                     _to_json(base.get("core_rules", [])),
-                    _to_json(data.get("branches", [])),
-                    _to_json(data.get("metadata", {})),
-                    _now(),
-                ),
-            )
-
-    def _upsert_style_charter(self, project_id: str, data: Dict[str, Any]) -> None:
-        with get_store().connection() as conn:
-            conn.execute(
-                """
-                INSERT INTO style_charter (
-                    project_id, prose_style_json, tone_json, density_json,
-                    taboos_json, notes_json, limits_json, metadata_json, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(project_id) DO UPDATE SET
-                    prose_style_json=excluded.prose_style_json,
-                    tone_json=excluded.tone_json,
-                    density_json=excluded.density_json,
-                    taboos_json=excluded.taboos_json,
-                    notes_json=excluded.notes_json,
-                    limits_json=excluded.limits_json,
-                    metadata_json=excluded.metadata_json,
-                    updated_at=excluded.updated_at
-                """,
-                (
-                    project_id,
-                    _to_json(data.get("prose_style")),
-                    _to_json(data.get("tone")),
-                    _to_json(data.get("density")),
-                    _to_json(data.get("taboos")),
-                    _to_json(data.get("notes", [])),
-                    _to_json(data.get("limits")),
                     _to_json(data.get("metadata", {})),
                     _now(),
                 ),
@@ -305,7 +251,7 @@ class ProjectRepository:
             )
 
     def _replace_subplots(self, project_id: str, sub_plots: List[Dict[str, Any]]) -> None:
-        """支线一对多：先删后插（显式事务，防并发冲突）"""
+        """支线一对多：先删后插（显式事务）"""
         with get_store().transaction() as conn:
             conn.execute("DELETE FROM sub_plot WHERE project_id = ?", (project_id,))
             for sp in sub_plots or []:
@@ -313,8 +259,8 @@ class ProjectRepository:
                     """
                     INSERT OR REPLACE INTO sub_plot (
                         id, project_id, title, description, parent_beat_id, status, priority,
-                        linked_seeds_json, linked_chars_json, beats_json, metadata_json, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        linked_seeds_json, linked_chars_json, metadata_json, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         sp.get("id", f"subplot-{uuid.uuid4().hex[:8]}"),
@@ -326,14 +272,13 @@ class ProjectRepository:
                         sp.get("priority", "side"),
                         _to_json(sp.get("linked_seeds", [])),
                         _to_json(sp.get("linked_chars", [])),
-                        _to_json(sp.get("beats", [])),
                         _to_json(sp.get("metadata", {})),
                         _now(),
                     ),
                 )
 
     def _replace_characters(self, project_id: str, char_card: Dict[str, Any]) -> None:
-        """角色一对多 + 关系一对多：先删角色（cascade 删关系），在显式事务内执行，防止并发冲突"""
+        """角色 + 关系一对多：先删角色（cascade 删关系），显式事务"""
         characters = char_card.get("characters", []) or []
         relationships = char_card.get("relationships", []) or []
         with get_store().transaction() as conn:
@@ -382,7 +327,7 @@ class ProjectRepository:
                 )
 
     def _replace_seeds(self, project_id: str, seeds: List[Dict[str, Any]]) -> None:
-        """种子一对多：先删后插（显式事务，防并发冲突）"""
+        """种子一对多：先删后插（显式事务）"""
         with get_store().transaction() as conn:
             conn.execute("DELETE FROM seeds WHERE project_id = ?", (project_id,))
             for s in seeds or []:
@@ -390,15 +335,22 @@ class ProjectRepository:
                 conn.execute(
                     """
                     INSERT INTO seeds (
-                        project_id, content, importance_primary, size, planned_interval,
+                        project_id, content, name, trigger, payoff,
+                        estimated_chapter, payoff_chapter,
+                        importance_primary, size, planned_interval,
                         orientation, planted_at_chapter, planted_in_node, planted_context,
                         last_seen_chapter, weight, status, linked_char_ids_json,
                         linked_subplot_id, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         project_id,
                         s.get("content", ""),
+                        s.get("name"),
+                        s.get("trigger"),
+                        s.get("payoff"),
+                        s.get("estimated_chapter"),
+                        s.get("payoff_chapter"),
                         importance.get("primary", "小巧思"),
                         s.get("size", "点状"),
                         s.get("planned_interval"),
@@ -419,45 +371,34 @@ class ProjectRepository:
         self,
         project_id: str,
         world_tree: Dict[str, Any],
-        style_charter: Dict[str, Any],
         genre_resonance: Dict[str, Any],
         main_plot: Dict[str, Any],
         sub_plot: Dict[str, Any],
         character_card: Dict[str, Any],
         seed_table: Dict[str, Any],
     ) -> None:
-        """7 件基座一次性落库（onboarding 完成后调用）"""
+        """6 件基座一次性落库"""
         self._upsert_world_tree(project_id, world_tree)
-        self._upsert_style_charter(project_id, style_charter)
         self._upsert_genre_resonance(project_id, genre_resonance)
         self._upsert_main_plot(project_id, main_plot)
-        # sub_plot 提取 threads 列表
         threads = sub_plot.get("threads", []) if isinstance(sub_plot, dict) else []
         self._replace_subplots(project_id, threads)
         self._replace_characters(project_id, character_card)
-        # seed_table 提取 seeds 列表
         seeds = seed_table.get("seeds", []) if isinstance(seed_table, dict) else []
         self._replace_seeds(project_id, seeds)
-        # 触底时间更新
         with get_store().connection() as conn:
             conn.execute(
                 "UPDATE projects SET updated_at = ? WHERE id = ?",
                 (_now(), project_id),
             )
 
-    # ----- 7 件基座读取 -----
+    # ----- 6 件基座读取 -----
 
     def load_all_artifacts(self, project_id: str) -> Dict[str, Any]:
-        """7 件基座一次性读出 (v0.8.2 key 改正常命名, 不再带 .yaml 后缀)
-
-        v0.4.1 入库后本方法取代了 WorldTree.from_dict, 直接返 dict 给 context_builder 用
-        """
+        """6 件基座一次性读出，返回 dict 给 context_builder 用"""
         with get_store().connection() as conn:
             wt = conn.execute(
                 "SELECT * FROM world_tree WHERE project_id = ?", (project_id,)
-            ).fetchone()
-            sc = conn.execute(
-                "SELECT * FROM style_charter WHERE project_id = ?", (project_id,)
             ).fetchone()
             gr = conn.execute(
                 "SELECT * FROM genre_resonance WHERE project_id = ?", (project_id,)
@@ -479,9 +420,7 @@ class ProjectRepository:
             ).fetchall()
 
         return {
-            # v0.8.2: 去掉 .yaml 后缀 (v0.4.1 入库后文件命名已废弃, 改用正常 key)
             "world_tree": _serialize_world_tree(dict(wt) if wt else {}),
-            "style_charter": _serialize_style_charter(dict(sc) if sc else {}),
             "genre_resonance": _serialize_genre_resonance(dict(gr) if gr else {}),
             "main_plot": _serialize_main_plot(dict(mp) if mp else {}),
             "sub_plot": _serialize_sub_plot([dict(s) for s in sps]),
@@ -511,6 +450,20 @@ class ProjectRepository:
             )
         self.log.info("DB character ADD: project=%s, char_id=%s", project_id, char_id)
         return char_id
+
+    def get_character(self, project_id: str, char_id: str) -> Optional[Dict[str, Any]]:
+        """按 char_id 查单个角色，不存在返回 None"""
+        with get_store().connection() as conn:
+            row = conn.execute(
+                "SELECT * FROM characters WHERE id = ? AND project_id = ?",
+                (char_id, project_id),
+            ).fetchone()
+        if not row:
+            return None
+        d = dict(row)
+        d["traits"] = _from_json(d.pop("traits_json", None)) or []
+        d["metadata"] = _from_json(d.pop("metadata_json", None)) or {}
+        return d
 
     def update_character(self, project_id: str, char_id: str, data: Dict[str, Any]) -> bool:
         """增量更新单个角色（diff merge），返回是否找到"""
@@ -581,10 +534,10 @@ class ProjectRepository:
             )
         self.log.info("DB relationship DELETE: project=%s, rel_id=%s", project_id, rel_id)
 
-    # ----- Core Rule 增量 CRUD（world_tree.core_rules_json JSON 数组内操作）-----
+    # ----- Core Rule（world_tree.core_rules_json 数组操作）-----
 
     def get_core_rules(self, project_id: str) -> Optional[List[Dict[str, Any]]]:
-        """读取 core_rules 列表，world_tree 不存在则返回 None"""
+        """读取 core_rules 列表，world_tree 不存在返回 None"""
         with get_store().connection() as conn:
             row = conn.execute(
                 "SELECT core_rules_json FROM world_tree WHERE project_id = ?",
@@ -602,7 +555,7 @@ class ProjectRepository:
                 (_to_json(rules), _now(), project_id),
             )
 
-    # ----- Timeline / Geography upsert（world_tree 列级更新）-----
+    # ----- Timeline / Geography（world_tree 列级更新）-----
 
     def update_timeline(self, project_id: str, data: Dict[str, Any]) -> bool:
         """更新 world_tree timeline 字段，返回是否找到"""
@@ -612,17 +565,12 @@ class ProjectRepository:
             ).fetchone()
             if not row:
                 return False
-            year_range = data.get("year_range")
-            year_start = year_range.get("start") if isinstance(year_range, dict) else None
-            year_end = year_range.get("end") if isinstance(year_range, dict) else None
             conn.execute(
                 """UPDATE world_tree SET
-                    timeline_era=?, year_range_start=?, year_range_end=?, anchor_event=?, updated_at=?
+                    timeline_era=?, anchor_event=?, updated_at=?
                 WHERE project_id=?""",
                 (
                     data.get("era", row["timeline_era"]),
-                    year_start if year_start is not None else row["year_range_start"],
-                    year_end if year_end is not None else row["year_range_end"],
                     data.get("anchor_event", row["anchor_event"]),
                     _now(), project_id,
                 ),
@@ -660,14 +608,21 @@ class ProjectRepository:
         with get_store().connection() as conn:
             cursor = conn.execute(
                 """INSERT INTO seeds (
-                    project_id, content, importance_primary, size, planned_interval,
+                    project_id, content, name, trigger, payoff,
+                    estimated_chapter, payoff_chapter,
+                    importance_primary, size, planned_interval,
                     orientation, planted_at_chapter, planted_in_node, planted_context,
                     last_seen_chapter, weight, status, linked_char_ids_json,
                     linked_subplot_id, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     project_id,
                     data.get("content", ""),
+                    data.get("name"),
+                    data.get("trigger"),
+                    data.get("payoff"),
+                    data.get("estimated_chapter"),
+                    data.get("payoff_chapter"),
                     data.get("importance_primary", "小巧思"),
                     data.get("size", "点状"),
                     data.get("planned_interval"),
@@ -699,11 +654,18 @@ class ProjectRepository:
             old = dict(row)
             conn.execute(
                 """UPDATE seeds SET
-                    content=?, importance_primary=?, size=?, planned_interval=?,
+                    content=?, name=?, trigger=?, payoff=?,
+                    estimated_chapter=?, payoff_chapter=?,
+                    importance_primary=?, size=?, planned_interval=?,
                     orientation=?, weight=?, status=?, updated_at=?
                 WHERE id=? AND project_id=?""",
                 (
                     data.get("content", old["content"]),
+                    data.get("name", old.get("name")),
+                    data.get("trigger", old.get("trigger")),
+                    data.get("payoff", old.get("payoff")),
+                    data.get("estimated_chapter", old.get("estimated_chapter")),
+                    data.get("payoff_chapter", old.get("payoff_chapter")),
                     data.get("importance_primary", old["importance_primary"]),
                     data.get("size", old["size"]),
                     data.get("planned_interval", old["planned_interval"]),
@@ -734,8 +696,8 @@ class ProjectRepository:
             conn.execute(
                 """INSERT INTO sub_plot (
                     id, project_id, title, description, parent_beat_id, status, priority,
-                    linked_seeds_json, linked_chars_json, beats_json, metadata_json, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    linked_seeds_json, linked_chars_json, metadata_json, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     sp_id, project_id,
                     data.get("title", ""), data.get("description"),
@@ -744,7 +706,6 @@ class ProjectRepository:
                     data.get("priority", "side"),
                     _to_json(data.get("linked_seeds", [])),
                     _to_json(data.get("linked_chars", [])),
-                    _to_json(data.get("beats", [])),
                     _to_json(data.get("metadata", {})),
                     _now(),
                 ),
@@ -761,10 +722,10 @@ class ProjectRepository:
             )
         self.log.info("DB subplot DELETE: project=%s, sp_id=%s", project_id, sp_id)
 
-    # ----- Beat 增量 CRUD（main_plot.beats_json JSON 数组内操作）-----
+    # ----- Beat（main_plot.beats_json 数组操作）-----
 
     def get_beats(self, project_id: str) -> Optional[List[Dict[str, Any]]]:
-        """读取 beats 列表，main_plot 不存在则返回 None"""
+        """读取 beats 列表，main_plot 不存在返回 None"""
         with get_store().connection() as conn:
             row = conn.execute(
                 "SELECT beats_json FROM main_plot WHERE project_id = ?",
@@ -784,7 +745,6 @@ class ProjectRepository:
 
 
 # ============ DB → dict 序列化 ============
-# 把单行/多行转成原 YAML 加载后的 dict 结构（向后兼容 WorldTree.from_dict / ChapterGenerator）
 
 def _serialize_world_tree(row: Dict[str, Any]) -> Dict[str, Any]:
     if not row:
@@ -792,11 +752,6 @@ def _serialize_world_tree(row: Dict[str, Any]) -> Dict[str, Any]:
     timeline = {}
     if row.get("timeline_era"):
         timeline["era"] = row["timeline_era"]
-    if row.get("year_range_start") is not None:
-        timeline["year_range"] = {
-            "start": row["year_range_start"],
-            "end": row.get("year_range_end"),
-        }
     if row.get("anchor_event"):
         timeline["anchor_event"] = row["anchor_event"]
     geography = {}
@@ -813,22 +768,6 @@ def _serialize_world_tree(row: Dict[str, Any]) -> Dict[str, Any]:
             "geography": geography,
             "core_rules": _from_json(row.get("core_rules_json")) or [],
         },
-        "branches": _from_json(row.get("branches_json")) or [],
-        "metadata": _from_json(row.get("metadata_json")) or {},
-    }
-
-
-def _serialize_style_charter(row: Dict[str, Any]) -> Dict[str, Any]:
-    if not row:
-        return {}
-    return {
-        "schema_version": "1.0",
-        "prose_style": _from_json(row.get("prose_style_json")) or {},
-        "tone": _from_json(row.get("tone_json")) or {},
-        "density": _from_json(row.get("density_json")) or {},
-        "taboos": _from_json(row.get("taboos_json")) or [],
-        "notes": _from_json(row.get("notes_json")) or [],
-        "limits": _from_json(row.get("limits_json")) or {},
         "metadata": _from_json(row.get("metadata_json")) or {},
     }
 
@@ -869,7 +808,6 @@ def _serialize_sub_plot(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
             "priority": r.get("priority"),
             "linked_seeds": _from_json(r.get("linked_seeds_json")) or [],
             "linked_chars": _from_json(r.get("linked_chars_json")) or [],
-            "beats": _from_json(r.get("beats_json")) or [],
             "metadata": _from_json(r.get("metadata_json")) or {},
         })
     return {"schema_version": "1.0", "threads": threads, "metadata": {}}
@@ -914,6 +852,11 @@ def _serialize_seeds(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
         seeds.append({
             "id": r["id"],
             "content": r.get("content", ""),
+            "name": r.get("name"),
+            "trigger": r.get("trigger"),
+            "payoff": r.get("payoff"),
+            "estimated_chapter": r.get("estimated_chapter"),
+            "payoff_chapter": r.get("payoff_chapter"),
             "importance": {"primary": r.get("importance_primary")},
             "size": r.get("size"),
             "planned_interval": r.get("planned_interval"),

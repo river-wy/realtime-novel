@@ -1,30 +1,57 @@
-/* 樱色夜空主题 tokens
- * 主色: 樱色夜空 #1B0F2E
- * 强调: 樱粉 #FF8FB1 / 金 #FFC857 / 紫 #8B5CF6
+/* 月光樱花 · 琉璃宫主题 tokens
+ * 主色: 月光下的樱花 #120a26
+ * 强调: 樱粉 #FF8FB1 / 月光金 #FFC857 / 星辉紫 #8B5CF6
  */
 
 :root {
-  /* 夜空背景层 */
-  --color-night-1: #1B0F2E;
-  --color-night-2: #2A1B4A;
-  --color-night-3: #3D2A66;
+  /* === 背景：月光夜空 === */
+  --color-bg-deep: #0a0617;
+  --color-bg-base: #120a26;
+  --color-bg-surface: #1B1035;
+  --color-bg-elevated: #2A1B4A;
 
-  /* 文字 */
-  --color-text: #F5F0FF;
-  --color-text-dim: #B8AED4;
-  --color-text-faint: #7A6FA0;
+  /* === 文字 === */
+  --color-text-primary: #F5F0FF;
+  --color-text-secondary: #C4B8E0;
+  --color-text-tertiary: #8A7FB5;
+  --color-text-on-accent: #1B0F2E;
 
-  /* 强调色 */
-  --color-accent-1: #FF8FB1;       /* 樱粉 */
-  --color-accent-2: #FFC857;       /* 金 */
-  --color-accent-3: #8B5CF6;       /* 紫 */
+  /* === 强调色：樱花月光系 === */
+  --color-sakura: #FF8FB1;
+  --color-sakura-light: #FFB3CC;
+  --color-sakura-glow: rgba(255, 143, 177, 0.25);
+  --color-moon: #FFC857;
+  --color-moon-glow: rgba(255, 200, 87, 0.25);
+  --color-violet: #8B5CF6;
+  --color-violet-glow: rgba(139, 92, 246, 0.25);
 
-  /* 状态色 */
+  /* === 状态色 === */
   --color-success: #4ADE80;
   --color-warning: #FBBF24;
   --color-error: #F87171;
+  --color-info: #60A5FA;
 
-  /* 间距 */
+  /* === 玻璃表面 === */
+  --glass-bg: rgba(255, 255, 255, 0.04);
+  --glass-bg-hover: rgba(255, 255, 255, 0.08);
+  --glass-bg-active: rgba(255, 255, 255, 0.12);
+  --glass-border: rgba(255, 255, 255, 0.08);
+  --glass-border-hover: rgba(255, 143, 177, 0.3);
+  --glass-blur: 20px;
+
+  /* === 光晕 === */
+  --glow-sakura: 0 0 24px rgba(255, 143, 177, 0.3);
+  --glow-violet: 0 0 24px rgba(139, 92, 246, 0.3);
+  --glow-moon: 0 0 16px rgba(255, 200, 87, 0.35);
+  --glow-strong: 0 0 48px rgba(255, 143, 177, 0.4), 0 0 24px rgba(139, 92, 246, 0.3);
+
+  /* === 阴影 === */
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.2);
+  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.3);
+  --shadow-lg: 0 16px 48px rgba(0, 0, 0, 0.4);
+  --shadow-card: 0 4px 20px rgba(0, 0, 0, 0.25);
+
+  /* === 间距 === */
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
@@ -34,23 +61,20 @@
   --space-7: 48px;
   --space-8: 64px;
 
-  /* 圆角 */
-  --radius-sm: 6px;
-  --radius-md: 12px;
+  /* === 圆角 === */
+  --radius-sm: 8px;
+  --radius-md: 14px;
   --radius-lg: 20px;
+  --radius-xl: 28px;
   --radius-full: 9999px;
 
-  /* 阴影 */
-  --shadow-glow: 0 0 24px rgba(255, 143, 177, 0.3);
-  --shadow-card: 0 8px 32px rgba(0, 0, 0, 0.3);
-  --shadow-glow-strong: 0 0 48px rgba(255, 143, 177, 0.4), 0 0 24px rgba(139, 92, 246, 0.3);
-
-  /* 字体 */
-  --font-display: 'Plus Jakarta Sans', 'Zen Maru Gothic', sans-serif;
-  --font-body: 'Noto Sans SC', 'Plus Jakarta Sans', sans-serif;
+  /* === 字体 === */
+  --font-display: 'Noto Serif SC', 'Cormorant Garamond', serif;
+  --font-body: 'Plus Jakarta Sans', 'Noto Sans SC', sans-serif;
+  --font-reader: 'Noto Serif SC', 'Libre Baskerville', serif;
   --font-mono: 'JetBrains Mono', monospace;
 
-  /* 字号 */
+  /* === 字号 === */
   --text-xs: 12px;
   --text-sm: 14px;
   --text-base: 16px;
@@ -60,9 +84,30 @@
   --text-3xl: 32px;
   --text-4xl: 48px;
 
-  /* 动效 */
-  --motion-fast: 0.15s;
-  --motion-base: 0.25s;
-  --motion-slow: 0.4s;
-  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  /* === 动效 === */
+  --ease-spring: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-out: cubic-bezier(0, 0, 0.2, 1);
+  --ease-in: cubic-bezier(0.4, 0, 1, 1);
+  --ease-bounce: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --dur-fast: 150ms;
+  --dur-base: 250ms;
+  --dur-slow: 400ms;
+  --dur-slower: 600ms;
+
+  /* === 兼容映射（旧变量名 → 新 token） === */
+  --color-night-1: var(--color-bg-surface);
+  --color-night-2: var(--color-bg-elevated);
+  --color-night-3: var(--color-bg-overlay, #3D2A66);
+  --color-text: var(--color-text-primary);
+  --color-text-dim: var(--color-text-secondary);
+  --color-text-faint: var(--color-text-tertiary);
+  --color-accent-1: var(--color-sakura);
+  --color-accent-2: var(--color-moon);
+  --color-accent-3: var(--color-violet);
+  --shadow-glow: var(--glow-sakura);
+  --shadow-glow-strong: var(--glow-strong);
+  --motion-fast: var(--dur-fast);
+  --motion-base: var(--dur-base);
+  --motion-slow: var(--dur-slow);
+  --radius-full: 9999px;
 }

@@ -25,32 +25,28 @@ from backend.persistence import (
 # ============ v0.4.1 基础 ============
 
 def _row_to_message(row: dict) -> Optional[Dict[str, Any]]:
-    """DB message row → OpenAI 格式 message"""
+    """DB message row → OpenAI 格式 message
+
+    冷启动 rebuild 场景只保留纯对话消息（user / assistant 无 tool_calls）：
+    - role=tool → 返回 None（历史 tool 消息缺少 tool_call_id，无法还原合法链路）
+    - role=assistant + tool_calls → 返回 None（孤立的 assistant tool_calls 消息
+      无对应 tool message，会让 LLM 误以为工具还未执行）
+    - role=user / role=assistant（纯文本）→ 正常返回
+    """
     role = row.get("role")
     content = row.get("content") or ""
 
     if role == "tool":
-        tool_results = row.get("tool_results")
-        if tool_results:
-            import json
-            try:
-                results = json.loads(tool_results) if isinstance(tool_results, str) else tool_results
-            except Exception:
-                results = tool_results
-            content = f"[工具调用: {row.get('tool_calls', '')[:200]}]\n结果: {str(results)[:500]}"
-        return {"role": "tool", "content": content}
+        # tool 消息无法安全还原（缺 tool_call_id），冷启动时丢弃
+        return None
 
     if role == "assistant":
-        msg = {"role": "assistant", "content": content}
         tool_calls = row.get("tool_calls")
         if tool_calls:
-            import json
-            try:
-                tc = json.loads(tool_calls) if isinstance(tool_calls, str) else tool_calls
-                msg["tool_calls"] = tc
-            except Exception:
-                pass
-        return msg
+            # 带 tool_calls 的 assistant 消息若无对应 tool message 会破坏上下文
+            # 冷启动时一并丢弃
+            return None
+        return {"role": "assistant", "content": content}
 
     return {"role": role, "content": content}
 
@@ -180,69 +176,6 @@ def _format_world_tree_compact(world_tree: dict) -> str:
 
 # s1.4 新增: 5 个 helper 格式化 7 件基座其余字段
 
-def _format_style_charter(style_charter: dict) -> str:
-    """压缩 style_charter 为字符串（文笔家用）
-
-    [v0.6.2 已废弃，style_charter 已被 style_pack 替代]
-
-    包含: prose_style / tone / density / taboos / notes / limits
-    """
-    if not style_charter or not isinstance(style_charter, dict):
-        return "（文风宪法为空）"
-
-    parts = []
-
-    prose = style_charter.get('prose_style', {}) or {}
-    if prose.get('primary'):
-        prose_parts = [prose['primary']]
-        if prose.get('sentence_length'):
-            prose_parts.append(f"句式={prose['sentence_length']}")
-        if prose.get('paragraph_style'):
-            prose_parts.append(f"段落={prose['paragraph_style']}")
-        parts.append("文风: " + " · ".join(prose_parts))
-
-    tone = style_charter.get('tone', {}) or {}
-    if tone.get('primary'):
-        tone_parts = [tone['primary']]
-        if tone.get('psychological_per_paragraph'):
-            tone_parts.append(f"心理活动≤{tone['psychological_per_paragraph']}句/段")
-        parts.append("基调: " + " · ".join(tone_parts))
-
-    # density
-    density = style_charter.get('density', {}) or {}
-    if density:
-        density_str = ", ".join([f"{k}={v}" for k, v in density.items() if v is not None])
-        if density_str:
-            parts.append(f"密度: {density_str}")
-
-    # taboos (Step 3 用户填)
-    taboos = style_charter.get('taboos', []) or []
-    if taboos:
-        taboo_strs = []
-        for t in taboos:
-            if isinstance(t, dict):
-                taboo_strs.append(t.get('text') or t.get('statement', ''))
-            elif isinstance(t, str):
-                taboo_strs.append(t)
-        taboo_strs = [s for s in taboo_strs if s]
-        if taboo_strs:
-            parts.append(f"禁区: {'; '.join(taboo_strs)}")
-
-    # notes (Step 1 styles + Step 3 emotional_anchor)
-    notes = style_charter.get('notes', []) or []
-    notes_strs = [str(n) for n in notes if n]
-    if notes_strs:
-        parts.append(f"备注: {'; '.join(notes_strs)}")
-
-    # limits
-    limits = style_charter.get('limits', {}) or {}
-    if limits:
-        limits_str = ", ".join([f"{k}={v}" for k, v in limits.items() if v is not None])
-        if limits_str:
-            parts.append(f"限制: {limits_str}")
-
-    return "\n".join(parts) if parts else "（文风宪法无具体内容）"
-
 
 def _format_main_plot(main_plot: dict) -> str:
     """压缩 main_plot 为字符串（文笔家用）
@@ -348,31 +281,35 @@ def _format_seeds(seeds: list) -> str:
     """压缩 seed_table seeds 为字符串（文笔家用）
 
     seeds: list[dict] from seed_table.seeds[]
-    字段: id, content, importance, size, orientation, status
+    v007: 加入 trigger / payoff 显示
     """
     if not seeds:
         return "（种子为空）"
     lines = []
     for s in seeds[:20]:
+        name = s.get('name', '') or ''
         content = s.get('content', '')
-        importance = s.get('importance', {}) or {}
-        size = s.get('size', '')
-        orientation = s.get('orientation', '')
+        trigger = s.get('trigger', '') or ''
+        payoff = s.get('payoff', '') or ''
+        estimated = s.get('estimated_chapter')
+        payoff_ch = s.get('payoff_chapter')
         status = s.get('status', '')
 
-        imp_str = importance.get('primary', '') if isinstance(importance, dict) else str(importance)
-        line = f"- {content[:80]}"
-        meta_parts = []
-        if imp_str:
-            meta_parts.append(imp_str)
-        if size:
-            meta_parts.append(size)
-        if orientation:
-            meta_parts.append(orientation)
-        if status:
-            meta_parts.append(status)
-        if meta_parts:
-            line += f" [{', '.join(meta_parts)}]"
+        label = name if name else content[:40]
+        line = f"- [{label}]"
+        if trigger:
+            line += f" 触发: {trigger[:60]}"
+        if payoff:
+            line += f" 回收: {payoff[:60]}"
+        ch_parts = []
+        if estimated:
+            ch_parts.append(f"预规ch{estimated}")
+        if payoff_ch:
+            ch_parts.append(f"回收ch{payoff_ch}")
+        if ch_parts:
+            line += f" ({', '.join(ch_parts)})"
+        if status and status != 'planted':
+            line += f" [{status}]"
         lines.append(line)
     return "\n".join(lines) if lines else "（种子无具体内容）"
 
@@ -433,61 +370,46 @@ def _load_project_history(project_id: str, max_history: int = 5) -> list[dict[st
 
 async def load_chat_history(
     user_id: str,
-    base_rounds: int = 7,
     session_rounds: int = 15,
 ) -> List[Dict[str, Any]]:
-    """管家 CHAT 路径 history 加载（7+15 滑动窗口）
+    """管家 CHAT 路径 history 加载（cache miss 时的冷启动 rebuild）
 
     设计：
-    - base_rounds：最近 1 个 invalidated conv 的最后 N 条（历史基底）
-    - session_rounds：当前 active conv 的最近 N 条（本轮叠加）
-    - 组合：base 在前，session 在后，总数 ≤ base_rounds + session_rounds
-    - 去掉 session 最后一条 user 消息（ws_manager 在调管家前已把 user_message 存入 DB，
-      executor 末尾会自己 append user_message，不能重复）
+    - 只读当前 active conv 的最近 session_rounds 条消息
+    - 只保留纯对话消息（user / assistant 无 tool_calls），过滤掉 tool 消息
+      和带 tool_calls 的 assistant 消息——这类消息在 DB 中缺失 tool_call_id
+      等关键字段，无法安全还原为合法的 OpenAI 工具链，贸然注入会让 LLM
+      误判上下文状态。
+    - 去掉最后一条 user 消息：ws_manager 在调 steward.receive() 前已把本次
+      user_message 存入 DB，executor 末尾会自己 append，不能重复
+
+    背景：
+    - cache hit 路径完全不走本函数（NovelSteward.receive 中已短路）
+    - cache miss 只发生在进程重启 / TTL 超时（24h）
+    - 此时只需恢复当前 active session 的近期上下文，不需要跨 conv 的历史基底：
+      TTL 超时意味着新的一天，invalidated conv 的内容是噪音；
+      进程重启时 active conv 的近 15 条已足够恢复上下文。
 
     Returns:
-        list[dict]: OpenAI 格式 messages（含 role/content）
+        list[dict]: OpenAI 格式 messages（仅含纯 user/assistant 对话消息）
     """
     from backend.persistence.conversation_repository import ConversationRepository
 
     conv_repo = ConversationRepository()
     result: List[Dict[str, Any]] = []
 
-    # 1. 历史基底：最近 1 个 invalidated conv
-    try:
-        invalid_list = await conv_repo.list_conversations(
-            user_id=user_id, status="invalidated", limit=1
-        )
-        if invalid_list:
-            last_invalid = invalid_list[0]
-            base_msgs = await conv_repo.get_messages(last_invalid.id, limit=base_rounds)
-            # DESC → ASC 翻转
-            base_msgs = list(reversed(base_msgs))
-            for m in base_msgs:
-                d = {
-                    "id": m.id,
-                    "role": m.role.value if hasattr(m.role, "value") else m.role,
-                    "content": m.content,
-                    "tool_calls": m.tool_calls,
-                    "tool_results": m.tool_results,
-                }
-                msg = _row_to_message(d)
-                if msg:
-                    result.append(msg)
-    except Exception as e:
-        import logging
-        logging.warning(f"load_chat_history: base 加载失败: {e}", exc_info=True)
-
-    # 2. 本轮叠加：当前 active conv（滑动窗口）
     try:
         active = await conv_repo.get_active_conversation(user_id)
         if active:
             session_msgs = await conv_repo.get_messages(active.id, limit=session_rounds)
             # DESC → ASC 翻转
             session_msgs = list(reversed(session_msgs))
-            # ws_manager 在调 steward.receive() 前已将 user_message 存入 DB，
-            # 因此 session_msgs 最后一条是本次请求的 user 消息（executor 会自己 append，去掉避免重复）
-            if session_msgs and (session_msgs[-1].role.value if hasattr(session_msgs[-1].role, "value") else session_msgs[-1].role) == "user":
+            # 去掉最后一条 user 消息（本次请求的消息，executor 会自己 append）
+            if session_msgs and (
+                session_msgs[-1].role.value
+                if hasattr(session_msgs[-1].role, "value")
+                else session_msgs[-1].role
+            ) == "user":
                 session_msgs = session_msgs[:-1]
             for m in session_msgs:
                 d = {

@@ -1,16 +1,11 @@
-"""OnboardingRepository — onboarding_state 表 CRUD
+"""OnboardingRepository：onboarding_state 表 CRUD
 
-负责 onboarding_state 表的全部读写，杜绝 services 层直接写 SQL。
-
-表结构 (v002_artifacts_to_db.sql):
-    project_id       TEXT PRIMARY KEY
-    current_step     INTEGER
-    started_at       DATETIME
-    updated_at       DATETIME
-    state_json       TEXT    — JSON 大 blob, 含 payload + project_name + updated_at
-    artifacts_generated BOOLEAN
-    chapter_1_generated BOOLEAN
-    chapter_1_path   TEXT
+表结构：
+    project_id   TEXT PRIMARY KEY
+    current_step INTEGER
+    started_at   DATETIME
+    updated_at   DATETIME
+    state_json   TEXT — JSON blob，含 payload + project_name + updated_at
 """
 from __future__ import annotations
 
@@ -63,11 +58,7 @@ class OnboardingRepository:
         return state_data.get("payload", {}) or {}
 
     def list_current_steps(self) -> Dict[str, int]:
-        """批量读所有项目的 current_step（N+1 查询优化，list_projects 用）
-
-        Returns:
-            {project_id: current_step} dict
-        """
+        """批量读所有项目的 current_step（list_projects N+1 优化用）"""
         with get_store().connection() as conn:
             rows = conn.execute(
                 "SELECT project_id, current_step FROM onboarding_state"
@@ -95,7 +86,7 @@ class OnboardingRepository:
         Args:
             project_id: 项目 ID
             step_num:   步骤编号（1-5）
-            state_data: 完整的 state_json dict（由调用方构造，避免 Repository 承载业务逻辑）
+            state_data: 完整的 state_json dict（由调用方构造）
         """
         now = _now()
         state_json_str = json.dumps(state_data, ensure_ascii=False)
@@ -126,11 +117,6 @@ class OnboardingRepository:
         fields: Dict[str, Any],
     ) -> Dict[str, Any]:
         """将 fields 合并到 state_json.payload（已有字段保留，新字段追加/覆盖）
-
-        Args:
-            project_id: 项目 ID
-            step_num:   完成的步骤编号，同步写入 current_step 列
-            fields:     本次新增/修改的字段
 
         Returns:
             merged_payload: 合并后的完整 payload
@@ -168,7 +154,7 @@ class OnboardingRepository:
                 (project_id,),
             ).fetchone()
             if not row:
-                return  # 不存在则静默跳过（幂等）
+                return
             state_data = json.loads(row["state_json"])
             state_data["project_name"] = new_name
             state_data["updated_at"] = now.isoformat()
@@ -177,25 +163,5 @@ class OnboardingRepository:
                 "SET state_json = ?, updated_at = ? "
                 "WHERE project_id = ?",
                 (json.dumps(state_data, ensure_ascii=False), now, project_id),
-            )
-
-    def mark_artifacts_generated(self, project_id: str) -> None:
-        """标记 7 件产物已生成"""
-        with get_store().connection() as conn:
-            conn.execute(
-                "UPDATE onboarding_state "
-                "SET artifacts_generated = 1, updated_at = ? "
-                "WHERE project_id = ?",
-                (_now(), project_id),
-            )
-
-    def mark_chapter1_generated(self, project_id: str, chapter_path: str) -> None:
-        """标记第 1 章已生成"""
-        with get_store().connection() as conn:
-            conn.execute(
-                "UPDATE onboarding_state "
-                "SET chapter_1_generated = 1, chapter_1_path = ?, updated_at = ? "
-                "WHERE project_id = ?",
-                (chapter_path, _now(), project_id),
             )
 

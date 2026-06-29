@@ -5,7 +5,6 @@
 - chapter_tools:      generate_chapter / read_chapter
 - base_edit_tools:    update_base / rollback_base
 - image_tools:        generate_image
-- memory_tools:       search_memory
 - style_tools:        adjust_style
 - pov_tools:          switch_pov
 - character_tools:    introspect_character
@@ -20,7 +19,7 @@
 from backend.agent.tools import (
     base, schemas, locks,
     project_tools, chapter_tools, base_edit_tools,
-    image_tools, memory_tools,
+    image_tools,
     style_tools, pov_tools, character_tools, plot_tools,
     edit_artifact_tool,
     onboarding_tools,

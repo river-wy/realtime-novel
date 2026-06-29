@@ -51,14 +51,14 @@ class NovelWriter:
         self,
         project_id: str,
         user_message: str = "请生成下一章",
-        max_iterations: int = 7,
+        max_iterations: int = 15,
     ) -> ChapterOutput:
         """生成下一章（ReAct loop）
 
         Args:
             project_id: 项目 ID
             user_message: 用户提示
-            max_iterations: ReAct loop 最大轮次（默认 7）
+            max_iterations: ReAct loop 最大轮次（默认 15）
 
         Returns:
             ChapterOutput（含 chapter_num/title/word_count/chapter_content/chapter_summary/error）
@@ -72,7 +72,15 @@ class NovelWriter:
             build_writer_system_prompt,
             build_project_context_message,
         )
+
+        # session_key 按 project 维度隔离（不跨 project）
+        # 文笔家需要跨调用记住已写章节的上下文，避免章节衔接断裂
+        session_key = f"{project_id}:novel_writer"
+
+        # 每次都传入完整的 system_prompt，HIT/MISS 判断由 executor 内部決定
+        # （避免调用方预检查和 executor 内部检查间的极小概率时序竞争）
         system_prompt = build_writer_system_prompt(project_id)
+        # context_message（7 件基座快照）每次都刷新，确保 LLM 看到最新基座状态
         context_message = build_project_context_message(project_id, "novel_writer")
 
         cfg = AgentConfig(
@@ -85,6 +93,7 @@ class NovelWriter:
             user_message=user_message,
             project_id=project_id,
             context_message=context_message,
+            session_key=session_key,
             max_iterations=max_iterations,
         )
 

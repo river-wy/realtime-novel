@@ -28,6 +28,10 @@ export interface ProjectDetail {
   chapters: ChapterSummary[] | null
   // v0.9: 世界封面图
   cover_image_url?: string | null
+  // v007 C2: POV 角色（current_pov 存 char_id，分拆为 char_id + name）
+  current_pov?: string | null          // char_id（兼容旧字段）
+  current_pov_char_id?: string | null  // 明确语义：char_id
+  current_pov_name?: string | null     // 展示用 name
 }
 
 export interface ChapterSummary {

@@ -301,7 +301,6 @@ load_history_messages
 | 视角 | `pov_tools.py` | `switch_pov` |
 | 项目 | `project_tools.py` | `load_project` `create_project` `delete_project` |
 | 风格 | `style_tools.py` | `adjust_style` |
-| 记忆 | `memory_tools.py` | `search_memory` |
 | 图片 | `image_tools.py` | `generate_image` |
 | 通用 | `edit_artifact_tool.py` | `edit_artifact` |
 | Onboarding | `onboarding_tools.py` | `onboarding_propose_step` `onboarding_user_confirm` `onboarding_generate_chapter` |

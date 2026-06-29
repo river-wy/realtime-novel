@@ -1,7 +1,4 @@
-"""Tools 通用 Pydantic Schemas（13 个工具的 Input/Output）
-
-对应 core.md §B.1.3
-"""
+"""Tools 通用 Pydantic Schemas（工具的 Input/Output）"""
 from __future__ import annotations
 
 from pydantic import BaseModel, Field
@@ -16,9 +13,7 @@ class LoadProjectInput(BaseModel):
 
 class CreateProjectInput(BaseModel):
     name: str = Field(..., min_length=1, max_length=100)
-    # v0.7: palette 允许空（Onboarding Step 2 才会选）
     palette: str = Field(default="", min_length=0, max_length=500)
-    # v0.8: 探索度旋钮 (conservative/standard/wild)
     exploration_level: Literal["conservative", "standard", "wild"] = Field(
         default="standard",
         description="探索度: conservative (严守) / standard (平衡) / wild (大胆)"
@@ -28,14 +23,13 @@ class CreateProjectInput(BaseModel):
 
 class DeleteProjectInput(BaseModel):
     project_id: str = Field(..., min_length=1)
-    confirm: Literal[True]  # 强制 True
+    confirm: Literal[True]
 
 
 class ProjectDetail(BaseModel):
     id: str
     name: str
     palette: str
-    # v0.8: 探索度
     exploration_level: str = "standard"
     seven_artifacts: Optional[dict[str, Any]] = None
     world_tree: Optional[dict[str, Any]] = None
@@ -45,13 +39,13 @@ class ProjectDetail(BaseModel):
 # ============ Chapter 工具 ============
 
 class GenerateChapterInput(BaseModel):
-    """v0.6.2 重构：LLM 在 ReAct loop 里写正文，工具只负责落盘
+    """LLM 在 ReAct loop 里写正文，工具只负责落盘
     
     - content: LLM 写的章节正文（3000-4500 字）
     - intervention/actor_feedback/actor_character: 用户干预信息（可选，写入 DB）
     """
     project_id: str = Field(..., min_length=1)
-    content: str = Field(..., min_length=100, description="章节正文（LLM 写的 3000-4500 字）")
+    content: str = Field(..., min_length=100, description="章节正文（3000-4500 字）")
     intervention: Optional[str] = None
     actor_feedback: Optional[str] = None
     actor_character: Optional[str] = None
@@ -68,15 +62,15 @@ class ChapterContent(BaseModel):
     content: str
     word_count: int
     generated_at: Optional[str] = None
-    summary: Optional[str] = None  # v0.5 新增：1 句话 summary
+    summary: Optional[str] = None
 
 
-# ============ v0.6.2: 章节总结工具（文笔家 ReAct 用）============
+# ============ 章节总结工具 ============
 
 class SummarizeChapterInput(BaseModel):
     """章节总结工具输入
     
-    - chapter_num: 章节号（写入日志用，可选）
+    - chapter_num: 章节号（日志用，可选）
     - content: 章节正文（>= 100 字）
     """
     project_id: str = Field(..., min_length=1)
@@ -94,13 +88,10 @@ class SummarizeChapterOutput(BaseModel):
     method: str = Field(default="sentinel", description="sentinel / fallback_truncate / llm_fallback")
 
 
-# ============ Base Edit 工具（7 件基座）============
+# ============ Base Edit 工具（6 件基座）============
 
 class UpdateBaseInput(BaseModel):
-    """v0.4 兼容 API：整段写入
-
-    v0.4.1 推荐改用 EditArtifactInput（结构化增删改）
-    """
+    """整段写入（兼容旧 API）"""
     project_id: str = Field(..., min_length=1)
     key: Literal["name", "palette", "world_tree", "main_plot", "style_pack", "seed_table", "genre_resonance", "character_card", "sub_plot"]
     new_value: str = Field(..., min_length=1)
@@ -115,17 +106,10 @@ class UpdateBaseResult(BaseModel):
 
 
 class EditArtifactInput(BaseModel):
-    """v0.4.1 新增：结构化增量编辑（推荐使用）
+    """结构化增量编辑 6 件基座
 
-    业务含义：
-    - 管家 Agent 调 LLM 解析 user message → 调本工具
-    - 不传整段 JSON，传结构化 diff（add/update/delete）
-    - 工具内部做 Pydantic 校验 + DB 落盘
-
-    优势：
-    - 不会"忘了其他字段"（diff 友好）
-    - LLM 不需要输出完整 YAML/JSON
-    - 支持关系图操作（加关系、改弧光）
+    管家 Agent 解析 user message → 调本工具（add/update/delete）。
+    不传整段 JSON，传结构化 diff，工具内部做 Pydantic 校验 + DB 落盘。
     """
     project_id: str = Field(..., min_length=1)
     target: Literal[
@@ -136,7 +120,7 @@ class EditArtifactInput(BaseModel):
     ]
     operation: Literal["add", "update", "delete"]
     identifier: Optional[str] = None  # update/delete 用（ID）
-    data: Optional[dict] = None  # add/update 用（完整字段或 diff）
+    data: Optional[dict] = None       # add/update 用（完整字段或 diff）
 
 
 class EditArtifactResult(BaseModel):
@@ -169,7 +153,7 @@ class ImageResult(BaseModel):
     cache_hit: bool = False
 
 
-# ============ Memory 工具（向量检索）============
+# ============ Memory 工具 ============
 
 class SearchMemoryInput(BaseModel):
     project_id: str = Field(..., min_length=1)
@@ -181,7 +165,7 @@ class SearchMemoryResult(BaseModel):
     entries: list[dict[str, Any]]
 
 
-# ============ v0.4 新工具（4 个）============
+# ============ Style / POV 工具 ============
 
 class AdjustStyleInput(BaseModel):
     project_id: str = Field(..., min_length=1)
@@ -195,13 +179,14 @@ class AdjustStyleResult(BaseModel):
 
 class SwitchPovInput(BaseModel):
     project_id: str = Field(..., min_length=1)
-    new_pov_character: str = Field(..., min_length=1)
+    new_pov_char_id: str = Field(..., min_length=1, description="目标 POV 角色的 char_id（格式: char-xxxxxxxx）")
 
 
 class SwitchPovResult(BaseModel):
     project_id: str
-    previous_pov: str
-    new_pov: str
+    previous_pov_char_id: str  # 前一个 POV char_id（空字符串=未设置）
+    new_pov_char_id: str
+    new_pov_name: str          # 方便 LLM 输出
 
 
 class IntrospectCharacterInput(BaseModel):
@@ -224,7 +209,7 @@ class WeavePlotResult(BaseModel):
     next_chapter_plan: dict[str, Any]
 
 
-# ============ v0.6.1: Onboarding 推进工具 (管家 ReAct 用) ============
+# ============ Onboarding 工具 ============
 
 class OnboardingProposeStepInput(BaseModel):
     project_id: str = Field(..., min_length=1)

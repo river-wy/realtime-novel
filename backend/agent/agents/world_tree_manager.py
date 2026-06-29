@@ -8,7 +8,6 @@
 5. diff 结构化输出（base_updates + plot_adjustments + new_seeds）
 
 实现：s3.4 起改用 AgentExecutor 跑 ReAct loop，LLM 自主决定调：
-- search_memory（查历史干预/记忆）
 - load_project（读 7 件基座）
 - edit_artifact（改 7 件）
 - update_base（直接改基座字段）
@@ -143,8 +142,7 @@ WORLD_TREE_MANAGER_SYSTEM_PROMPT = """你是「世界树管理」。
 
 【典型工作流】
 1. 调用 load_project 获取当前 7 件基座
-2. 调用 search_memory 检索相关历史干预记录
-3. 分析用户干预的影响：
+2. 分析用户干预的影响：
    - 涉及哪些基座的哪些字段？
    - 是否影响主线弧线（main_plot）？
    - 是否需要埋伏笔（seed_table）？
@@ -202,7 +200,7 @@ class WorldTreeManager:
         self,
         project_id: str,
         onboarding_payload: dict,
-        max_iterations: int = 10,
+        max_iterations: int = 15,
     ) -> WorldTreeDiff:
         """Onboarding 专用：基于用户确认的 6 维信息初始化 7 件基座
 
@@ -316,7 +314,7 @@ class WorldTreeManager:
         self,
         project_id: str,
         intervention_text: str,
-        max_iterations: int = 7,
+        max_iterations: int = 15,
     ) -> WorldTreeDiff:
         """分析干预影响，返回结构化 diff（含一致性检查）"""
         self.log.info(
@@ -329,7 +327,13 @@ class WorldTreeManager:
             build_worldtree_system_prompt,
             build_project_context_message,
         )
+
+        # session_key 按 project 维度隔离，跨调用保留推演上下文
+        session_key = f"{project_id}:world_tree_manager"
+
+        # 每次都传入完整的 system_prompt，HIT/MISS 判断由 executor 内部決定
         system_prompt = build_worldtree_system_prompt(project_id)
+        # context_message 每次刷新，确保基座快照最新
         context_message = build_project_context_message(project_id, "world_tree_manager")
 
         cfg = AgentConfig(
@@ -342,6 +346,7 @@ class WorldTreeManager:
             user_message=f"用户干预：{intervention_text}",
             project_id=project_id,
             context_message=context_message,
+            session_key=session_key,
             max_iterations=max_iterations,
         )
 
@@ -384,7 +389,7 @@ class WorldTreeManager:
         self,
         project_id: str,
         adjustment_text: str,
-        max_iterations: int = 7,
+        max_iterations: int = 15,
     ) -> WorldTreeDiff:
         """分析基座调整（与干预类似，但 intent 不同）"""
         self.log.info(
@@ -397,6 +402,11 @@ class WorldTreeManager:
             build_worldtree_system_prompt,
             build_project_context_message,
         )
+
+        # session_key 与 analyze_intervention 共享同一个 project 维度 cache
+        session_key = f"{project_id}:world_tree_manager"
+
+        # 每次都传入完整的 system_prompt，HIT/MISS 判断由 executor 内部決定
         system_prompt = build_worldtree_system_prompt(project_id)
         context_message = build_project_context_message(project_id, "world_tree_manager")
 
@@ -410,6 +420,7 @@ class WorldTreeManager:
             user_message=f"用户基座调整：{adjustment_text}",
             project_id=project_id,
             context_message=context_message,
+            session_key=session_key,
             max_iterations=max_iterations,
         )
 

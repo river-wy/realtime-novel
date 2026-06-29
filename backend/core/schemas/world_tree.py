@@ -5,8 +5,8 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import Optional, List
 from pydantic import BaseModel, Field, ConfigDict
+from typing import Optional, List
 
 
 class Era(str, Enum):
@@ -41,9 +41,8 @@ class NodeStatus(str, Enum):
 
 
 class Timeline(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")  # v007: 删了 year_range，旧数据 extra="ignore" 兼容
     era: Era
-    year_range: Optional[dict] = None  # {start, end?}
     anchor_event: Optional[str] = None
 
 
@@ -77,10 +76,10 @@ class TreeNode(BaseModel):
 class WorldTreeSchema(BaseModel):
     """03 §1.1 — 7 件之 #1
     文件名约定: 01-world-tree.yaml
+    v007: 删除 branches 字段（branches_json DB 列已删，ReAct 架构下无持久化）
     """
-    model_config = ConfigDict(extra="ignore")  # 兼容 v0.2 旧字段
+    model_config = ConfigDict(extra="ignore")  # 兼容旧字段
 
     schema_version: str = "1.0"
     base: dict = Field(default_factory=dict)  # {timeline, geography, core_rules} — 暂用 dict 兜底
-    branches: List[TreeNode] = Field(default_factory=list)
     metadata: dict = Field(default_factory=dict)

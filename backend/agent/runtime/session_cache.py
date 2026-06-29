@@ -1,6 +1,6 @@
 """session_cache — Agent 会话上下文缓存
 
-为管家（以及后续专家 Agent）维护跨调用的 messages 缓存。
+为管家和两个专家 Agent 维护跨调用的 messages 缓存。
 
 Cache 内 messages 布局：
     index 0  → {"role":"system", "content": sys_prompt + tools}  ← 固定头，可原地替换
@@ -11,8 +11,8 @@ Cache 内 messages 布局：
 - sys_prompt 变化（project 切换等）→ 只替换 index 0，保留对话历史
 - 上下文（context_msg）变化       → 只替换 index 1，不动其他
 - 每轮结束后 append delta（user + tool chain + final_assistant）
-- 对话轮数 >= MAX_ROUNDS（100）   → 异步触发 summary 压缩
-- TTL 超时（24h）                 → 整体 rebuild
+- used_tokens 超过 context_window * COMPRESS_THRESHOLD → 异步触发 summary 压缩
+- TTL 超时（24h）                                      → 整体 rebuild
 """
 from __future__ import annotations
 
@@ -29,8 +29,11 @@ log = logging.getLogger(__name__)
 # cache TTL（秒）：超过此时间没有活动则视为过期
 CACHE_TTL_SECONDS = 86400           # 24 小时
 
-# 对话轮数上限（1 轮 = 1 user + 1 assistant）；超过时触发 summary 压缩
-MAX_ROUNDS = 100
+# 压缩触发阈值：used_tokens 超过 context_window 的该比例时触发 summary 压缩
+COMPRESS_THRESHOLD = 0.70
+
+# 默认 context_window（没有配置时的 fallback）
+DEFAULT_CONTEXT_WINDOW = 128000
 
 # summary 压缩后保留的最新轮数
 KEEP_RECENT_ROUNDS = 20
@@ -54,8 +57,10 @@ class AgentSessionCache:
     user_id: str
     conversation_id: str
     messages: List[dict] = field(default_factory=list)
-    sys_prompt_hash: str = ""       # 用于检测 sys_prompt 是否变化
+    sys_prompt_hash: str = ""          # 用于检测 sys_prompt 是否变化
     has_context_segment: bool = False  # messages[1] 是否是 context 段
+    context_window: int = DEFAULT_CONTEXT_WINDOW  # 模型最大 token 数（从 agents.json 读取）
+    used_tokens: int = 0               # 本会话已累计使用的 token 数
     created_at: float = field(default_factory=time.time)
     last_used_at: float = field(default_factory=time.time)
 
@@ -67,16 +72,14 @@ class AgentSessionCache:
     def touch(self) -> None:
         self.last_used_at = time.time()
 
-    def round_count(self) -> int:
-        """对话轮数（跳过 system 段，每对 user+assistant 算 1 轮）"""
-        user_msgs = sum(
-            1 for m in self.messages
-            if m.get("role") == "user"
-        )
-        return user_msgs  # 每条 user 消息代表一轮开始，近似为轮数
+    def add_tokens(self, tokens: int) -> None:
+        """当前轮 LLM 返回后累加 token 用量"""
+        self.used_tokens += tokens
+        self.touch()
 
     def needs_summary(self) -> bool:
-        return self.round_count() >= MAX_ROUNDS
+        """used_tokens 超过 context_window 的 70% 时触发压缩"""
+        return self.used_tokens >= self.context_window * COMPRESS_THRESHOLD
 
     def append_delta(self, delta: List[dict]) -> None:
         """追加本轮新增 messages delta（本轮 user + tool chain + final_assistant）"""
@@ -175,6 +178,7 @@ class SessionCacheManager:
         agent_name: str,
         sys_prompt: str,
         initial_messages: List[dict],
+        context_window: int = DEFAULT_CONTEXT_WINDOW,
     ) -> AgentSessionCache:
         """创建新 cache（全量 rebuild 路径）"""
         key = self.make_key(user_id, conversation_id, agent_name)
@@ -185,11 +189,12 @@ class SessionCacheManager:
             conversation_id=conversation_id,
             messages=list(initial_messages),
             sys_prompt_hash=_hash_str(sys_prompt),
+            context_window=context_window,
         )
         self._store[key] = cache
         log.info(
-            "SessionCache: 新建 cache，key=%s，initial_messages=%d",
-            key, len(initial_messages),
+            "SessionCache: 新建 cache，key=%s，initial_messages=%d，context_window=%d",
+            key, len(initial_messages), context_window,
         )
         return cache
 
@@ -223,6 +228,28 @@ class SessionCacheManager:
         key = self.make_key(user_id, conversation_id, agent_name)
         cache = self._store.get(key)
         return cache is not None and not cache.is_expired()
+
+    def get_without_prompt_check(
+        self,
+        user_id: str,
+        conversation_id: str,
+        agent_name: str,
+    ) -> Optional[AgentSessionCache]:
+        """获取 cache（仅 TTL 检查，不做 sys_prompt hash 校验 / patch）。
+
+        供 executor cache HIT 路径使用：调用方已通过 has_valid_cache 确认命中，
+        不需要重新组装 system_prompt，因此跳过 hash 比对直接返回对象。
+        """
+        key = self.make_key(user_id, conversation_id, agent_name)
+        cache = self._store.get(key)
+        if cache is None:
+            return None
+        if cache.is_expired():
+            log.info("SessionCache: TTL 过期，key=%s", key)
+            del self._store[key]
+            return None
+        cache.touch()
+        return cache
 
     def stats(self) -> dict:
         """调试用：返回当前 cache 统计"""

@@ -20,10 +20,8 @@ schemas/: 7 件 Pydantic Schema（v0.5 全部走 DB）
 设计文档: docs/design/
 约束规则: .realtime-novel/conventions.md
 """
-from .core.world_tree import WorldTree
 from .core.schemas import (
     WorldTreeSchema,
-    StyleCharterSchema,
     GenreResonanceSchema,
     MainPlotSchema,
     SubPlotSchema,
@@ -31,6 +29,7 @@ from .core.schemas import (
     SeedTableSchema,
     ChapterSummarySchema,
 )
+from .core.world_tree import WorldTree
 from .utils.version import __version__
 
 __all__ = [
@@ -38,7 +37,6 @@ __all__ = [
     "WorldTree",
     # 7 件 Schema + 摘要 Schema (core)
     "WorldTreeSchema",
-    "StyleCharterSchema",
     "GenreResonanceSchema",
     "MainPlotSchema",
     "SubPlotSchema",

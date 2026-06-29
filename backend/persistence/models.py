@@ -1,9 +1,4 @@
-"""backend v0.4.1 持久化层 Pydantic Schema
-
-对应 spec.md §4.1 + v002_artifacts_to_db.sql
-- v001: 5 张表（conversations/messages/tool_calls_log/agent_state/user_preferences/chapter_status/projects_deleted/world_entries_vec）
-- v002: 13 张表（projects + 7 件基座 + chapters + onboarding_state + 2 张关联表）
-"""
+"""持久化层 Pydantic Schema"""
 from __future__ import annotations
 
 from datetime import datetime
@@ -29,11 +24,6 @@ class ChapterState(str, Enum):
 
 
 class ConversationStatus(str, Enum):
-    """v0.5 新增：对话状态
-    - active: 当前进行中
-    - invalidated: 被新建对话取代（保留历史）
-    - archived: 用户主动归档
-    """
     ACTIVE = "active"
     INVALIDATED = "invalidated"
     ARCHIVED = "archived"
@@ -67,31 +57,28 @@ class SubplotPriority(str, Enum):
     MINOR = "minor"
 
 
-# ============ v001 Tables ============
+# ============ conversations / messages ============
 
 class Conversation(BaseModel):
-    """v0.5 重构：project_id 移除（不绑 project），加 status/invalidated_at/reason/summary/message_count"""
     id: str
     user_id: str
     created_at: datetime
     last_active_at: datetime
     status: ConversationStatus = ConversationStatus.ACTIVE
     invalidated_at: Optional[datetime] = None
-    reason: Optional[str] = None
-    summary: Optional[str] = None  # v0.5 新增：对话压缩 summary
-    message_count: int = 0  # v0.5 新增：消息计数（用于触发 summary 压缩）
+    summary: Optional[str] = None
+    message_count: int = 0
 
 
 class Message(BaseModel):
-    """v0.5 重构：加 project_id 字段（每条消息绑 project）"""
     id: str
     conversation_id: str
-    project_id: Optional[str] = None  # v0.5 新增
+    project_id: Optional[str] = None
     role: MessageRole
     content: Optional[str] = None
     tool_calls: Optional[dict[str, Any]] = None
     tool_results: Optional[dict[str, Any]] = None
-    thinking: Optional[dict[str, Any]] = None
+    agent_name: Optional[str] = None   # 处理该消息的 agent：novel_steward / novel_writer / world_tree_manager
     created_at: datetime
 
 
@@ -103,12 +90,6 @@ class ToolCallLog(BaseModel):
     result: Optional[dict[str, Any]] = None
     duration_ms: int
     created_at: datetime
-
-
-class AgentState(BaseModel):
-    thread_id: str
-    checkpoint_data: dict[str, Any]
-    updated_at: datetime
 
 
 class UserPreference(BaseModel):
@@ -133,23 +114,17 @@ class ProjectDeleted(BaseModel):
     palette: str
     deleted_at: datetime
     trash_path: Optional[str] = None
-    seven_artifacts_yaml: Optional[str] = None
-    world_tree_json: Optional[str] = None
 
 
-# ============ v002 Tables ============
+# ============ projects + 6 件基座 ============
 
 class Project(BaseModel):
-    """项目元数据（v0.4 走文件系统，v0.4.1 入 DB）"""
     id: str
     name: str
     palette: str = ""
-    # v0.8: 探索度旋钮 (conservative/standard/wild)
     exploration_level: str = "standard"
-    current_pov: Optional[str] = None
-    # v0.9: 世界封面图 URL（相对路径 /static/projects/{id}/cover.png，null 表示未生成）
+    current_pov: Optional[str] = None       # char_id，由 switch_pov 维护
     cover_image_url: Optional[str] = None
-    # v0.6.2: 写作笔风 id（style_pack 库中的 id，为空时用默认笔风）
     style_pack_id: Optional[str] = None
     created_at: datetime
     updated_at: datetime
@@ -157,29 +132,13 @@ class Project(BaseModel):
 
 
 class WorldTreeRow(BaseModel):
-    """01-world-tree.yaml → world_tree 表"""
     project_id: str
     timeline_era: Optional[str] = None
-    year_range_start: Optional[int] = None
-    year_range_end: Optional[int] = None
     anchor_event: Optional[str] = None
     geography_primary: Optional[str] = None
-    geography_secondary_json: Optional[str] = None  # list[str]
-    geography_spatial_rules_json: Optional[str] = None  # list[str]
-    core_rules_json: Optional[str] = None  # list[CoreRule]
-    branches_json: Optional[str] = None  # list[TreeNode]
-    metadata_json: Optional[str] = None
-    updated_at: datetime
-
-
-class StyleCharterRow(BaseModel):
-    project_id: str
-    prose_style_json: Optional[str] = None
-    tone_json: Optional[str] = None
-    density_json: Optional[str] = None
-    taboos_json: Optional[str] = None
-    notes_json: Optional[str] = None  # list[str] (adjust_style 追加)
-    limits_json: Optional[str] = None
+    geography_secondary_json: Optional[str] = None
+    geography_spatial_rules_json: Optional[str] = None
+    core_rules_json: Optional[str] = None
     metadata_json: Optional[str] = None
     updated_at: datetime
 
@@ -197,7 +156,7 @@ class MainPlotRow(BaseModel):
     project_id: str
     current_beat: int = 0
     arc_phrase: Optional[str] = None
-    beats_json: Optional[str] = None  # list[Beat]
+    beats_json: Optional[str] = None
     metadata_json: Optional[str] = None
     updated_at: datetime
 
@@ -212,7 +171,6 @@ class SubPlotRow(BaseModel):
     priority: SubplotPriority
     linked_seeds_json: Optional[str] = None
     linked_chars_json: Optional[str] = None
-    beats_json: Optional[str] = None
     metadata_json: Optional[str] = None
     updated_at: datetime
 
@@ -247,6 +205,11 @@ class SeedRow(BaseModel):
     id: int
     project_id: str
     content: str
+    name: Optional[str] = None
+    trigger: Optional[str] = None
+    payoff: Optional[str] = None
+    estimated_chapter: Optional[int] = None
+    payoff_chapter: Optional[int] = None
     importance_primary: str
     size: str
     planned_interval: Optional[int] = None
@@ -263,12 +226,12 @@ class SeedRow(BaseModel):
 
 
 class ChapterRow(BaseModel):
-    """章节 metadata（正文走文件 `data/{project_id}/chapters/chapter_NNN.md`）"""
+    """章节 metadata（正文存文件 data/projects/{id}/chapters/chapter_NNN.md）"""
     project_id: str
     chapter_num: int
     title: Optional[str] = None
-    summary: Optional[str] = None  # 1 句话
-    detailed_summary: Optional[str] = None  # 100-200 字
+    summary: Optional[str] = None
+    detailed_summary: Optional[str] = None
     word_count: int = 0
     file_path: str
     intervention: Optional[str] = None
@@ -284,9 +247,6 @@ class OnboardingStateRow(BaseModel):
     started_at: Optional[datetime] = None
     updated_at: datetime
     state_json: str
-    artifacts_generated: bool = False
-    chapter_1_generated: bool = False
-    chapter_1_path: Optional[str] = None
 
 
 class ChapterSeedChangeRow(BaseModel):

@@ -1,9 +1,4 @@
-"""EditArtifactTool — v0.4.1 结构化编辑 7 件基座
-
-管家 Agent LLM 解析 user message → 调本工具（add/update/delete）
-
-对应 core.md §B.1
-"""
+"""EditArtifactTool：结构化编辑 6 件基座（add/update/delete）"""
 from __future__ import annotations
 
 import uuid
@@ -17,12 +12,12 @@ from backend.persistence import ProjectRepository
 
 
 class EditArtifactTool(BaseTool):
-    """结构化增量编辑 7 件基座
+    """结构化增量编辑 6 件基座
 
-    9 个 target × 3 个 operation = 27 种组合，下面分块实现
+    9 个 target × 3 个 operation = 27 种组合
     """
     name = "edit_artifact"
-    description = "结构化编辑 7 件基座（add/update/delete）"
+    description = "结构化编辑 6 件基座（add/update/delete）"
 
     input_schema = EditArtifactInput
     output_schema = EditArtifactResult
@@ -121,14 +116,28 @@ class EditArtifactTool(BaseTool):
         )
 
     async def _edit_current_pov(self, input: EditArtifactInput) -> EditArtifactResult:
+        """current_pov 存 char_id，写入前校验角色存在"""
         repo = ProjectRepository()
         if input.operation == "update":
-            new_pov = (input.data or {}).get("character_name")
-            repo.update_current_pov(input.project_id, new_pov)
+            char_id = (input.data or {}).get("char_id")
+            if not char_id:
+                return EditArtifactResult(
+                    project_id=input.project_id, target=input.target,
+                    operation=input.operation, success=False,
+                    error="data.char_id 是必填字段（格式: char-xxxxxxxx）",
+                )
+            char = repo.get_character(input.project_id, char_id)
+            if char is None:
+                return EditArtifactResult(
+                    project_id=input.project_id, target=input.target,
+                    operation=input.operation, success=False,
+                    error=f"角色 {char_id} 不存在，请先用 edit_artifact(target=character, operation=add) 创建",
+                )
+            repo.update_current_pov(input.project_id, char_id)
             return EditArtifactResult(
                 project_id=input.project_id, target=input.target,
                 operation=input.operation, success=True,
-                affected={"new_pov": new_pov},
+                affected={"new_pov_char_id": char_id, "new_pov_name": char.get("name", "")},
             )
         return EditArtifactResult(
             project_id=input.project_id, target=input.target,
@@ -389,7 +398,7 @@ class EditArtifactTool(BaseTool):
     # ============ Beat ============
 
     async def _edit_beat(self, input: EditArtifactInput) -> EditArtifactResult:
-        """Beat 编辑（main_plot.beats 数组，JSON 形式）"""
+        """Beat 编辑（main_plot.beats 数组）"""
         repo = ProjectRepository()
         beats = repo.get_beats(input.project_id)
         if beats is None:
@@ -436,8 +445,6 @@ class EditArtifactTool(BaseTool):
         )
 
 
-# 补上 ProjectManager import
 from backend.services.project_manager import ProjectManager
 
-# 注册
 register_tool(EditArtifactTool())

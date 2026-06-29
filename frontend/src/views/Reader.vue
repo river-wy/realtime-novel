@@ -1,8 +1,9 @@
 <script setup lang="ts">
 /**
- * Reader 章节阅读（v0.5 新增 summary 展示）
- *
- * 3 栏 Bento：左项目信息 / 中章节正文 / 右干预面板
+ * Reader 章节阅读（琉璃宫升级版 v3）
+ * - 左栏玻璃面板：封面 + 章节导航 + 进度 + 生成下一章
+ * - 底部干预栏：单行输入 + 展开
+ * - 章尾：完结标记 + 生成按钮
  */
 import { ref, onMounted, watch, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -19,8 +20,8 @@ const chapterNum = computed(() => parseInt(route.params.chapterNum as string) ||
 
 const intervention = ref('')
 const showDrawer = ref(false)
-// v0.9: 封面图 banner 折叠状态（默认展开，用户可收起）
-const showCoverBanner = ref(true)
+const interventionExpanded = ref(false)
+const recordFeedback = ref(false)
 
 async function loadAll() {
   await projectsStore.loadOne(projectId.value)
@@ -32,12 +33,10 @@ function goToChapter(n: number) {
   router.push({ name: 'reader', params: { projectId: projectId.value, chapterNum: n } })
 }
 
-/** v0.8: 切换项目探索度 */
 async function onExplorationChange(newLevel: string) {
   if (!['conservative', 'standard', 'wild'].includes(newLevel)) return
   try {
     await projectsStore.updateExplorationLevel(projectId.value, newLevel as any)
-    console.log(`[Reader] 探索度已切换为 ${newLevel}`)
   } catch (e: any) {
     console.error('[Reader] 切换探索度失败', e)
     alert(`切换失败: ${e.message}`)
@@ -51,147 +50,215 @@ async function nextChapter() {
       intervention: intervention.value || undefined
     })
     intervention.value = ''
+    interventionExpanded.value = false
     await goToChapter(n)
-  } catch (e) {
-    // 错误已存 store.error
-  }
+  } catch (e) { /* 错误已存 store.error */ }
 }
 
 async function submitIntervention() {
   if (!intervention.value.trim()) return
-  // v0.5: 干预保存到当前章节 metadata，下次 generate 应用
-  alert(`已记录干预：${intervention.value}\n下次"下一章"生成时应用`)
+  recordFeedback.value = true
+  setTimeout(() => { recordFeedback.value = false }, 2000)
 }
 
 onMounted(loadAll)
 watch(() => route.params, loadAll)
+
+const explorationLevels = [
+  { value: 'conservative', label: '保守', icon: 'shield' },
+  { value: 'standard', label: '标准', icon: 'scales' },
+  { value: 'wild', label: '狂野', icon: 'planet' },
+]
+
+const currentExploration = computed(() => projectsStore.current?.exploration_level || 'standard')
 </script>
 
 <template>
   <div class="reader">
-    <!-- Header -->
-    <header class="reader-header">
-      <button class="back-btn" @click="router.push({ name: 'world', params: { projectId } })">←</button>
-      <div class="project-info" v-if="projectsStore.current">
-        <h1 class="project-name">{{ projectsStore.current.name }}</h1>
-        <span class="palette">{{ projectsStore.current.palette }}</span>
-        <!-- v0.8: 探索度下拉 (conservative/standard/wild) -->
-        <div class="exploration-control" v-if="projectsStore.current">
-          <label class="exploration-label">探索度</label>
-          <select
-            class="exploration-select"
-            :value="projectsStore.current.exploration_level"
-            @change="onExplorationChange(($event.target as HTMLSelectElement).value)"
+    <!-- Header（虚化封面图背景） -->
+    <header
+      class="reader-header"
+      :class="{ 'has-cover': projectsStore.current?.cover_image_url }"
+    >
+      <div
+        v-if="projectsStore.current?.cover_image_url"
+        class="header-bg"
+        :style="{ backgroundImage: `url(${projectsStore.current.cover_image_url})` }"
+      ></div>
+      <div class="header-overlay"></div>
+      <div class="header-content">
+        <button class="header-btn" @click="router.push({ name: 'world', params: { projectId } })">
+          <i class="ph ph-arrow-left"></i>
+        </button>
+        <h1 class="reader-title" v-if="projectsStore.current">{{ projectsStore.current.name }}</h1>
+        <span class="palette-badge" v-if="projectsStore.current">{{ projectsStore.current.palette }}</span>
+        <!-- 探索度 toggle -->
+        <div class="exploration-toggle" :data-level="currentExploration">
+          <div class="toggle-slider" :data-level="currentExploration"></div>
+          <button
+            v-for="lvl in explorationLevels"
+            :key="lvl.value"
+            class="toggle-label"
+            :class="{ active: currentExploration === lvl.value }"
+            :data-level="lvl.value"
+            @click="onExplorationChange(lvl.value)"
           >
-            <option value="conservative">🛡️ 保守</option>
-            <option value="standard">⚖️ 标准</option>
-            <option value="wild">🌌 狂野</option>
-          </select>
+            <i :class="`ph ph-${lvl.icon}`"></i>
+            {{ lvl.label }}
+          </button>
         </div>
+        <button class="header-btn header-btn-wide" @click="showDrawer = !showDrawer">
+          <i class="ph ph-books"></i>
+          <span>章节</span>
+        </button>
       </div>
-      <button class="drawer-toggle" @click="showDrawer = !showDrawer">📚 章节列表</button>
     </header>
 
-    <!-- v0.9: 封面图折叠 banner -->
-    <transition name="banner-fade">
-      <div
-        v-if="projectsStore.current?.cover_image_url && showCoverBanner"
-        class="cover-banner"
-        :style="{ backgroundImage: `url(${projectsStore.current.cover_image_url})` }"
-      >
-        <div class="cover-banner-overlay"></div>
-        <button class="cover-banner-close" @click="showCoverBanner = false" title="收起封面">×</button>
-      </div>
-    </transition>
-    <!-- 无 banner 时的展开按钮 -->
-    <button
-      v-if="projectsStore.current?.cover_image_url && !showCoverBanner"
-      class="cover-banner-toggle"
-      @click="showCoverBanner = true"
-      title="展开封面"
-    >🖼 展开封面</button>
-
     <div class="reader-body">
-      <!-- 左：章节导航 -->
-      <aside class="left-pane">
-        <!-- v0.9: 封面图缩略图（始终展示，无图用占位） -->
+      <!-- 左栏：玻璃面板 -->
+      <aside class="left-col">
         <div
-          class="left-cover"
-          :class="projectsStore.current?.cover_image_url ? 'left-cover-image' : 'left-cover-placeholder'"
+          class="cover-thumb"
+          :class="projectsStore.current?.cover_image_url ? 'has-cover' : ''"
           :style="projectsStore.current?.cover_image_url
             ? { backgroundImage: `url(${projectsStore.current.cover_image_url})` }
             : {}"
         >
-          <span v-if="!projectsStore.current?.cover_image_url" class="left-cover-icon">📖</span>
+          <i v-if="!projectsStore.current?.cover_image_url" class="ph ph-book-open"></i>
         </div>
-        <div class="chapter-nav">
-          <button :disabled="chapterNum <= 1" @click="goToChapter(chapterNum - 1)">← 上一章</button>
-          <button @click="goToChapter(chapterNum + 1)" v-if="chapterNum < chaptersStore.count">下一章 →</button>
+
+        <button class="nav-btn" :disabled="chapterNum <= 1" @click="goToChapter(chapterNum - 1)">
+          <i class="ph ph-arrow-left"></i><span>上一章</span>
+        </button>
+        <button class="nav-btn" v-if="chapterNum < chaptersStore.count" @click="goToChapter(chapterNum + 1)">
+          <i class="ph ph-arrow-right"></i><span>下一章</span>
+        </button>
+
+        <div class="progress-bar">
+          <div class="progress-fill" :style="{ width: `${(chapterNum / Math.max(chaptersStore.count, 1)) * 100}%` }"></div>
         </div>
-        <div class="progress">
-          <div class="progress-bar" :style="{ width: `${(chapterNum / Math.max(chaptersStore.count, 1)) * 100}%` }"></div>
-          <span class="progress-text">{{ chapterNum }} / {{ chaptersStore.count }}</span>
+        <div class="progress-text">
+          第 {{ chapterNum }} / {{ chaptersStore.count }} 章
+        </div>
+
+        <!-- 生成下一章 -->
+        <button
+          v-if="!chaptersStore.generating"
+          class="btn-generate"
+          @click="nextChapter"
+        >
+          <i class="ph ph-sparkle"></i>
+          <span>生成下一章</span>
+        </button>
+        <div v-else class="generating-state">
+          <div class="spinner"></div>
+          <span>生成中...</span>
         </div>
       </aside>
 
-      <!-- 中：章节正文 -->
-      <main class="center-pane">
-        <div v-if="chaptersStore.loading" class="loading">加载中...</div>
-        <div v-else-if="chaptersStore.current" class="chapter-content">
-          <!-- v0.5 关键：summary 展示 -->
-          <div v-if="chaptersStore.currentSummary" class="summary-capsule fade-in">
-            <span class="summary-label">本章概要</span>
-            <span class="summary-text">{{ chaptersStore.currentSummary }}</span>
-          </div>
-          <h1 class="chapter-title">{{ chaptersStore.current.title }}</h1>
-          <div class="chapter-meta">
-            <span>{{ chaptersStore.current.word_count }} 字</span>
-            <span v-if="chaptersStore.current.generated_at">·</span>
-            <span v-if="chaptersStore.current.generated_at">{{ new Date(chaptersStore.current.generated_at).toLocaleDateString() }}</span>
-          </div>
-          <article class="prose">
-            <pre>{{ chaptersStore.current.content }}</pre>
-          </article>
+      <!-- 中栏：正文 -->
+      <main class="center-col">
+        <!-- 骨架屏 -->
+        <div v-if="chaptersStore.loading" class="skeleton-wrap">
+          <div class="skeleton-line title"></div>
+          <div class="skeleton-line meta"></div>
+          <div class="skeleton-line w-100"></div>
+          <div class="skeleton-line w-90"></div>
+          <div class="skeleton-line w-100"></div>
+          <div class="skeleton-line w-80"></div>
+          <div class="skeleton-line w-100"></div>
+          <div class="skeleton-line w-70"></div>
+        </div>
 
-          <!-- 章尾：下一章按钮 -->
-          <div class="chapter-footer">
-            <button
-              v-if="!chaptersStore.generating"
-              class="btn btn-primary next-btn"
-              @click="nextChapter"
-            >
-              ✨ 生成下一章
-            </button>
-            <div v-else class="generating">
-              <div class="spinner"></div>
-              <span>正在生成下一章（30-60s）...</span>
+        <div v-else-if="chaptersStore.current" class="chapter-content">
+          <!-- 概要胶囊 -->
+          <div v-if="chaptersStore.currentSummary" class="summary-pill">
+            <i class="ph ph-sparkle"></i>
+            <div>
+              <strong>本章概要：</strong>{{ chaptersStore.currentSummary }}
             </div>
+          </div>
+
+          <h1 class="chapter-title">{{ chaptersStore.current.title }}</h1>
+
+          <div class="chapter-meta">
+            <span><i class="ph ph-text-aa"></i> {{ chaptersStore.current.word_count }} 字</span>
+            <span v-if="chaptersStore.current.generated_at">·</span>
+            <span v-if="chaptersStore.current.generated_at"><i class="ph ph-clock"></i> {{ new Date(chaptersStore.current.generated_at).toLocaleDateString() }}</span>
+          </div>
+
+          <div class="prose">
+            <pre>{{ chaptersStore.current.content }}</pre>
+          </div>
+
+          <!-- 章尾 -->
+          <div class="chapter-tail">
+            <div class="tail-label">— 第 {{ chapterNum }} 章 完 —</div>
           </div>
         </div>
       </main>
+    </div>
 
-      <!-- 右：干预面板 -->
-      <aside class="right-pane">
-        <h3 class="pane-title">🎭 干预</h3>
-        <textarea
-          v-model="intervention"
-          placeholder="下一章的剧情要求...（留空则自由生成）"
-          class="intervention-textarea"
-          rows="6"
-        ></textarea>
-        <button class="btn btn-secondary" @click="submitIntervention" :disabled="!intervention.trim()">
-          记录干预
-        </button>
-        <p class="hint">干预会在下一章生成时应用</p>
-      </aside>
+    <!-- 底部干预栏 -->
+    <div class="intervention-bar" :class="{ expanded: interventionExpanded }">
+      <transition name="bar-swap" mode="out-in">
+        <!-- 折叠态 -->
+        <div v-if="!interventionExpanded" class="bar-collapsed" key="collapsed">
+          <i class="ph ph-mask-theater bar-icon"></i>
+          <input
+            v-model="intervention"
+            placeholder="下一章的剧情要求...（留空则自由生成）"
+            class="bar-input"
+            @keydown.enter.exact.prevent="submitIntervention"
+          />
+          <button class="bar-submit" @click="submitIntervention" :disabled="!intervention.trim()">
+            提交
+          </button>
+          <button v-if="recordFeedback" class="bar-feedback">
+            <i class="ph ph-check-circle"></i>
+          </button>
+          <button class="bar-expand" @click="interventionExpanded = true">
+            <i class="ph ph-arrows-out-vertical"></i>
+          </button>
+        </div>
+
+        <!-- 展开态 -->
+        <div v-else class="bar-expanded" key="expanded">
+          <div class="bar-expanded-header">
+            <span class="bar-title"><i class="ph ph-mask-theater"></i> 作者干预</span>
+            <button class="bar-collapse" @click="interventionExpanded = false">
+              <i class="ph ph-arrows-in-vertical"></i>
+            </button>
+          </div>
+          <div class="bar-expanded-body">
+            <textarea
+              v-model="intervention"
+              placeholder="在此输入你想让 AI 知道的情节走向、伏笔或角色设定…"
+              class="bar-textarea"
+              rows="4"
+            ></textarea>
+            <div class="bar-expanded-actions">
+              <button class="bar-submit" @click="submitIntervention" :disabled="!intervention.trim()">
+                提交
+              </button>
+              <span v-if="recordFeedback" class="bar-feedback-text">
+                <i class="ph ph-check-circle"></i> 已记录
+              </span>
+              <span class="bar-hint">干预会在下一章生成时应用</span>
+            </div>
+          </div>
+        </div>
+      </transition>
     </div>
 
     <!-- 章节列表 drawer -->
     <transition name="slide">
       <div v-if="showDrawer" class="drawer">
         <div class="drawer-header">
-          <h3>章节列表</h3>
-          <button @click="showDrawer = false">×</button>
+          <h2>章节列表</h2>
+          <button class="drawer-close" @click="showDrawer = false">
+            <i class="ph ph-x"></i>
+          </button>
         </div>
         <div class="drawer-list">
           <div
@@ -201,11 +268,8 @@ watch(() => route.params, loadAll)
             :class="{ active: ch.num === chapterNum }"
             @click="goToChapter(ch.num); showDrawer = false"
           >
-            <div class="drawer-num">#{{ ch.num }}</div>
-            <div class="drawer-info">
-              <div class="drawer-title">{{ ch.title }}</div>
-              <div v-if="ch.summary" class="drawer-summary">{{ ch.summary }}</div>
-            </div>
+            <span class="drawer-num">#{{ ch.num }}</span>
+            <span class="drawer-title">{{ ch.title }}</span>
           </div>
         </div>
       </div>
@@ -215,435 +279,654 @@ watch(() => route.params, loadAll)
 
 <style scoped>
 .reader {
-  padding: var(--space-4) 0;
+  padding: var(--space-4);
+  padding-bottom: 72px;
 }
 
+/* ===== Header ===== */
 .reader-header {
+  position: relative;
+  border-radius: var(--radius-md);
+  margin-bottom: var(--space-4);
+  overflow: hidden;
+  border: 1px solid var(--glass-border);
+  background: var(--glass-bg);
+  backdrop-filter: blur(12px);
+  animation: fadeInDown 300ms var(--ease-spring);
+}
+.header-bg {
+  position: absolute;
+  inset: 0;
+  background-size: cover;
+  background-position: center;
+  filter: blur(8px);
+  transform: scale(1.1);
+}
+.header-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(10, 5, 20, 0.6);
+}
+.header-content {
+  position: relative;
+  z-index: 1;
   display: flex;
   align-items: center;
-  gap: var(--space-4);
-  margin-bottom: var(--space-5);
+  gap: var(--space-3);
   padding: var(--space-3) var(--space-4);
-  background: var(--color-night-2);
-  border-radius: var(--radius-md);
 }
-
-.back-btn {
-  font-size: var(--text-2xl);
-  width: 40px;
-  height: 40px;
+.header-btn {
+  width: 36px; height: 36px;
   border-radius: var(--radius-full);
-  background: var(--color-night-3);
-  transition: all var(--motion-fast) var(--ease-out);
+  background: rgba(0, 0, 0, 0.3);
+  backdrop-filter: blur(4px);
+  display: flex; align-items: center; justify-content: center;
+  transition: all var(--dur-fast) var(--ease-spring);
+  flex-shrink: 0;
 }
-.back-btn:hover { background: var(--color-accent-3); }
-
-.project-info {
-  flex: 1;
-}
-.project-name {
-  font-size: var(--text-lg);
-  margin-bottom: var(--space-1);
-}
-.palette {
-  font-size: var(--text-xs);
-  color: var(--color-text-dim);
-  background: rgba(139, 92, 246, 0.2);
-  padding: 2px 8px;
-  border-radius: var(--radius-sm);
-}
-
-/* v0.8: 探索度控制 */
-.exploration-control {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-2);
-  margin-left: var(--space-3);
-}
-.exploration-label {
-  font-size: var(--text-xs);
-  color: var(--color-text-dim);
-}
-.exploration-select {
-  padding: 2px 8px;
-  font-size: var(--text-xs);
-  background: var(--color-night-3);
-  color: var(--color-text);
-  border: 1px solid var(--color-night-2);
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-}
-.exploration-select:hover {
-  border-color: var(--color-accent, #8b5cf6);
-}
-
-.drawer-toggle {
-  padding: var(--space-2) var(--space-4);
-  background: var(--color-night-3);
-  border-radius: var(--radius-md);
+.header-btn:hover { background: var(--color-violet); }
+.header-btn:active { transform: scale(0.96); }
+.header-btn i { font-size: 18px; }
+.header-btn-wide {
+  width: auto;
+  padding: 0 14px;
+  gap: 6px;
   font-size: var(--text-sm);
 }
-.drawer-toggle:hover { background: var(--color-accent-3); }
-
-.reader-body {
-  display: grid;
-  grid-template-columns: 200px 1fr 280px;
-  gap: var(--space-4);
+.reader-title {
+  font-family: var(--font-display);
+  font-size: var(--text-lg);
+  font-weight: 600;
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
+  margin: 0;
+}
+.palette-badge {
+  font-size: var(--text-xs);
+  background: rgba(139, 92, 246, 0.2);
+  color: var(--color-text-secondary);
+  padding: 3px 10px;
+  border-radius: var(--radius-sm);
+  flex-shrink: 0;
 }
 
+/* 探索度 toggle（slider 指示器） */
+.exploration-toggle {
+  display: flex;
+  align-items: center;
+  background: rgba(0, 0, 0, 0.3);
+  backdrop-filter: blur(4px);
+  padding: 3px;
+  border-radius: var(--radius-full);
+  position: relative;
+  flex-shrink: 0;
+  transition: background 300ms ease;
+}
+.exploration-toggle[data-level="conservative"] { background: rgba(99, 102, 241, 0.25); }
+.exploration-toggle[data-level="standard"] { background: rgba(139, 92, 246, 0.25); }
+.exploration-toggle[data-level="wild"] { background: rgba(236, 72, 153, 0.25); }
+.toggle-slider {
+  position: absolute;
+  top: 3px; bottom: 3px;
+  width: calc((100% - 6px) / 3);
+  border-radius: var(--radius-full);
+  z-index: 1;
+  transition: transform 300ms var(--ease-spring), background 300ms ease;
+}
+.toggle-slider[data-level="conservative"] { transform: translateX(0); background: var(--color-indigo, #6366F1); }
+.toggle-slider[data-level="standard"] { transform: translateX(100%); background: var(--color-violet); }
+.toggle-slider[data-level="wild"] { transform: translateX(200%); background: var(--color-pink, #EC4899); }
+.toggle-label {
+  padding: 5px 12px;
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+  position: relative;
+  z-index: 2;
+  transition: color 300ms;
+  cursor: pointer;
+  border: none;
+  background: none;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.toggle-label.active {
+  color: #fff;
+  font-weight: 600;
+}
+.toggle-label i { font-size: 12px; }
+
+/* ===== 2 栏布局 ===== */
+.reader-body {
+  display: grid;
+  grid-template-columns: 200px 1fr;
+  gap: var(--space-4);
+}
 @media (max-width: 1024px) {
   .reader-body { grid-template-columns: 1fr; }
 }
 
-/* Left */
-.left-pane {
+/* ===== 左栏（玻璃面板） ===== */
+.left-col {
+  background: var(--glass-bg);
+  padding: var(--space-4);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--glass-border);
+  backdrop-filter: blur(12px);
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
+  animation: fadeInLeft 400ms var(--ease-spring) 100ms both;
+  align-self: start;
+  position: sticky;
+  top: var(--space-4);
+}
+@keyframes fadeInLeft {
+  from { opacity: 0; transform: translateX(-12px); }
+  to { opacity: 1; transform: translateX(0); }
 }
 
-/* v0.9: 左侧封面缩略图 */
-.left-cover {
+.cover-thumb {
   width: 100%;
   aspect-ratio: 1 / 1;
   border-radius: var(--radius-md);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
-  position: relative;
   overflow: hidden;
-}
-.left-cover-image {
-  background-size: cover;
-  background-position: center;
-}
-.left-cover-placeholder {
-  background: linear-gradient(135deg, var(--color-night-2), var(--color-night-3));
+  background: linear-gradient(135deg, var(--color-bg-surface), var(--color-bg-elevated));
   display: flex;
   align-items: center;
   justify-content: center;
-  border: 1px solid var(--color-night-3);
+  border: 1px solid var(--glass-border);
 }
-.left-cover-icon {
+.cover-thumb.has-cover {
+  background-size: cover;
+  background-position: center;
+  border: none;
+}
+.cover-thumb i {
   font-size: 48px;
   opacity: 0.5;
+  color: var(--color-text-secondary);
 }
 
-.chapter-nav {
+.nav-btn {
+  width: 100%;
   display: flex;
-  flex-direction: column;
+  align-items: center;
   gap: var(--space-2);
-}
-
-.chapter-nav button {
   padding: var(--space-2) var(--space-3);
-  background: var(--color-night-2);
   border-radius: var(--radius-md);
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
   font-size: var(--text-sm);
-  text-align: left;
-  transition: all var(--motion-fast) var(--ease-out);
+  color: var(--color-text-primary);
+  transition: all var(--dur-base) var(--ease-spring);
+  justify-content: center;
 }
-.chapter-nav button:hover:not(:disabled) {
-  background: var(--color-accent-3);
-  color: white;
+.nav-btn i { font-size: 16px; }
+.nav-btn:hover:not(:disabled) {
+  background: var(--color-violet);
+  color: #fff;
 }
-.chapter-nav button:disabled {
+.nav-btn:disabled {
   opacity: 0.4;
   cursor: not-allowed;
 }
 
-.progress {
-  position: relative;
-  height: 8px;
-  background: var(--color-night-3);
+.progress-bar {
+  width: 100%;
+  height: 6px;
   border-radius: var(--radius-full);
+  background: var(--color-bg-elevated);
   overflow: hidden;
 }
-.progress-bar {
+.progress-fill {
   height: 100%;
-  background: linear-gradient(90deg, var(--color-accent-1), var(--color-accent-2));
-  transition: width 0.3s;
+  background: linear-gradient(90deg, var(--color-sakura), var(--color-moon));
+  border-radius: var(--radius-full);
+  transition: width 300ms var(--ease-spring);
 }
 .progress-text {
-  display: block;
-  text-align: center;
   font-size: var(--text-xs);
-  color: var(--color-text-dim);
-  margin-top: var(--space-2);
-}
-
-/* Center */
-.center-pane {
-  min-height: 70vh;
-}
-
-.loading {
+  color: var(--color-text-tertiary);
   text-align: center;
-  padding: var(--space-7);
-  color: var(--color-text-dim);
+  font-family: var(--font-mono);
 }
 
-/* v0.5 关键：summary 胶囊 */
-.summary-capsule {
+/* 生成下一章按钮 */
+.btn-generate {
+  width: 100%;
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-full);
+  background: linear-gradient(135deg, var(--color-sakura), var(--color-violet));
+  color: #fff;
+  font-size: var(--text-base);
+  font-weight: 600;
   display: flex;
   align-items: center;
-  gap: var(--space-3);
-  padding: var(--space-3) var(--space-4);
-  background: linear-gradient(135deg, rgba(255, 143, 177, 0.15), rgba(139, 92, 246, 0.1));
-  border: 1px solid var(--color-accent-1);
-  border-radius: var(--radius-md);
-  margin-bottom: var(--space-5);
+  justify-content: center;
+  gap: var(--space-2);
+  box-shadow: var(--glow-sakura);
+  transition: transform var(--dur-base) var(--ease-spring), box-shadow var(--dur-base) var(--ease-spring);
+}
+.btn-generate i { font-size: 20px; }
+.btn-generate:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 0 36px rgba(255, 143, 177, 0.5), var(--glow-sakura);
+}
+.btn-generate:active {
+  transform: scale(0.96);
+  transition: transform 100ms var(--ease-in);
+}
+.generating-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  color: var(--color-moon);
   font-size: var(--text-sm);
 }
-.summary-label {
-  color: var(--color-accent-1);
-  font-weight: 600;
-  white-space: nowrap;
+.spinner {
+  width: 18px; height: 18px;
+  border: 2px solid transparent;
+  border-top-color: var(--color-sakura);
+  border-right-color: var(--color-sakura);
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
 }
-.summary-text {
-  color: var(--color-text);
-  flex: 1;
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ===== 中栏 ===== */
+.center-col {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  animation: fadeInUp 400ms var(--ease-spring) 200ms both;
+}
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* 骨架屏 */
+.skeleton-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  max-width: 68ch;
+  margin: 0 auto;
+}
+.skeleton-line {
+  height: 14px;
+  border-radius: var(--radius-sm);
+  background: linear-gradient(90deg, var(--color-bg-elevated) 0%, var(--glass-bg) 50%, var(--color-bg-elevated) 100%);
+  background-size: 200% 100%;
+  animation: shimmer 1.8s linear infinite;
+}
+.skeleton-line.title { height: 28px; width: 60%; }
+.skeleton-line.meta { height: 12px; width: 30%; }
+.skeleton-line.w-100 { width: 100%; }
+.skeleton-line.w-90 { width: 90%; }
+.skeleton-line.w-80 { width: 80%; }
+.skeleton-line.w-70 { width: 70%; }
+
+/* 章节内容 */
+.chapter-content {
+  max-width: 68ch;
+  margin: 0 auto;
+  width: 100%;
+}
+
+.summary-pill {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  background: linear-gradient(135deg, rgba(255, 143, 177, 0.15), rgba(139, 92, 246, 0.1));
+  border: 1px solid var(--color-sakura);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+  animation: fadeIn 400ms var(--ease-spring);
+}
+.summary-pill i {
+  font-size: 18px;
+  color: var(--color-sakura);
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+.summary-pill strong {
+  color: var(--color-text-primary);
 }
 
 .chapter-title {
+  font-family: var(--font-display);
   font-size: var(--text-3xl);
-  margin-bottom: var(--space-3);
-  color: var(--color-accent-1);
+  font-weight: 700;
+  color: var(--color-sakura);
+  margin-top: var(--space-3);
 }
 
 .chapter-meta {
   display: flex;
+  flex-direction: row;
   gap: var(--space-2);
   font-size: var(--text-sm);
-  color: var(--color-text-dim);
-  margin-bottom: var(--space-5);
+  color: var(--color-text-secondary);
+  align-items: center;
 }
+.chapter-meta span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.chapter-meta i { font-size: 14px; }
 
 .prose pre {
-  font-family: var(--font-body);
-  font-size: var(--text-base);
-  line-height: 1.8;
-  color: var(--color-text);
+  font-family: var(--font-reader);
+  font-size: var(--text-lg);
+  line-height: 1.9;
+  color: var(--color-text-primary);
   white-space: pre-wrap;
   word-wrap: break-word;
-  margin: 0;
+  margin: var(--space-4) 0 0;
 }
 
-.chapter-footer {
-  margin-top: var(--space-7);
-  text-align: center;
-  padding: var(--space-6);
-  background: var(--color-night-2);
+/* 章尾 */
+.chapter-tail {
+  padding: var(--space-6) var(--space-5);
   border-radius: var(--radius-md);
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  backdrop-filter: blur(12px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-4);
+  margin-top: var(--space-5);
 }
-
-.btn {
-  padding: var(--space-3) var(--space-5);
-  border-radius: var(--radius-md);
-  font-size: var(--text-base);
-  font-weight: 500;
-  transition: all var(--motion-fast) var(--ease-out);
-}
-.btn-primary {
-  background: linear-gradient(135deg, var(--color-accent-1), var(--color-accent-3));
-  color: white;
-  box-shadow: var(--shadow-glow);
-}
-.btn-primary:hover:not(:disabled) {
-  transform: translateY(-2px);
-}
-.btn-primary:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-.btn-secondary {
-  background: transparent;
-  border: 1px solid var(--color-accent-3);
-  color: var(--color-accent-3);
-}
-.btn-secondary:disabled { opacity: 0.4; cursor: not-allowed; }
-
-.next-btn {
+.tail-label {
+  font-family: var(--font-display);
   font-size: var(--text-lg);
-  padding: var(--space-4) var(--space-7);
+  color: var(--color-text-secondary);
 }
 
-.generating {
+/* ===== 底部干预栏 ===== */
+.intervention-bar {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 50;
+  background: rgba(18, 10, 38, 0.95);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border-top: 1px solid var(--glass-border);
+}
+
+.bar-collapsed {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-5);
+  max-width: 1280px;
+  margin: 0 auto;
+}
+.bar-icon {
+  font-size: 20px;
+  color: var(--color-sakura);
+  flex-shrink: 0;
+}
+.bar-input {
+  flex: 1;
+  height: 40px;
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-full);
+  padding: 0 var(--space-4);
+  color: var(--color-text-primary);
+  font-size: var(--text-sm);
+  outline: none;
+  transition: border-color var(--dur-fast) var(--ease-spring), box-shadow var(--dur-fast) var(--ease-spring);
+}
+.bar-input:focus {
+  border-color: var(--color-sakura);
+  box-shadow: 0 0 0 3px rgba(255, 143, 177, 0.15);
+}
+.bar-input::placeholder { color: var(--color-text-tertiary); }
+
+.bar-submit {
+  padding: 8px 20px;
+  background: linear-gradient(135deg, var(--color-violet), var(--color-sakura));
+  border: none;
+  border-radius: var(--radius-full);
+  color: #fff;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--dur-fast);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.bar-submit:hover:not(:disabled) { box-shadow: var(--glow-sakura); }
+.bar-submit:active:not(:disabled) { transform: scale(0.96); }
+.bar-submit:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.bar-feedback {
+  width: 32px; height: 32px;
+  border-radius: 50%;
+  background: rgba(74, 222, 128, 0.2);
+  border: none;
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: var(--space-3);
-  color: var(--color-accent-2);
+  flex-shrink: 0;
+  animation: fadeIn 250ms var(--ease-spring);
 }
-.spinner {
-  width: 24px;
-  height: 24px;
-  border: 3px solid var(--color-night-3);
-  border-top-color: var(--color-accent-1);
-  border-radius: 50%;
-  animation: spin 1s linear infinite;
-}
+.bar-feedback i { font-size: 16px; color: var(--color-success); }
 
-/* Right */
-.right-pane {
-  background: var(--color-night-2);
-  padding: var(--space-5);
-  border-radius: var(--radius-md);
+.bar-expand {
+  width: 32px; height: 32px;
+  border-radius: 50%;
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: background var(--dur-fast);
+}
+.bar-expand:hover { background: var(--glass-bg-hover); }
+.bar-expand i { font-size: 16px; color: var(--color-text-secondary); }
+
+/* 展开态 */
+.bar-expanded {
+  padding: var(--space-4) var(--space-5);
+  max-width: 1280px;
+  margin: 0 auto;
+}
+.bar-expanded-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-3);
+}
+.bar-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--text-base);
+  color: var(--color-sakura);
+  font-weight: 600;
+}
+.bar-title i { font-size: 18px; }
+.bar-collapse {
+  width: 32px; height: 32px;
+  border-radius: 50%;
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background var(--dur-fast);
+}
+.bar-collapse:hover { background: var(--glass-bg-hover); }
+.bar-collapse i { font-size: 16px; color: var(--color-text-secondary); }
+
+.bar-expanded-body {
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
-  align-self: start;
-  position: sticky;
-  top: 80px;
 }
-
-.pane-title {
-  font-size: var(--text-lg);
-  color: var(--color-accent-1);
-}
-
-.intervention-textarea {
+.bar-textarea {
+  width: 100%;
   resize: vertical;
-  min-height: 120px;
+  min-height: 80px;
   font-size: var(--text-sm);
+  line-height: 1.6;
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
+  color: var(--color-text-primary);
+  outline: none;
+  transition: border-color var(--dur-fast) var(--ease-spring), box-shadow var(--dur-fast) var(--ease-spring);
 }
+.bar-textarea:focus {
+  border-color: var(--color-sakura);
+  box-shadow: 0 0 0 3px rgba(255, 143, 177, 0.15);
+}
+.bar-textarea::placeholder { color: var(--color-text-tertiary); }
 
-.hint {
+.bar-expanded-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+.bar-feedback-text {
   font-size: var(--text-xs);
-  color: var(--color-text-faint);
-  margin: 0;
+  color: var(--color-success);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  animation: fadeIn 250ms var(--ease-spring);
+}
+.bar-hint {
+  font-size: var(--text-xs);
+  color: var(--color-text-tertiary);
+  margin-left: auto;
 }
 
-/* Drawer */
+/* bar 切换动画 */
+.bar-swap-enter-active, .bar-swap-leave-active {
+  transition: opacity 150ms var(--ease-out);
+}
+.bar-swap-enter-from, .bar-swap-leave-to {
+  opacity: 0;
+}
+
+/* ===== Drawer ===== */
 .drawer {
   position: fixed;
-  right: 0;
-  top: 0;
-  bottom: 0;
+  top: 0; right: 0; bottom: 0;
   width: 360px;
-  background: var(--color-night-1);
-  border-left: 1px solid var(--color-night-3);
+  background: rgba(18, 10, 38, 0.95);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border-left: 1px solid var(--glass-border);
   z-index: 200;
   display: flex;
   flex-direction: column;
 }
-
 .drawer-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: var(--space-4);
-  border-bottom: 1px solid var(--color-night-3);
+  padding: var(--space-5) var(--space-5);
+  border-bottom: 1px solid var(--glass-border);
 }
-.drawer-header button {
-  font-size: var(--text-2xl);
-  width: 32px;
-  height: 32px;
+.drawer-header h2 {
+  font-family: var(--font-display);
+  font-size: var(--text-xl);
+  margin: 0;
 }
+.drawer-close {
+  width: 36px; height: 36px;
+  border-radius: var(--radius-full);
+  background: var(--glass-bg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background var(--dur-base) var(--ease-spring);
+}
+.drawer-close:hover { background: var(--glass-bg-hover); }
+.drawer-close i { font-size: 18px; }
 
 .drawer-list {
   flex: 1;
   overflow-y: auto;
   padding: var(--space-3);
 }
-
 .drawer-item {
   display: flex;
+  align-items: center;
   gap: var(--space-3);
   padding: var(--space-3);
   border-radius: var(--radius-md);
   cursor: pointer;
-  transition: background var(--motion-fast) var(--ease-out);
+  transition: background var(--dur-base) var(--ease-spring);
+  margin-bottom: 4px;
 }
-.drawer-item:hover,
+.drawer-item:hover {
+  background: var(--glass-bg-hover);
+}
 .drawer-item.active {
-  background: var(--color-night-2);
+  background: var(--glass-bg-active);
+  color: var(--color-sakura);
 }
 .drawer-num {
   font-family: var(--font-mono);
-  color: var(--color-accent-2);
+  font-size: var(--text-xs);
+  color: var(--color-text-tertiary);
   flex-shrink: 0;
 }
 .drawer-title {
   font-size: var(--text-sm);
-  margin-bottom: 2px;
-}
-.drawer-summary {
-  font-size: var(--text-xs);
-  color: var(--color-text-dim);
-  line-height: 1.4;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .slide-enter-active, .slide-leave-active {
-  transition: transform 0.25s;
+  transition: transform 300ms var(--ease-spring);
 }
 .slide-enter-from, .slide-leave-to {
   transform: translateX(100%);
 }
 
-/* v0.9: 封面图折叠 banner */
-.cover-banner {
-  width: 100%;
-  height: 180px;
-  background-size: cover;
-  background-position: center 30%;
-  border-radius: var(--radius-lg);
-  position: relative;
-  overflow: hidden;
-  margin-bottom: var(--space-4);
+@media (prefers-reduced-motion: reduce) {
+  .reader-header, .left-col, .center-col { animation: none; opacity: 1; }
+  .slide-enter-active, .slide-leave-active { transition: opacity 200ms; }
+  .slide-enter-from, .slide-leave-to { transform: none; }
+  .skeleton-line { animation: none; }
 }
-.cover-banner-overlay {
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(
-    to bottom,
-    rgba(10, 5, 20, 0.1) 0%,
-    rgba(10, 5, 20, 0.6) 100%
-  );
+@media (max-width: 1024px) {
+  .reader-body { grid-template-columns: 1fr; }
+  .left-col { position: static; flex-direction: row; flex-wrap: wrap; align-items: center; }
+  .left-col .cover-thumb { width: 64px; height: 64px; aspect-ratio: auto; }
+  .left-col .nav-btn { width: auto; }
+  .left-col .progress-bar { flex: 1; min-width: 100px; }
+  .left-col .btn-generate { width: auto; }
 }
-.cover-banner-close {
-  position: absolute;
-  top: var(--space-2);
-  right: var(--space-2);
-  width: 28px;
-  height: 28px;
-  border-radius: 50%;
-  background: rgba(0, 0, 0, 0.5);
-  color: rgba(255, 255, 255, 0.8);
-  font-size: 18px;
-  line-height: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  backdrop-filter: blur(4px);
-  transition: background var(--motion-fast);
-  z-index: 1;
-}
-.cover-banner-close:hover {
-  background: rgba(0, 0, 0, 0.75);
-  color: white;
-}
-.cover-banner-toggle {
-  font-size: var(--text-xs);
-  color: var(--color-text-dim);
-  background: none;
-  border: 1px solid var(--color-night-3);
-  border-radius: var(--radius-sm);
-  padding: 2px var(--space-3);
-  margin-bottom: var(--space-3);
-  cursor: pointer;
-  transition: all var(--motion-fast);
-}
-.cover-banner-toggle:hover {
-  border-color: var(--color-accent-3);
-  color: var(--color-accent-3);
-}
-.banner-fade-enter-active,
-.banner-fade-leave-active {
-  transition: opacity 0.3s, transform 0.3s;
-}
-.banner-fade-enter-from,
-.banner-fade-leave-to {
-  opacity: 0;
-  transform: scaleY(0.85);
-  transform-origin: top;
+@media (max-width: 640px) {
+  .header-content { flex-wrap: wrap; gap: var(--space-2); }
+  .reader-title { font-size: var(--text-base); flex-basis: 100%; order: 5; }
+  .prose pre { font-size: var(--text-base); }
+  .chapter-title { font-size: var(--text-2xl); }
+  .bar-collapsed { padding: var(--space-2) var(--space-3); }
 }
 </style>
