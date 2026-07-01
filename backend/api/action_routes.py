@@ -58,6 +58,7 @@ async def submit_intervention(project_id: str, req: InterventionRequest):
             "result": result if isinstance(result, dict) else {"raw": str(result)},
         },
         project_id=project_id,
+        agent_name="world_tree_manager",   # v0.9.2 补：intervention 实际走 WTM ReAct
     )
     return InterventionResponse(
         project_id=project_id,
@@ -101,6 +102,7 @@ async def rollback_project(
             "result": output,
         },
         project_id=project_id,
+        agent_name="world_tree_manager",   # v0.9.2 补：rollback 改基座
     )
     return RollbackResponse(
         project_id=project_id,
@@ -148,6 +150,7 @@ async def generate_image(project_id: str, req: ImageRequest):
             "result": result_dict,
         },
         project_id=project_id,
+        agent_name="novel_steward",   # v0.9.2 补：image 管家直接调（不是 WTM 路径）
     )
     return ImageResponse(
         project_id=output.project_id,
@@ -199,6 +202,7 @@ async def update_base(project_id: str, req: UpdateBaseRequest):
             "result": result_dict,
         },
         project_id=project_id,
+        agent_name="world_tree_manager",   # v0.9.2 补：update_base 改基座
     )
     return UpdateBaseResponse(
         project_id=output.project_id,

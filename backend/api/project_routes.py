@@ -119,6 +119,7 @@ async def create_project(req: CreateProjectRequest):
                                "exploration_level": req.exploration_level},
                       "result": result},
         project_id=result.get("id"),
+        agent_name="novel_steward",   # v0.9.2 补：create_project 管家直接调
     )
     return CreateProjectResponse(
         id=result.get("id", ""),
@@ -195,6 +196,7 @@ async def delete_project(
                       "args": {"project_id": project_id, "confirm": confirm},
                       "result": result},
         project_id=project_id,
+        agent_name="novel_steward",   # v0.9.2 补：delete_project 管家直接调
     )
     # 统计 chapter 数
     from pathlib import Path

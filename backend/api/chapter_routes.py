@@ -165,6 +165,7 @@ async def generate_chapter(
             },
         },
         project_id=project_id,
+        agent_name="novel_writer",   # v0.9.2 补：章节生成委托给文笔家
     )
 
     return GenerateChapterResponse(
