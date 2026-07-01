@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import re
 import pytest
 from pathlib import Path
 
@@ -37,11 +38,16 @@ def test_tc_prompts_003_agents_readme_no_actor():
 
 
 def test_tc_prompts_004_e2e_test_no_opening_scene():
-    """e2e_integration_test.py 全文零命中 opening_scene"""
-    src = Path("tests/e2e_integration_test.py").read_text()
-    # 仅 Step 3 payload 字段已删除
-    # 注释 "Step 3 payload: {story_core, characters}" 可出现
-    assert "opening_scene" not in src
+    """旧 e2e_integration_test.py 已删（2026-07-01 清理），由 tests/e2e_scenarios/scenarios.md 替代。
+    本 test 验证业务代码 (backend/) 零命中 opening_scene（fixtures 全部清理）"""
+    import subprocess
+    result = subprocess.run(
+        ["grep", "-rn", "--include=*.py", "opening_scene", "backend/"],
+        capture_output=True, text=True,
+    )
+    # 允许「v003 删 / 已删 / 清理」等说明性注释
+    lines = [l for l in result.stdout.split("\n") if l and not re.search(r"v003[：:]?\s*(删|已删)|2026.*清理|替代|fixtures 全部清理|零命中|删 opening_scene|v003 删", l)]
+    assert len(lines) == 0, f"backend/ 仍有 opening_scene 命中: {lines[:3]}"
 
 
 def test_tc_prompts_006_tests_dir_no_actor():
@@ -99,10 +105,11 @@ def test_tc_prompts_007_tests_dir_no_opening_scene():
 
 
 def test_tc_prompts_005_e2e_passes_smoke():
-    """e2e_integration_test.py 至少能解析（语法）"""
-    import ast
-    src = Path("tests/e2e_integration_test.py").read_text()
-    try:
-        ast.parse(src)
-    except SyntaxError as e:
-        pytest.fail(f"e2e_integration_test.py 语法错误: {e}")
+    """旧 e2e_integration_test.py 已删（2026-07-01 清理）。
+    替代验证：tests/e2e_scenarios/scenarios.md 存在且至少 5 个场景"""
+    scenarios = Path("tests/e2e_scenarios/scenarios.md")
+    assert scenarios.exists(), f"业务场景文件不存在: {scenarios}"
+    content = scenarios.read_text()
+    # 至少 5 个场景标题
+    scenario_count = content.count("## 场景")
+    assert scenario_count >= 5, f"业务场景不足 5 个, 实际 {scenario_count}"

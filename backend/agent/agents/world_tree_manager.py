@@ -414,24 +414,29 @@ class WorldTreeManager:
         diff.tool_calls_count = len(executor_output.tool_calls_history)
         diff.tool_calls_trace = executor_output.tool_calls_history
 
-        # v0.6 s4：调用一致性检查器验证 LLM 返回的 diff
-        diff.consistency = await self._run_consistency_check(
+        # v0.9 改造：调 Validator 校验落库后的基座一致性
+        from backend.agent.agents.validator import get_validator
+        validator = get_validator()
+        diff.validation = await validator.validate_world_tree(
             project_id=project_id,
-            proposed_updates=diff.base_updates,
-            proposed_seeds=diff.new_seeds,
+            user_intent=intervention_text,
         )
 
-        # 根据一致性状态升级 risk_level
-        if diff.consistency.status == "FAIL":
+        # 联动策略：B 方案精准回滚 / FATAL 全清
+        from backend.agent.agents.validator import ValidationStatus
+        if diff.validation.status == ValidationStatus.FATAL:
+            await self._rollback_all_writes(project_id, executor_output.tool_calls_history)
             diff.risk_level = "blocked"
             diff.requires_double_confirm = True
+        elif diff.validation.status == ValidationStatus.BLOCKED:
+            await self._rollback_issue_rows(project_id, diff.validation.issues)
 
         self.log.info(
             "WorldTreeManager.analyze_intervention DONE: project_id=%s, "
-            "risk=%s, base_updates=%d, plot_adj=%d, new_seeds=%d, consistency=%s",
+            "risk=%s, validation_status=%s, base_updates=%d, plot_adj=%d, new_seeds=%d",
             project_id, diff.risk_level,
+            diff.validation.status,
             len(diff.base_updates), len(diff.plot_adjustments), len(diff.new_seeds),
-            diff.consistency.status,
         )
 
         return diff
@@ -505,6 +510,247 @@ class WorldTreeManager:
         )
 
         return diff
+
+    async def run_initial_baseline_react(
+        self,
+        project_id: str,
+        steward_payload: Dict[str, Any],
+        max_iterations: int = 20,
+    ) -> Dict[str, Any]:
+        """v0.8 WTM 入口：Onboarding 阶段完整规划小说世界基座（走 ReAct loop）
+
+        跟 generate_full_world_tree_baseline 机械代码的区别：
+        - 走 executor.execute() ReAct loop，WTM LLM 自主调工具落库 9 张表
+        - 角色名字/性格/关系/伏笔等细节由 LLM 自由发挥
+        - final_response 描述 WTM 实际落了什么 + 各表行数
+        - 失败时直接抛错，service 层捕获并回退 info_state
+
+        跟 analyze_intervention 的区别：
+        - 注入的 system_prompt 是 initial_baseline 身份段
+        - context_message 注入 steward_payload（管家收集的 hint）
+        - max_iterations=20（首次生成比干预更复杂）
+        - LLM 自主落库，不需要"应用前/应用后"一致性 diff
+        """
+        from backend.agent.prompts.agent_prompt_factory import (
+            build_worldtree_system_prompt,
+            build_project_context_message,
+        )
+        from backend.agent.runtime.executor import AgentConfig
+
+        self.log.info(
+            "WTM.run_initial_baseline_react START: project_id=%s, payload_keys=%s, max_iter=%d",
+            project_id, list(steward_payload.keys()), max_iterations,
+        )
+
+        # session_key 按 project 维度，跨调用保留推演上下文
+        session_key = f"{project_id}:world_tree_manager:initial_baseline"
+
+        system_prompt = build_worldtree_system_prompt(project_id, intent="initial_baseline")
+
+        # context_message 注入 steward_payload（管家从用户收集的 hint）
+        payload_str = json.dumps(steward_payload, ensure_ascii=False, indent=2)
+        context_message = (
+            f"【管家收集的用户信息 hint】\n"
+            f"以下是管家从用户多轮对话中提炼的信息，"
+            f"你在 ReAct loop 中参考这些 hint 自主发挥：\n\n"
+            f"{payload_str}\n\n"
+        ) + build_project_context_message(project_id, "world_tree_manager")
+
+        cfg = AgentConfig(
+            agent_name="world_tree_manager",
+            system_prompt=system_prompt,
+        )
+
+        user_message = (
+            "请基于管家收集的 hint，在 ReAct loop 中自主调 edit_artifact / update_base 等工具，"
+            "规划并落库完整小说世界基座（9 张表）。"
+            "落库完成后输出 final_response，结构化说明每张表生成了多少行。"
+        )
+
+        executor_output = await self.executor.execute(
+            agent=cfg,
+            user_message=user_message,
+            project_id=project_id,
+            context_message=context_message,
+            session_key=session_key,
+            max_iterations=max_iterations,
+        )
+
+        self.log.info(
+            "WTM.run_initial_baseline_react EXECUTOR DONE: project_id=%s, "
+            "iterations=%d, tool_calls=%d, error=%s",
+            project_id, executor_output.iterations,
+            len(executor_output.tool_calls_history), executor_output.error,
+        )
+
+        if executor_output.error:
+            return {
+                "success": False,
+                "iterations": executor_output.iterations,
+                "tool_calls_count": len(executor_output.tool_calls_history),
+                "error": executor_output.error,
+            }
+
+        # 统计落库行数（从 Repository 读，**不依赖 LLM final_response**）
+        from backend.persistence import ProjectRepository
+        repo = ProjectRepository()
+        summary = {
+            "world_tree_set": 1 if repo.get_world_tree(project_id) and repo.get_world_tree(project_id).story_core else 0,
+            "characters_count": len(repo.list_characters(project_id)),
+            "main_plot_nodes_count": len(repo.list_main_plot_nodes(project_id)),
+            "volumes_count": len(repo.list_volumes(project_id)),
+            "world_entries_count": len(repo.list_world_entries(project_id)),
+            "timeline_events_count": len(repo.list_timeline_events(project_id)),
+            "geography_locations_count": len(repo.list_geography_locations(project_id)),
+            "sub_plots_count": len(repo.list_subplots(project_id)),
+            "seeds_count": len(repo.list_seeds(project_id)),
+        }
+        self.log.info(
+            "WTM.run_initial_baseline_react BASELINE_STATS: project_id=%s, summary=%s",
+            project_id, summary,
+        )
+
+        # v0.9 改造：调 Validator 校验落库后的基座一致性
+        from backend.agent.agents.validator import get_validator, ValidationStatus
+        validator = get_validator()
+        user_intent = json.dumps(steward_payload, ensure_ascii=False)
+        validation = await validator.validate_world_tree(
+            project_id=project_id,
+            user_intent=user_intent,
+        )
+
+        # 联动（Onboarding 必须 PASS/WARN 才算成功）
+        if validation.status == ValidationStatus.FATAL:
+            await self._rollback_all_writes(project_id, executor_output.tool_calls_history)
+            return {
+                "success": False,
+                "iterations": executor_output.iterations,
+                "tool_calls_count": len(executor_output.tool_calls_history),
+                "validation": validation,
+                "error": "基座违反 hard rule",
+            }
+        elif validation.status == ValidationStatus.BLOCKED:
+            await self._rollback_issue_rows(project_id, validation.issues)
+            return {
+                "success": False,
+                "iterations": executor_output.iterations,
+                "tool_calls_count": len(executor_output.tool_calls_history),
+                "validation": validation,
+                "error": "基座需要修正",
+            }
+
+        return {
+            "success": True,
+            "iterations": executor_output.iterations,
+            "tool_calls_count": len(executor_output.tool_calls_history),
+            "tool_calls_trace": executor_output.tool_calls_history,
+            "summary": summary,
+            "final_response": executor_output.final_response,
+            "validation": validation,
+            "error": None,
+        }
+
+    # ── v0.9 新增：Validator 联动回滚 ─────────────────────
+
+    async def _rollback_all_writes(self, project_id: str, tool_calls_trace: list) -> None:
+        """全清 WTM 本次 ReAct 落库的所有新行（FATAL 时调用）
+
+        从 tool_calls_trace 提取 edit_artifact 成功调用的 row_id，逐个 delete
+        """
+        from backend.agent.tools.edit_artifact_tool import EditArtifactTool, EditArtifactInput
+        tool = EditArtifactTool()
+        cleared = 0
+        for tc in tool_calls_trace:
+            tool_name = tc.get("tool_name", "")
+            tc_result = tc.get("result", {}) or {}
+            if tool_name == "edit_artifact" and tc.get("status") == "success":
+                target = tc_result.get("target")
+                row_id = tc_result.get("row_id") or tc_result.get("id")
+                if target and row_id:
+                    try:
+                        await tool.run(EditArtifactInput(
+                            project_id=project_id,
+                            target=target,
+                            operation="delete",
+                            identifier=row_id,
+                        ))
+                        cleared += 1
+                    except Exception as e:
+                        self.log.warning(f"_rollback_all_writes 失败 target={target} id={row_id}: {e}")
+        self.log.info(f"WTM _rollback_all_writes: cleared {cleared} rows for project_id={project_id}")
+
+    async def _rollback_issue_rows(self, project_id: str, issues: list) -> None:
+        """只清 issues 标记的行（BLOCKED 时调用，B 方案精准回滚）
+
+        从 issues 里的 table+field 找 row_id，逐个 delete
+        """
+        from backend.agent.tools.edit_artifact_tool import EditArtifactTool, EditArtifactInput
+        from backend.persistence import ProjectRepository
+        tool = EditArtifactTool()
+        repo = ProjectRepository()
+        cleared = 0
+        for issue in issues:
+            # 只回滚 error/fatal 严重度，warning 不回滚
+            sev = issue.severity.value if hasattr(issue.severity, "value") else str(issue.severity)
+            if sev not in ("error", "fatal"):
+                continue
+            table = issue.table
+            if not table:
+                continue
+            # 通过 table 找符合 issue.description 关键词的 row_id（简化：找最新一行）
+            # 实际生产应该根据 issue.field 更精确匹配
+            try:
+                row_id = self._find_row_for_issue(repo, project_id, table, issue)
+                if row_id:
+                    await tool.run(EditArtifactInput(
+                        project_id=project_id,
+                        target=table,
+                        operation="delete",
+                        identifier=row_id,
+                    ))
+                    cleared += 1
+            except Exception as e:
+                self.log.warning(f"_rollback_issue_rows 失败 table={table}: {e}")
+        self.log.info(f"WTM _rollback_issue_rows: cleared {cleared} rows for project_id={project_id}")
+
+    def _find_row_for_issue(self, repo, project_id: str, table: str, issue) -> Optional[str]:
+        """根据 issue 找最可能对应的 row_id（简化实现）"""
+        try:
+            if table in ("characters", "character", "character_card"):
+                chars = repo.list_characters(project_id)
+                if chars:
+                    return chars[-1].id
+            elif table in ("main_plot_node", "main_plot", "main_plot_nodes"):
+                nodes = repo.list_main_plot_nodes(project_id)
+                if nodes:
+                    return nodes[-1].id
+            elif table in ("volumes", "volume"):
+                vols = repo.list_volumes(project_id)
+                if vols:
+                    return vols[-1].id
+            elif table in ("world_entries", "world_entry"):
+                entries = repo.list_world_entries(project_id)
+                if entries:
+                    return entries[-1].id
+            elif table in ("sub_plot", "sub_plot_nodes", "sub_plots"):
+                subs = repo.list_subplots(project_id)
+                if subs:
+                    return subs[-1].id
+            elif table in ("timeline_events", "timeline_event"):
+                evts = repo.list_timeline_events(project_id)
+                if evts:
+                    return evts[-1].id
+            elif table in ("geography_locations", "geography_location"):
+                locs = repo.list_geography_locations(project_id)
+                if locs:
+                    return locs[-1].id
+            elif table in ("seeds", "seed"):
+                sds = repo.list_seeds(project_id)
+                if sds:
+                    return sds[-1].id
+        except Exception as e:
+            self.log.warning(f"_find_row_for_issue 失败: {e}")
+        return None
 
     async def _run_consistency_check(
         self,
@@ -654,125 +900,6 @@ def get_world_tree_manager() -> WorldTreeManager:
 
 # ============ v003 WTM 主入口：generate_full_world_tree_baseline ============
 
-async def generate_full_world_tree_baseline(
-    project_id: str,
-    steward_payload: Dict[str, Any],
-) -> Dict[str, Any]:
-    """WTM Agent 主入口：输出完整世界树基座（spec §5.8）
-
-    接收管家调工具暂存的信息，输出 9 张表的内容：
-    - world_tree (story_core / genre_tags / core_rules)
-    - characters（含主角/配角关系网）
-    - volumes（卷规划）
-    - main_plot（主线节点含卷划分）
-    - sub_plot（可选）
-    - timeline_events（可选）
-    - geography_locations（可选）
-    - world_entries（世界百科）
-    - seeds（可选）
-
-    v003 新增
-    """
-    from backend.persistence import ProjectRepository
-
-    repo = ProjectRepository()
-    summary: Dict[str, int] = {
-        "world_tree_set": 0,
-        "characters_count": 0,
-        "main_plot_nodes_count": 0,
-        "volumes_count": 0,
-        "world_entries_count": 0,
-        "timeline_events_count": 0,
-        "geography_locations_count": 0,
-        "sub_plots_count": 0,
-        "seeds_count": 0,
-    }
-
-    try:
-        # 提取管家提供的 hint
-        story_core = steward_payload.get("story_core_hint", "") or steward_payload.get("story_core", "")
-        characters_hint = steward_payload.get("characters_hint", []) or []
-        world_setting_hint = steward_payload.get("world_setting_hint", {}) or {}
-        core_rules_hint = steward_payload.get("core_rules_hint", []) or []
-        style_hint = steward_payload.get("style_hint", {}) or {}
-
-        # 1. world_tree 5 字段
-        if story_core or core_rules_hint:
-            _upsert_world_tree_minimal(
-                project_id,
-                story_core=story_core,
-                genre_tags=style_hint.get("genres", []) or style_hint.get("styles", []) or [],
-                core_rules=core_rules_hint,
-            )
-            summary["world_tree_set"] = 1
-
-        # 2. characters
-        for ch in characters_hint:
-            if isinstance(ch, str):
-                # 简单字符串格式：自动归为 protagonist
-                repo.add_character(project_id, {
-                    "name": ch.split("-")[0].strip(),
-                    "role": "protagonist",
-                    "background": ch,
-                })
-            elif isinstance(ch, dict):
-                repo.add_character(project_id, ch)
-        summary["characters_count"] = len(repo.list_characters(project_id))
-
-        # 3. volumes（默认 1 个）
-        if not repo.list_volumes(project_id):
-            repo.add_volume(project_id, {
-                "volume_num": 1,
-                "title": "第一卷",
-                "description": story_core[:100] if story_core else "开篇",
-                "planned_chapter_count": 20,
-            })
-        summary["volumes_count"] = len(repo.list_volumes(project_id))
-
-        # 4. main_plot（默认 3 个节点）
-        if not repo.list_main_plot_nodes(project_id):
-            volumes = repo.list_volumes(project_id)
-            volume_id = volumes[0].id if volumes else None
-            for i, beat_title in enumerate(["开场", "冲突", "高潮"], start=1):
-                repo.add_main_plot_node(project_id, {
-                    "volume_id": volume_id,
-                    "plot_num": i,
-                    "title": beat_title,
-                    "description": f"主线节点 {i}",
-                    "status": "active" if i == 1 else "pending",
-                })
-        summary["main_plot_nodes_count"] = len(repo.list_main_plot_nodes(project_id))
-
-        # 5. world_entries（从 world_setting_hint 提取）
-        for category, entries in world_setting_hint.items():
-            if not isinstance(entries, list):
-                continue
-            for entry in entries:
-                if isinstance(entry, dict):
-                    repo.add_world_entry(project_id, {
-                        "category": category,
-                        "title": entry.get("title", ""),
-                        "content": entry.get("content", ""),
-                    })
-                elif isinstance(entry, str):
-                    repo.add_world_entry(project_id, {
-                        "category": category,
-                        "title": entry[:30],
-                        "content": entry,
-                    })
-        summary["world_entries_count"] = len(repo.list_world_entries(project_id))
-
-        return {
-            "success": True,
-            "summary": summary,
-            "error": None,
-        }
-    except Exception as e:
-        return {
-            "success": False,
-            "summary": summary,
-            "error": str(e),
-        }
 
 
 def _upsert_world_tree_minimal(

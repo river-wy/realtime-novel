@@ -65,9 +65,17 @@ class ProjectManager:
         self._proj_repo.update_exploration_level(project_id, exploration_level)
 
     async def load(self, project_id: str) -> Optional[dict]:
-        """加载项目详情（DB 优先）"""
+        """加载项目详情（DB 优先）
+
+        v0.7.1 修 7.2 gap：过滤已软删项目（deleted_at 非空）
+        """
         project = self._proj_repo.get(project_id)
         if not project:
+            return None
+        # 软删项目不允许 load
+        if hasattr(project, "deleted_at") and project.deleted_at is not None:
+            self.log.info("PM.load: project=%s 已软删 (deleted_at=%s), 返回 None",
+                          project_id, project.deleted_at)
             return None
         all_artifacts = self._proj_repo.load_all_artifacts(project_id)
         chapter_rows = self._chap_repo.list_by_project(project_id, limit=200)

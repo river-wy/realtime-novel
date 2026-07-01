@@ -33,21 +33,23 @@ def test_tc_agent_core_006_novel_writer_no_actor_in_prompt():
 
 
 def test_tc_agent_core_001_wtm_has_7_tools():
-    """WTM Agent 工具注册含完整 7 个 add_* 工具（v003 输出范围扩大）"""
+    """WTM Agent 工具注册 + Onboarding 主入口（v0.8 走 ReAct loop）
+
+    v0.8 改造：generate_full_world_tree_baseline（机械代码）已删，替换为
+    run_initial_baseline_react（走 ReAct loop）
+    """
     from backend.agent.agents import world_tree_manager
     src = open("backend/agent/agents/world_tree_manager.py").read()
-    # 关键函数存在
-    assert "generate_full_world_tree_baseline" in src
-    # 9 个 add_* 工具名在源中（虽然分散在 docstring 与代码里）
-    for tool in [
-        "add_world_entry", "add_timeline_event", "add_geography_location",
-        "add_main_plot_node", "add_sub_plot", "add_volume",
-        "add_character", "add_seed",
+    # 关键：WTM 新主入口函数存在
+    assert "async def run_initial_baseline_react" in src
+    # 旧机械函数应已删
+    assert "async def generate_full_world_tree_baseline" not in src
+    # 9 张表在 prompt 身份段里全部提及
+    for table in [
+        "world_tree", "characters", "volumes", "main_plot", "sub_plot",
+        "world_entries", "timeline_events", "geography_locations", "seeds",
     ]:
-        # 至少在 source/plan 中提及
-        pass  # 这些 tool 实际写在 edit_artifact_tool.py，不在 WTM 里
-    # 关键：WTM 主入口函数存在
-    assert "async def generate_full_world_tree_baseline" in src
+        assert table in src, f"WTM 身份段应提及 9 张表之一: {table}"
 
 
 def test_tc_agent_core_002_wtm_output_covers_9_tables():

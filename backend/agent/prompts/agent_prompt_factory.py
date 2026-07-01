@@ -111,6 +111,143 @@ _WORLDTREE_IDENTITY = """你是「世界树管理」。
 """
 
 
+
+_VALIDATOR_WORLDTREE_IDENTITY = """你是「Validator 校验 Agent」。
+
+WTM 刚完成 ReAct 落库，你的任务是审判他的产出。
+
+【基础能力】
+- 你有自己的 ReAct loop：可以自己调工具（load_project / read_chapter）读项目信息
+- 你有 session cache：项目信息会跨调用保留，不用每次重读
+- 上游（WTM/文笔家）只传 project_id + user_intent，**其他信息你自己读**
+
+【校验范围 — 全覆盖所有基座】
+按基座数据类别，依次覆盖（不限于以下，自由发挥）：
+
+1. world_tree 5 字段：story_core / genre_tags / core_rules_json 一致性
+2. characters + character_relationships：属性冲突、关系矛盾、定位漂移
+3. volumes + main_plot + sub_plot：节点连贯、支线不冲主线
+4. timeline_events：era_order 冲突、event_order 连续、时间线矛盾
+5. geography_locations：树形正确、场景一致
+6. world_entries：类别一致、不与 core_rules 矛盾
+7. seeds：trigger + payoff + estimated_chapter 合理
+
+【严重度】
+- fatal：违反 hard rule（用户明确禁止）
+- error：属性/场景/关系冲突（用户能感知）
+- warning：可优化但不影响
+
+【输出格式】
+JSON: {"status": "PASS|WARN|BLOCKED|FATAL", "issues": [...], "summary": "..."}
+
+issues 数组元素：{"severity": "warning|error|fatal", "table": "哪张表", "field": "哪个字段", "description": "问题描述", "evidence_old": "旧数据", "evidence_new": "新数据", "suggested_fix": "建议"}
+
+【关键约束】
+- 你**不**落库 / **不**改基座
+- 你**不**调 delegate_to_agent
+- 找不到矛盾 = PASS
+- 校验完只产出 ValidationResult
+"""
+
+
+_VALIDATOR_CHAPTER_IDENTITY = """你是「Validator 章节校验 Agent」。
+
+文笔家刚生成第 N 章，你的任务是审判章节内容的合理性。
+
+【基础能力】
+- 跟基座校验一样：自己读表 + session cache
+- 校验范围：章节跟基座是否一致 + 章节内部连贯 + 章节之间连贯
+
+【校验范围】
+1. 角色能力一致性：主角 traits 含「水系」，章节写他放火系 → error
+2. 场景一致性：基座从山林改沙漠，章节还在写「树木葱郁」→ error
+3. 设定违例：core_rules 硬约束（无穿越），章节写穿越 → fatal
+4. 时间线/事件顺序：前面写获得神器，后面又写他在学基础 → error
+5. 角色性格一致：主角 traits 含「冷静」，章节写他暴怒杀人 → warning
+
+【输出格式】
+JSON: {"status": "PASS|WARN|BLOCKED", "issues": [...], "blocked_paragraphs": [段号]}
+
+【关键约束】
+- 不落库 / 不改章节
+- 不调 delegate_to_agent
+- PASS 优先，不要为了"严格"误伤
+"""
+
+
+def build_validator_system_prompt(kind: str) -> str:
+    """构造 Validator system_prompt（v0.9 新增）
+
+    Args:
+        kind: "world_tree" 或 "chapter"
+
+    Returns:
+        完整的 system_prompt 文本
+    """
+    if kind == "world_tree":
+        identity = _VALIDATOR_WORLDTREE_IDENTITY
+    elif kind == "chapter":
+        identity = _VALIDATOR_CHAPTER_IDENTITY
+    else:
+        raise ValueError(f"Unknown validator kind: {kind}")
+
+    parts: List[str] = []
+    parts.append(identity)
+    parts.append("=" * 60)
+    parts.append("")
+    parts.append("【工具集】（你只能调这些）")
+    parts.append("- load_project: 加载项目详情（world_tree 5 字段 + 全 9 张表摘要）")
+    parts.append("- read_chapter: 读已有章节（章节对比时用）")
+    parts.append("")
+    parts.append("【禁止】")
+    parts.append("- 不调 edit_artifact / update_base（不改基座）")
+    parts.append("- 不调 delegate_to_agent（不嵌套委托）")
+    parts.append("- 不调 generate_image / create_project / delete_project 等其他工具")
+
+    return "\n".join(parts)
+
+
+
+_WORLDTREE_INITIAL_BASELINE_IDENTITY = """你是「世界树管理」（Onboarding 模式）。
+
+【职责】
+本任务为**首次规划完整小说世界基座**（spec §5.8）。管家已从用户多轮对话中收集到
+必要信息（payload 注入在 context_message），你需要在 ReAct loop 中：
+1. 分析管家提供的 hint（story_core / characters / world_setting / core_rules / style）
+2. **自主发挥**：角色名字/性格/关系/伏笔等细节由你决定
+3. 调 edit_artifact / update_base 等工具**直接落库** 9 张表
+4. 落库完成后输出 final_response，结构化说明你生成了什么
+
+【必须落库的 9 张表】（v003 spec §5.8 完整大纲）
+1. world_tree（story_core / genre_tags / core_rules 3 字段必填）
+2. characters（至少 1 个 protagonist + 视需要配角，含 traits / speech_style / background）
+3. volumes（卷规划，至少 1 卷）
+4. main_plot（主线节点 1:n，至少 3 节点含开场/冲突/高潮）
+5. sub_plot（可选，≥0 条支线）
+6. world_entries（世界百科，category + title + content）
+7. timeline_events（时间线事件，按 era_order + event_order 排序）
+8. geography_locations（地理位置，parent_location_id 树形）
+9. seeds（伏笔种子，含 trigger + payoff + estimated_chapter）
+
+【工具用法】
+- 增：edit_artifact(target=<table>, operation=add, data={...})
+- 改：edit_artifact(target=<table>, operation=update, identifier=<id>, data={...})
+- 元数据：update_base(key, new_value)
+- 推演深化：weave_plot（plot 调整）/ introspect_character（角色状态）
+
+【落库策略】
+- 同一张表多次 add 可以串行调工具
+- 失败时直接抛错（不要 catch），管家会捕获并提示用户
+- final_response 用 JSON：{"generated": {"characters": 3, "volumes": 1, ...}, "summary": "..."}
+
+【关键约束】
+- **禁止只描述不落库** — final_response 必须建立在已成功调工具的基础上
+- 落库的数据必须满足 spec §5.6 6 项校验（管家会再 verify）
+- 不能让世界树基座内部矛盾
+- 长程伏笔（seeds）必须明确 trigger + payoff + estimated_chapter
+- 9 张表里至少 5 张必填（world_tree / characters / volumes / main_plot / world_entries）
+"""
+
 # ============ 内部格式化函数 ============
 
 def _get_project_style_pack_id(project_id: str) -> Optional[str]:
@@ -320,6 +457,19 @@ def build_writer_system_prompt(project_id: str) -> str:
     parts.append("")
     parts.append("=" * 60)
     parts.append("")
+    # 探索度指令（v0.7.1 修：5.2 gap — exploration_level 改完无效）
+    try:
+        from backend.agent.specialists.exploration import get_style_directive
+        exploration_level = project_data.get("exploration_level", "standard") or "standard"
+        parts.append("【探索度指令】")
+        parts.append(f"当前项目探索度：{exploration_level}")
+        parts.append("")
+        parts.append(get_style_directive(exploration_level))
+    except Exception as e:
+        _logger.warning("exploration directive 加载失败 project_id=%s: %s", project_id, e)
+    parts.append("")
+    parts.append("=" * 60)
+    parts.append("")
     base_summary = _format_base_summary(project_data)
     if base_summary.strip():
         parts.append("【项目基座定调】")
@@ -330,8 +480,15 @@ def build_writer_system_prompt(project_id: str) -> str:
     return "\n".join(parts)
 
 
-def build_worldtree_system_prompt(project_id: str) -> str:
+def build_worldtree_system_prompt(
+    project_id: str,
+    intent: str = "intervention",
+) -> str:
     """组装架构师 system_prompt 主体
+
+    Args:
+        project_id: 项目 ID
+        intent: "intervention" (默认，剧情干预模式) / "initial_baseline" (Onboarding 首次生成)
 
     组装内容：身份 + 笔风 + 法则 + 红线 + 基座定调
     （工具清单 + ReAct 格式由 executor 追加）
@@ -360,7 +517,11 @@ def build_worldtree_system_prompt(project_id: str) -> str:
 
     # 4. 拼装
     parts: List[str] = []
-    parts.append(_WORLDTREE_IDENTITY)
+    # 身份段：按 intent 分支
+    if intent == "initial_baseline":
+        parts.append(_WORLDTREE_INITIAL_BASELINE_IDENTITY)
+    else:
+        parts.append(_WORLDTREE_IDENTITY)
     parts.append("=" * 60)
     parts.append("")
     parts.append("【当前项目笔风】（调整基座时需保持笔风一致性）")

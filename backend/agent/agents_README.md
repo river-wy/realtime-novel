@@ -301,8 +301,8 @@ load_history_messages
 | 风格 | `style_tools.py` | `adjust_style` |
 | 图片 | `image_tools.py` | `generate_image` |
 | 通用 | `edit_artifact_tool.py` | `edit_artifact` |
-| Onboarding（v003 委托模式）| `onboarding_tools.py` | `delegate_to_wtm` `verify_world_tree_baseline` |
-| **委托** | **`delegation_tools.py`** | **`delegate_to_agent`** `dispatch_background_task` |
+| Onboarding（v0.7.1 合并后）| `onboarding_tools.py` | `verify_world_tree_baseline` |
+| **委托** | **`delegation_tools.py`** | **`delegate_to_agent`**（含 mode=analyze 写章节前 / mode=full_baseline Onboarding）`dispatch_background_task` |
 | Schema | `schemas.py` | — |
 | Registry | `registry.py` | — |
 | Locks | `locks.py` | — |

@@ -37,14 +37,34 @@ class DelegateToAgentInput(BaseModel):
         description=(
             "目标专家 Agent 名，可选值：\n"
             "- novel_writer：生成章节正文\n"
-            "- world_tree_manager：分析干预 / 调整基座"
+            "- world_tree_manager：分析干预 / 生成完整基座（需传 intent）"
         ),
     )
     task: str = Field(
-        ...,
-        description="任务描述（自然语言，管家转述给专家的完整上下文，含用户原意）",
+        default="",
+        description=(
+            "任务描述（自然语言，管家转述给专家的完整上下文，含用户原意）\n"
+            "- intent=intervention 必填：用户干预描述\n"
+            "- intent=initial_baseline 不需要（用 payload 代替）\n"
+            "- novel_writer 必填：章节生成任务描述"
+        ),
     )
     project_id: str = Field(..., description="项目 ID")
+    intent: Optional[str] = Field(
+        default="intervention",
+        description=(
+            "委托意图（仅 world_tree_manager 有效）：\n"
+            "- intervention（默认）：剧情干预模式，调 WTM.analyze_intervention（走 ReAct + diff 返回）\n"
+            "- initial_baseline：Onboarding 首次生成模式，调 WTM.run_initial_baseline_react（走 ReAct + WTM 自主落库 9 张表）"
+        ),
+    )
+    payload: Optional[dict] = Field(
+        default=None,
+        description=(
+            "仅 intent=initial_baseline 时使用，管家从用户对话中提炼的信息提示：\n"
+            "story_core_hint / characters_hint / world_setting_hint / core_rules_hint / style_hint 等 free-form 字段"
+        ),
+    )
 
 
 class DelegateToAgentOutput(BaseModel):
@@ -98,8 +118,11 @@ class DelegateToAgentTool(BaseTool):
     name = "delegate_to_agent"
     description = (
         "把任务同步委托给专家 Agent，等待结果后整合回复用户。\n"
-        "适用于用户明确等待的操作（生成章节、干预基座）。\n"
-        "agent 可选值：novel_writer / world_tree_manager"
+        "适用于用户明确等待的操作（生成章节、干预基座、Onboarding 生成基座）。\n"
+        "agent 可选值：\n"
+        "  - novel_writer：生成章节正文（无需 mode）\n"
+        "  - world_tree_manager + mode=analyze（默认）：分析干预影响（写章节前调用）\n"
+        "  - world_tree_manager + mode=full_baseline：Onboarding 阶段生成完整世界树基座（9 张表，传入 payload）"
     )
     input_schema = DelegateToAgentInput
     output_schema = DelegateToAgentOutput
@@ -116,8 +139,18 @@ class DelegateToAgentTool(BaseTool):
 
         try:
             if input.agent == "novel_writer":
+                if input.intent and input.intent != "intervention":
+                    return DelegateToAgentOutput(
+                        agent="novel_writer",
+                        success=False,
+                        result="",
+                        error="novel_writer 不接受 intent 参数（章节生成只有一种路径）",
+                    )
                 return await self._delegate_novel_writer(input)
             elif input.agent == "world_tree_manager":
+                if input.intent == "initial_baseline":
+                    return await self._delegate_wtm_initial_baseline(input)
+                # 默认 intent=intervention
                 return await self._delegate_world_tree_manager(input)
             else:
                 log.warning("DelegateToAgentTool: 未知 agent '%s'", input.agent)
@@ -231,6 +264,106 @@ class DelegateToAgentTool(BaseTool):
             structured_data=diff.model_dump(),
             iterations=diff.iterations,
             error=None if success else f"一致性检查失败: {diff.consistency.conflicts}",
+        )
+
+    async def _delegate_wtm_initial_baseline(
+        self, input: DelegateToAgentInput
+    ) -> DelegateToAgentOutput:
+        """委托 WTM 输出完整世界树基座（v0.8 走 WTM ReAct loop）
+
+        路由：input.intent == "initial_baseline"
+        入参：input.payload（管家从用户对话中提炼的 hint）
+        流程：
+          1. WTM.run_initial_baseline_react 走 ReAct 自主落库 9 张表
+          2. 成功后调 onboarding_artifacts.delegate_to_wtm_after_wtm
+             （仅做状态机切换 + emit 事件，不重复落库）
+        返回：9 张表的 row count 摘要
+        """
+        if not input.payload:
+            return DelegateToAgentOutput(
+                agent="world_tree_manager",
+                success=False,
+                result="",
+                error="intent=initial_baseline 必须传 payload（管家收集的用户信息提示）",
+            )
+
+        log.info(
+            "DelegateToAgentTool._delegate_wtm_initial_baseline: project_id=%s, payload_keys=%s",
+            input.project_id, list(input.payload.keys()),
+        )
+
+        try:
+            from backend.agent.agents.world_tree_manager import get_world_tree_manager
+            from backend.services.onboarding_artifacts import (
+                mark_wtm_baseline_ready,
+                mark_wtm_baseline_failed,
+            )
+
+            manager = get_world_tree_manager()
+            result = await manager.run_initial_baseline_react(
+                project_id=input.project_id,
+                steward_payload=input.payload,
+            )
+        except Exception as e:
+            log.error("DelegateToAgentTool._delegate_wtm_initial_baseline FAILED: %s", e, exc_info=True)
+            # 异常时回退 info_state
+            try:
+                from backend.services.onboarding_artifacts import mark_wtm_baseline_failed
+                mark_wtm_baseline_failed(input.project_id, str(e))
+            except Exception as rollback_err:
+                log.error("mark_wtm_baseline_failed FAILED: %s", rollback_err)
+            return DelegateToAgentOutput(
+                agent="world_tree_manager",
+                success=False,
+                result="",
+                error=str(e),
+            )
+
+        if not result.get("success"):
+            # WTM ReAct 失败，service 层回退 info_state
+            try:
+                mark_wtm_baseline_failed(input.project_id, result.get("error", "WTM 完整基座生成失败"))
+            except Exception as rollback_err:
+                log.error("mark_wtm_baseline_failed FAILED: %s", rollback_err)
+            return DelegateToAgentOutput(
+                agent="world_tree_manager",
+                success=False,
+                result="",
+                structured_data=result,
+                error=result.get("error", "WTM 完整基座生成失败"),
+            )
+
+        # 成功：service 层切 info_state=ready + emit step4_confirmed 事件
+        try:
+            mark_wtm_baseline_ready(input.project_id)
+        except Exception as e:
+            log.error("mark_wtm_baseline_ready FAILED: %s", e, exc_info=True)
+            # 标记失败不阻断返回（基座已落库）
+
+        summary = result.get("summary", {}) or {}
+        counts = (
+            f"world_tree={'✓' if summary.get('world_tree_set') else '✗'}, "
+            f"characters={summary.get('characters_count', 0)}, "
+            f"main_plot={summary.get('main_plot_nodes_count', 0)}, "
+            f"volumes={summary.get('volumes_count', 0)}, "
+            f"world_entries={summary.get('world_entries_count', 0)}, "
+            f"timeline={summary.get('timeline_events_count', 0)}, "
+            f"geography={summary.get('geography_locations_count', 0)}, "
+            f"sub_plots={summary.get('sub_plots_count', 0)}, "
+            f"seeds={summary.get('seeds_count', 0)}"
+        )
+        return DelegateToAgentOutput(
+            agent="world_tree_manager",
+            success=True,
+            result=(
+                f"Onboarding 阶段完整基座已就绪（WTM 自主 ReAct 落库，{result.get('iterations', 0)} 轮推演，"
+                f"{result.get('tool_calls_count', 0)} 个工具调用，{counts}）"
+            ),
+            structured_data={
+                "summary": summary,
+                "iterations": result.get("iterations", 0),
+                "tool_calls_count": result.get("tool_calls_count", 0),
+            },
         )
 
 

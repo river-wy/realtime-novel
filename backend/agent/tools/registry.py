@@ -29,21 +29,22 @@ log = logging.getLogger(__name__)
 
 AGENT_TOOLS: Dict[str, List[str]] = {
     # ── 管家（唯一用户入口，ReAct loop）──────────────────
-    # 职责内：项目 CRUD、Onboarding 推进、基座编辑、图片生成、探索度
-    # 职责外：通过 delegate_to_agent（同步）/ dispatch_background_task（异步）委托专家
+    # 职责内：项目 CRUD、Onboarding 推进、图片生成、探索度、笔风调整
+    # 职责外（v0.8 改造）：禁止直接修改世界树基座，必须委托 WTM
+    #   调基座 = delegate_to_agent(agent="world_tree_manager", intent="intervention" | "initial_baseline", task/payload=...)
     "novel_steward": [
         "load_project",
         "create_project",
         "delete_project",              # v0.6.2 补：删除项目（软删 → .trash/）
-        "edit_artifact",
         "generate_image",
         "update_exploration_level",    # v0.6.2 补：调整项目/全局探索度
         "list_style_packs",            # 查询可用笔风列表（Onboarding/调整笔风时先读）
         "adjust_style",                # 写入/更新 style_pack_id
-        # v003 委托模式（v0.7 旧 5 步工具已删除：onboarding_propose_step / onboarding_user_confirm / onboarding_generate_chapter）
-        "delegate_to_wtm",             # v003：管家收集足够信息后委托 WTM 输出完整世界树基座
-        "verify_world_tree_baseline",  # v003：委托 WTM 前后校验世界树基座完整性
-        "delegate_to_agent",           # 同步委托专家（用户等待结果）
+        # v0.8 委托入口（intent 字段区分）：
+        #   intent="initial_baseline" + payload：Onboarding 首次生成（WTM 走 ReAct 自主落库）
+        #   intent="intervention"（默认）+ task：剧情干预（WTM 走 ReAct 分析 diff）
+        "verify_world_tree_baseline",  # v003：校验世界树基座完整性（spec §5.6 6 项）
+        "delegate_to_agent",           # 同步委托专家（intent 区分 initial_baseline / intervention）
         "dispatch_background_task",    # 异步派发后台任务（管家自主识别）
     ],
     # ── 文笔家（ReAct loop：调 LLM 写正文 + 调 generate_chapter/summarize_chapter 工具落盘）────────────

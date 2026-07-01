@@ -68,27 +68,23 @@ def seed_project(db_with_v003, mock_get_store):
 # ============ TC-001 ============
 
 
-def test_tc_onboarding_001_delegate_to_wtm_triggers_wtm(mock_get_store, seed_project):
-    """onboarding_artifacts.delegate_to_wtm 触发 WTM 委托"""
-    import asyncio
-    from backend.services.onboarding_artifacts import delegate_to_wtm
+def test_tc_onboarding_001_wtm_runs_initial_baseline_react(mock_get_store, seed_project):
+    """v0.8: WTM.run_initial_baseline_react 入口存在 + 走 ReAct
 
-    payload = {
-        "story_core_hint": "程序员穿越古代",
-        "characters_hint": ["林渊"],
-        "world_setting_hint": {},
-        "core_rules_hint": [],
-        "style_hint": {"genres": ["奇幻"]},
-    }
-    result = asyncio.run(delegate_to_wtm("p1", payload))
-    assert result["success"] is True, f"delegate_to_wtm 应成功: {result}"
-    assert "summary" in result
-    # 标记 onboarding_state.info_state = 'ready'（成功路径）
-    with mock_get_store.connection() as c:
-        row = c.execute(
-            "SELECT info_state FROM onboarding_state WHERE project_id='p1'"
-        ).fetchone()
-    assert row[0] == "ready", f"onboarding_state.info_state 应为 ready，实际 {row[0]}"
+    v0.8 改造：基座生成不再走 service 层机械代码，由 WTM ReAct loop 自主落库
+    本 test 验证 WTM 类有 run_initial_baseline_react 方法
+    """
+    from backend.agent.agents.world_tree_manager import WorldTreeManager
+    # 验证方法存在
+    assert hasattr(WorldTreeManager, "run_initial_baseline_react")
+    import inspect
+    sig = inspect.signature(WorldTreeManager.run_initial_baseline_react)
+    params = list(sig.parameters.keys())
+    assert "project_id" in params
+    assert "steward_payload" in params
+    # 旧机械函数应已删
+    from backend.agent.agents import world_tree_manager as wtm_mod
+    assert not hasattr(wtm_mod, "generate_full_world_tree_baseline")
 
 
 # ============ TC-002 ============
@@ -137,24 +133,27 @@ def test_tc_onboarding_002_verify_world_tree_baseline_6_items(mock_get_store, se
 # ============ TC-003 ============
 
 def test_tc_onboarding_003_no_step_limit():
-    """onboarding 不再有 step 限制（不限步数自由对话，v003 委托模式）
+    """onboarding 不再有 step 限制（不限步数自由对话，v0.7.1 合并后）
 
-    v003 变更（2026-07-01 完整删除旧 5 步工具）：
-    - 旧 onboarding_propose_step / onboarding_user_confirm 的 step 字段已随工具一起删除
-    - 新工具 DelegateToWTMInput / VerifyWorldTreeBaselineInput 没有 step 概念
-    - 管家与用户自由对话，不限步数，信息足够后直接调 delegate_to_wtm
+    v0.7.1 变更（2026-07-01）：
+    - delegate_to_wtm 工具已合并到 delegate_to_agent(mode="full_baseline")
+    - 保留 verify_world_tree_baseline（独立工具，不跟 delegate 重复）
+    - 新工具全无 step 概念：管家与用户自由对话，不限步数
+    - 委托入口在 delegate_to_agent.agent="world_tree_manager" + mode="full_baseline"
     """
-    from backend.agent.tools.onboarding_tools import (
-        DelegateToWTMInput, VerifyWorldTreeBaselineInput,
-    )
-    # 验证：新工具没有 step 字段（"无限 step" 的直接体现）
-    assert "step" not in DelegateToWTMInput.model_fields
+    from backend.agent.tools.onboarding_tools import VerifyWorldTreeBaselineInput
+    from backend.agent.tools.delegation_tools import DelegateToAgentInput
+
+    # 验证：onboarding_tools 的校验工具无 step 字段
     assert "step" not in VerifyWorldTreeBaselineInput.model_fields
-    # 验证：新工具只关心 project_id + 可选 payload
-    delegate_fields = set(DelegateToWTMInput.model_fields.keys())
-    assert delegate_fields == {"project_id", "steward_payload"}
-    verify_fields = set(VerifyWorldTreeBaselineInput.model_fields.keys())
-    assert verify_fields == {"project_id"}
+    assert set(VerifyWorldTreeBaselineInput.model_fields.keys()) == {"project_id"}
+
+    # 验证：v0.8 委托入口用 intent 字段（默认 intervention / initial_baseline 用于 Onboarding）
+    delegate_fields = set(DelegateToAgentInput.model_fields.keys())
+    assert "intent" in delegate_fields
+    assert "payload" in delegate_fields
+    # 默认 intent 应该是 "intervention"（向后兼容）
+    assert DelegateToAgentInput.model_fields["intent"].default == "intervention"
 
 
 # ============ TC-004 ============
@@ -257,29 +256,23 @@ def test_tc_onboarding_009_wtm_failure_fallback(mock_get_store, seed_project, mo
     from backend.services import onboarding_artifacts
 
     # 模拟 WTM 抛异常
-    async def failing_wtm(project_id, payload):
-        raise RuntimeError("LLM 调用失败")
-
-    monkeypatch.setattr(
-        "backend.agent.agents.world_tree_manager.generate_full_world_tree_baseline",
-        failing_wtm,
+    from backend.services.onboarding_artifacts import (
+        mark_wtm_pending,
+        mark_wtm_baseline_failed,
     )
 
-    from backend.services.onboarding_artifacts import delegate_to_wtm
+    # 模拟：WTM 委托失败，service 层回退 info_state 到 collecting
+    mark_wtm_pending("p1")
+    mark_wtm_baseline_failed("p1", "LLM 调用失败")
 
-    # 模拟：catch 异常 → info_state 回退到 collecting
-    try:
-        asyncio.run(delegate_to_wtm("p1", {"story_core_hint": "test"}))
-    except Exception:
-        pass
-
-    # 失败后应该把 info_state 设为 collecting
+    # 失败后 info_state 应为 collecting
     with mock_get_store.connection() as c:
         row = c.execute(
             "SELECT info_state FROM onboarding_state WHERE project_id='p1'"
         ).fetchone()
-    # 即使失败也不应 crash
-    assert row is None or row[0] in ("collecting", "wtm_pending", "ready")
+    assert row is None or row[0] == "collecting", (
+        f"失败后 info_state 应为 collecting，实际 {row[0] if row else None}"
+    )
 
 
 # ============ TC-010 ============

@@ -27,8 +27,8 @@ from backend.api.chapter_routes import router as chapter_router
 from backend.api.action_routes import router as action_router
 
 # v0.6.2: onboarding_routes 已删除（HTTP 路由 + WS handler 都不再用）
-# v003: 旧 5 步 onboarding 工具已删除（onboarding_propose_step / onboarding_user_confirm / onboarding_generate_chapter）
-# 项目 onboard 创建走管家 Agent 对接 (delegate_to_wtm / verify_world_tree_baseline 工具)
+# v0.7.1: delegate_to_wtm 已合并到 delegate_to_agent(mode="full_baseline")
+# 项目 onboard 创建走管家 Agent 对接 (verify_world_tree_baseline / delegate_to_agent)
 
 # 触发领域事件 handler 注册（import 即注册，无需显式调用）
 import backend.agent.onboarding.hooks  # noqa: F401

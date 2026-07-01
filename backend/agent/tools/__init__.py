@@ -10,7 +10,7 @@
 - character_tools:    introspect_character
 - plot_tools:         weave_plot
 - edit_artifact_tool: edit_artifact
-- onboarding_tools:   delegate_to_wtm / verify_world_tree_baseline              ← v003 委托模式
+- onboarding_tools:   verify_world_tree_baseline                                ← v0.7.1 委托入口合并到 delegate_to_agent
 - delegation_tools:   delegate_to_agent / dispatch_background_task  ← v0.6.2 新增
 - summarize_chapter_tool: summarize_chapter                       ← v0.6.2 新增
 - exploration_tools:  update_exploration_level                     ← v0.6.2 新增
