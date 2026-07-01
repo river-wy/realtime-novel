@@ -40,9 +40,8 @@ class ChapterContentResponse(BaseModel):
 
 
 class GenerateChapterRequest(BaseModel):
+    # v003：删 actor_feedback / actor_character 字段
     intervention: Optional[str] = None
-    actor_feedback: Optional[str] = None
-    actor_character: Optional[str] = None
 
 
 class GenerateChapterResponse(BaseModel):
@@ -136,8 +135,6 @@ async def generate_chapter(
     chapter_output = await delegate_chapter_generation(
         project_id=project_id,
         intervention=req.intervention,
-        actor_feedback=req.actor_feedback,
-        actor_character=req.actor_character,
         source="page_button",
     )
 
@@ -158,8 +155,6 @@ async def generate_chapter(
             "args": {
                 "project_id": project_id,
                 "intervention": req.intervention,
-                "actor_feedback": req.actor_feedback,
-                "actor_character": req.actor_character,
                 "source": "page_button",
             },
             "result": {

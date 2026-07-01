@@ -55,7 +55,12 @@ class CreateProjectTool(BaseTool):
 
     async def run(self, input: CreateProjectInput, progress_callback=None) -> ProjectDetail:
         try:
-            project = await self._manager.create(input.name, input.palette, input.initial_prompt)
+            project = await self._manager.create(
+                name=input.name,
+                palette=input.palette,
+                initial_prompt=input.initial_prompt,
+                exploration_level=input.exploration_level,
+            )
             return ProjectDetail(
                 id=project.get("id", ""),
                 name=input.name,

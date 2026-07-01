@@ -1,6 +1,10 @@
-"""ProjectRepository：projects 表 + 6 件基座 CRUD
+"""ProjectRepository：projects + world_tree 基座 + 9 张关联表
 
-所有 JSON 字段在 Repository 边界做序列化/反序列化。
+v003 重构（spec: .spec/db-refactor/spec.md）
+- 删：palette（迁前端主题）、current_pov（迁 project_state）、6 件基座（重构成 9 张表）
+- 删：update_timeline / update_geography（旧列级更新）
+- 新增：project_state / volumes / main_plot_node / sub_plot / world_entries / timeline_events / geography_locations 方法
+- _upsert_world_tree 重写：仅写 5 字段（story_core / genre_tags_json / core_rules_json）
 """
 from __future__ import annotations
 
@@ -10,7 +14,11 @@ from datetime import datetime
 from typing import Optional, List, Dict, Any
 
 from backend.persistence.models import (
-    Project, )
+    Project, ProjectState, WorldTreeRow,
+    VolumeRow, MainPlotNodeRow, SubPlotRow,
+    CharacterRow, CharacterRelationshipRow,
+    SeedRow, TimelineEventRow, GeographyLocationRow, WorldEntryRow,
+)
 from backend.persistence.sqlite_store import get_store
 from backend.utils.logger import logger
 
@@ -35,51 +43,33 @@ def _from_json(value: Optional[str]) -> Any:
 
 @logger
 class ProjectRepository:
-    """projects 表 CRUD + 6 件基座"""
+    """projects + 9 张关联表（世界树基座）"""
 
-    # ----- Project 元数据 -----
+    # ---------- projects ----------
 
-    def create(self, project_id: str, name: str, palette: str = "",
+    def create(self, project_id: str, name: str,
                exploration_level: str = "standard",
                style_pack_id: Optional[str] = None) -> Project:
-        """创建项目"""
+        """v003：删 palette 入参"""
         now = _now()
         with get_store().connection() as conn:
             conn.execute(
                 """
-                INSERT INTO projects (id, name, palette, exploration_level, style_pack_id, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO projects (id, name, exploration_level, style_pack_id, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
                 """,
-                (project_id, name, palette, exploration_level, style_pack_id, now, now),
+                (project_id, name, exploration_level, style_pack_id, now, now),
             )
-        self.log.info("DB project CREATE: id=%s, name=%r, exploration_level=%s, style_pack_id=%s",
-                      project_id, name, exploration_level, style_pack_id)
+        self.log.info(
+            "DB project CREATE: id=%s, name=%r, exploration_level=%s, style_pack_id=%s",
+            project_id, name, exploration_level, style_pack_id,
+        )
         return Project(
-            id=project_id, name=name, palette=palette,
+            id=project_id, name=name,
             exploration_level=exploration_level,
             style_pack_id=style_pack_id,
-            current_pov=None, created_at=now, updated_at=now,
+            created_at=now, updated_at=now,
         )
-
-    def update_style_pack_id(self, project_id: str, style_pack_id: str) -> None:
-        """更新写作笔风 id"""
-        with get_store().connection() as conn:
-            conn.execute(
-                "UPDATE projects SET style_pack_id = ?, updated_at = ? WHERE id = ?",
-                (style_pack_id, _now(), project_id),
-            )
-        self.log.info("DB project UPDATE style_pack_id: id=%s, style_pack_id=%s", project_id, style_pack_id)
-
-    def get_style_pack_id(self, project_id: str) -> Optional[str]:
-        """读取写作笔风 id，不存在返回 None"""
-        with get_store().connection() as conn:
-            row = conn.execute(
-                "SELECT style_pack_id FROM projects WHERE id = ?",
-                (project_id,),
-            ).fetchone()
-        if row:
-            return row[0] or None
-        return None
 
     def get(self, project_id: str) -> Optional[Project]:
         with get_store().connection() as conn:
@@ -106,17 +96,8 @@ class ProjectRepository:
                 "UPDATE projects SET name = ?, updated_at = ? WHERE id = ?",
                 (new_name, _now(), project_id),
             )
-        self.log.info("DB project UPDATE name: id=%s, name=%r", project_id, new_name)
-
-    def update_palette(self, project_id: str, new_palette: str) -> None:
-        with get_store().connection() as conn:
-            conn.execute(
-                "UPDATE projects SET palette = ?, updated_at = ? WHERE id = ?",
-                (new_palette, _now(), project_id),
-            )
 
     def update_exploration_level(self, project_id: str, new_level: str) -> None:
-        """切换探索度 (conservative/standard/wild)"""
         if new_level not in ("conservative", "standard", "wild"):
             raise ValueError(f"exploration_level 必须是 conservative/standard/wild, 收到: {new_level!r}")
         with get_store().connection() as conn:
@@ -124,15 +105,23 @@ class ProjectRepository:
                 "UPDATE projects SET exploration_level = ?, updated_at = ? WHERE id = ?",
                 (new_level, _now(), project_id),
             )
-        self.log.info("DB project UPDATE exploration_level: id=%s, level=%s", project_id, new_level)
 
-    def update_current_pov(self, project_id: str, new_pov: Optional[str]) -> None:
-        """更新 POV 角色 char_id"""
+    def update_style_pack_id(self, project_id: str, style_pack_id: str) -> None:
         with get_store().connection() as conn:
             conn.execute(
-                "UPDATE projects SET current_pov = ?, updated_at = ? WHERE id = ?",
-                (new_pov, _now(), project_id),
+                "UPDATE projects SET style_pack_id = ?, updated_at = ? WHERE id = ?",
+                (style_pack_id, _now(), project_id),
             )
+
+    def get_style_pack_id(self, project_id: str) -> Optional[str]:
+        with get_store().connection() as conn:
+            row = conn.execute(
+                "SELECT style_pack_id FROM projects WHERE id = ?",
+                (project_id,),
+            ).fetchone()
+        if row:
+            return row[0] or None
+        return None
 
     def update_cover_image_url(self, project_id: str, cover_image_url: Optional[str]) -> None:
         with get_store().connection() as conn:
@@ -140,7 +129,6 @@ class ProjectRepository:
                 "UPDATE projects SET cover_image_url = ?, updated_at = ? WHERE id = ?",
                 (cover_image_url, _now(), project_id),
             )
-        self.log.info("DB project UPDATE cover_image_url: id=%s, url=%s", project_id, cover_image_url)
 
     def soft_delete(self, project_id: str) -> None:
         with get_store().connection() as conn:
@@ -148,726 +136,796 @@ class ProjectRepository:
                 "UPDATE projects SET deleted_at = ? WHERE id = ?",
                 (_now(), project_id),
             )
-        self.log.info("DB project SOFT DELETE: id=%s", project_id)
 
     def hard_delete(self, project_id: str) -> None:
-        """物理删除（cascade 删 6 件基座）"""
         with get_store().connection() as conn:
             conn.execute("DELETE FROM projects WHERE id = ?", (project_id,))
-        self.log.info("DB project HARD DELETE: id=%s", project_id)
 
     def restore_delete(self, project_id: str) -> None:
-        """取消软删标记"""
         with get_store().connection() as conn:
             conn.execute(
                 "UPDATE projects SET deleted_at = NULL WHERE id = ?",
                 (project_id,),
             )
-        self.log.info("DB project RESTORE: id=%s", project_id)
 
-    # ----- 6 件基座 upsert -----
+    # ---------- project_state (1:1) ----------
+
+    def get_project_state(self, project_id: str) -> Optional[ProjectState]:
+        with get_store().connection() as conn:
+            row = conn.execute(
+                "SELECT * FROM project_state WHERE project_id = ?",
+                (project_id,),
+            ).fetchone()
+        if not row:
+            return None
+        return ProjectState(**dict(row))
+
+    def upsert_project_state(
+        self,
+        project_id: str,
+        current_pov: Optional[str] = None,
+        current_chapter: Optional[int] = None,
+        current_volume_id: Optional[str] = None,
+        current_timeline_event_id: Optional[str] = None,
+        current_geography_location_ids: Optional[List[str]] = None,
+        last_generated_at: Optional[datetime] = None,
+    ) -> None:
+        """upsert project_state（v003 新增）"""
+        now = _now()
+        with get_store().connection() as conn:
+            row = conn.execute(
+                "SELECT * FROM project_state WHERE project_id = ?",
+                (project_id,),
+            ).fetchone()
+            if row:
+                # 增量 UPDATE：仅更新非 None 字段
+                fields = []
+                values = []
+                if current_pov is not None:
+                    fields.append("current_pov = ?")
+                    values.append(current_pov)
+                if current_chapter is not None:
+                    fields.append("current_chapter = ?")
+                    values.append(current_chapter)
+                if current_volume_id is not None:
+                    fields.append("current_volume_id = ?")
+                    values.append(current_volume_id)
+                if current_timeline_event_id is not None:
+                    fields.append("current_timeline_event_id = ?")
+                    values.append(current_timeline_event_id)
+                if current_geography_location_ids is not None:
+                    fields.append("current_geography_location_ids_json = ?")
+                    values.append(_to_json(current_geography_location_ids))
+                if last_generated_at is not None:
+                    fields.append("last_generated_at = ?")
+                    values.append(last_generated_at)
+                fields.append("updated_at = ?")
+                values.append(now)
+                values.append(project_id)
+                conn.execute(
+                    f"UPDATE project_state SET {', '.join(fields)} WHERE project_id = ?",
+                    values,
+                )
+            else:
+                conn.execute(
+                    """
+                    INSERT INTO project_state (
+                        project_id, current_pov, current_chapter, current_volume_id,
+                        current_timeline_event_id, current_geography_location_ids_json,
+                        last_generated_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        project_id,
+                        current_pov,
+                        current_chapter or 0,
+                        current_volume_id,
+                        current_timeline_event_id,
+                        _to_json(current_geography_location_ids or []),
+                        last_generated_at,
+                        now,
+                    ),
+                )
+
+    # ---------- world_tree (5 字段最终态) ----------
 
     def _upsert_world_tree(self, project_id: str, data: Dict[str, Any]) -> None:
+        """v003 重写：仅写 5 字段
+
+        输入 data 格式：
+        - data["story_core"]: str（顶层）
+        - data["genre_tags"]: list[str]（顶层，替代 genre_resonance）
+        - data["base"]["core_rules"]: list[dict]（约束规则）
+        """
+        now = _now()
+        story_core = data.get("story_core")
+        genre_tags = data.get("genre_tags") or data.get("genres", [])
         base = data.get("base", {}) or {}
-        timeline = base.get("timeline", {}) or {}
-        geography = base.get("geography", {}) or {}
+        core_rules = base.get("core_rules", [])
+
         with get_store().connection() as conn:
             conn.execute(
                 """
                 INSERT INTO world_tree (
-                    project_id, timeline_era, anchor_event,
-                    geography_primary, geography_secondary_json, geography_spatial_rules_json,
-                    core_rules_json, metadata_json, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    project_id, story_core, genre_tags_json, core_rules_json, updated_at
+                ) VALUES (?, ?, ?, ?, ?)
                 ON CONFLICT(project_id) DO UPDATE SET
-                    timeline_era=excluded.timeline_era,
-                    anchor_event=excluded.anchor_event,
-                    geography_primary=excluded.geography_primary,
-                    geography_secondary_json=excluded.geography_secondary_json,
-                    geography_spatial_rules_json=excluded.geography_spatial_rules_json,
+                    story_core=excluded.story_core,
+                    genre_tags_json=excluded.genre_tags_json,
                     core_rules_json=excluded.core_rules_json,
-                    metadata_json=excluded.metadata_json,
                     updated_at=excluded.updated_at
                 """,
                 (
                     project_id,
-                    timeline.get("era"),
-                    timeline.get("anchor_event"),
-                    geography.get("primary"),
-                    _to_json(geography.get("secondary", [])),
-                    _to_json(geography.get("spatial_rules")),
-                    _to_json(base.get("core_rules", [])),
-                    _to_json(data.get("metadata", {})),
-                    _now(),
+                    story_core,
+                    _to_json(genre_tags),
+                    _to_json(core_rules),
+                    now,
                 ),
             )
 
-    def _upsert_genre_resonance(self, project_id: str, data: Dict[str, Any]) -> None:
-        with get_store().connection() as conn:
-            conn.execute(
-                """
-                INSERT INTO genre_resonance (
-                    project_id, accept_json, reject_json, anchors_json, metadata_json, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?)
-                ON CONFLICT(project_id) DO UPDATE SET
-                    accept_json=excluded.accept_json,
-                    reject_json=excluded.reject_json,
-                    anchors_json=excluded.anchors_json,
-                    metadata_json=excluded.metadata_json,
-                    updated_at=excluded.updated_at
-                """,
-                (
-                    project_id,
-                    _to_json(data.get("accept", [])),
-                    _to_json(data.get("reject", [])),
-                    _to_json(data.get("anchors", [])),
-                    _to_json(data.get("metadata", {})),
-                    _now(),
-                ),
-            )
-
-    def _upsert_main_plot(self, project_id: str, data: Dict[str, Any]) -> None:
-        with get_store().connection() as conn:
-            conn.execute(
-                """
-                INSERT INTO main_plot (
-                    project_id, current_beat, arc_phrase, beats_json, metadata_json, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?)
-                ON CONFLICT(project_id) DO UPDATE SET
-                    current_beat=excluded.current_beat,
-                    arc_phrase=excluded.arc_phrase,
-                    beats_json=excluded.beats_json,
-                    metadata_json=excluded.metadata_json,
-                    updated_at=excluded.updated_at
-                """,
-                (
-                    project_id,
-                    data.get("current_beat", 0),
-                    data.get("arc_phrase"),
-                    _to_json(data.get("beats", [])),
-                    _to_json(data.get("metadata", {})),
-                    _now(),
-                ),
-            )
-
-    def _replace_subplots(self, project_id: str, sub_plots: List[Dict[str, Any]]) -> None:
-        """支线一对多：先删后插（显式事务）"""
-        with get_store().transaction() as conn:
-            conn.execute("DELETE FROM sub_plot WHERE project_id = ?", (project_id,))
-            for sp in sub_plots or []:
-                conn.execute(
-                    """
-                    INSERT OR REPLACE INTO sub_plot (
-                        id, project_id, title, description, parent_beat_id, status, priority,
-                        linked_seeds_json, linked_chars_json, metadata_json, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        sp.get("id", f"subplot-{uuid.uuid4().hex[:8]}"),
-                        project_id,
-                        sp.get("title", ""),
-                        sp.get("description"),
-                        sp.get("parent_beat_id"),
-                        sp.get("status", "pending"),
-                        sp.get("priority", "side"),
-                        _to_json(sp.get("linked_seeds", [])),
-                        _to_json(sp.get("linked_chars", [])),
-                        _to_json(sp.get("metadata", {})),
-                        _now(),
-                    ),
-                )
-
-    def _replace_characters(self, project_id: str, char_card: Dict[str, Any]) -> None:
-        """角色 + 关系一对多：先删角色（cascade 删关系），显式事务"""
-        characters = char_card.get("characters", []) or []
-        relationships = char_card.get("relationships", []) or []
-        with get_store().transaction() as conn:
-            conn.execute("DELETE FROM characters WHERE project_id = ?", (project_id,))
-            for c in characters:
-                conn.execute(
-                    """
-                    INSERT OR REPLACE INTO characters (
-                        id, project_id, name, role, traits_json, speech_style,
-                        background, arc, internal_state, metadata_json, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        c.get("id", f"char-{uuid.uuid4().hex[:8]}"),
-                        project_id,
-                        c.get("name", ""),
-                        c.get("role", "supporting"),
-                        _to_json(c.get("traits", [])),
-                        c.get("speech_style"),
-                        c.get("background"),
-                        c.get("arc"),
-                        c.get("internal_state"),
-                        _to_json(c.get("metadata", {})),
-                        _now(),
-                    ),
-                )
-            for r in relationships:
-                conn.execute(
-                    """
-                    INSERT OR REPLACE INTO character_relationships (
-                        id, project_id, from_char_id, to_char_id, type,
-                        description, evolution_json, metadata_json, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        r.get("id", f"rel-{uuid.uuid4().hex[:8]}"),
-                        project_id,
-                        r.get("from_char"),
-                        r.get("to_char"),
-                        r.get("type"),
-                        r.get("description"),
-                        _to_json(r.get("evolution", [])),
-                        _to_json(r.get("metadata", {})),
-                        _now(),
-                    ),
-                )
-
-    def _replace_seeds(self, project_id: str, seeds: List[Dict[str, Any]]) -> None:
-        """种子一对多：先删后插（显式事务）"""
-        with get_store().transaction() as conn:
-            conn.execute("DELETE FROM seeds WHERE project_id = ?", (project_id,))
-            for s in seeds or []:
-                importance = s.get("importance", {}) or {}
-                conn.execute(
-                    """
-                    INSERT INTO seeds (
-                        project_id, content, name, trigger, payoff,
-                        estimated_chapter, payoff_chapter,
-                        importance_primary, size, planned_interval,
-                        orientation, planted_at_chapter, planted_in_node, planted_context,
-                        last_seen_chapter, weight, status, linked_char_ids_json,
-                        linked_subplot_id, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        project_id,
-                        s.get("content", ""),
-                        s.get("name"),
-                        s.get("trigger"),
-                        s.get("payoff"),
-                        s.get("estimated_chapter"),
-                        s.get("payoff_chapter"),
-                        importance.get("primary", "小巧思"),
-                        s.get("size", "点状"),
-                        s.get("planned_interval"),
-                        s.get("orientation", "氛围营造"),
-                        s.get("planted_at_chapter", 0),
-                        s.get("planted_in_node"),
-                        s.get("planted_context"),
-                        s.get("last_seen_chapter", 0),
-                        s.get("weight", 0.5),
-                        s.get("status", "planted"),
-                        _to_json(s.get("linked_char_ids", [])),
-                        s.get("linked_subplot_id"),
-                        _now(),
-                    ),
-                )
-
-    def save_7_artifacts(
-        self,
-        project_id: str,
-        world_tree: Dict[str, Any],
-        genre_resonance: Dict[str, Any],
-        main_plot: Dict[str, Any],
-        sub_plot: Dict[str, Any],
-        character_card: Dict[str, Any],
-        seed_table: Dict[str, Any],
-    ) -> None:
-        """6 件基座一次性落库"""
-        self._upsert_world_tree(project_id, world_tree)
-        self._upsert_genre_resonance(project_id, genre_resonance)
-        self._upsert_main_plot(project_id, main_plot)
-        threads = sub_plot.get("threads", []) if isinstance(sub_plot, dict) else []
-        self._replace_subplots(project_id, threads)
-        self._replace_characters(project_id, character_card)
-        seeds = seed_table.get("seeds", []) if isinstance(seed_table, dict) else []
-        self._replace_seeds(project_id, seeds)
-        with get_store().connection() as conn:
-            conn.execute(
-                "UPDATE projects SET updated_at = ? WHERE id = ?",
-                (_now(), project_id),
-            )
-
-    # ----- 6 件基座读取 -----
-
-    def load_all_artifacts(self, project_id: str) -> Dict[str, Any]:
-        """6 件基座一次性读出，返回 dict 给 context_builder 用"""
-        with get_store().connection() as conn:
-            wt = conn.execute(
-                "SELECT * FROM world_tree WHERE project_id = ?", (project_id,)
-            ).fetchone()
-            gr = conn.execute(
-                "SELECT * FROM genre_resonance WHERE project_id = ?", (project_id,)
-            ).fetchone()
-            mp = conn.execute(
-                "SELECT * FROM main_plot WHERE project_id = ?", (project_id,)
-            ).fetchone()
-            sps = conn.execute(
-                "SELECT * FROM sub_plot WHERE project_id = ?", (project_id,)
-            ).fetchall()
-            chars = conn.execute(
-                "SELECT * FROM characters WHERE project_id = ?", (project_id,)
-            ).fetchall()
-            rels = conn.execute(
-                "SELECT * FROM character_relationships WHERE project_id = ?", (project_id,)
-            ).fetchall()
-            seeds = conn.execute(
-                "SELECT * FROM seeds WHERE project_id = ?", (project_id,)
-            ).fetchall()
-
-        return {
-            "world_tree": _serialize_world_tree(dict(wt) if wt else {}),
-            "genre_resonance": _serialize_genre_resonance(dict(gr) if gr else {}),
-            "main_plot": _serialize_main_plot(dict(mp) if mp else {}),
-            "sub_plot": _serialize_sub_plot([dict(s) for s in sps]),
-            "character_card": _serialize_characters([dict(c) for c in chars], [dict(r) for r in rels]),
-            "seed_table": _serialize_seeds([dict(s) for s in seeds]),
-        }
-
-    # ----- Character 增量 CRUD -----
-
-    def add_character(self, project_id: str, data: Dict[str, Any]) -> str:
-        """新增单个角色，返回 char_id"""
-        char_id = data.get("id", f"char-{uuid.uuid4().hex[:8]}")
-        with get_store().connection() as conn:
-            conn.execute(
-                """INSERT INTO characters (
-                    id, project_id, name, role, traits_json, speech_style,
-                    background, arc, internal_state, metadata_json, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (
-                    char_id, project_id,
-                    data.get("name", ""), data.get("role", "supporting"),
-                    _to_json(data.get("traits", [])),
-                    data.get("speech_style"), data.get("background"),
-                    data.get("arc"), data.get("internal_state"),
-                    _to_json(data.get("metadata", {})), _now(),
-                ),
-            )
-        self.log.info("DB character ADD: project=%s, char_id=%s", project_id, char_id)
-        return char_id
-
-    def get_character(self, project_id: str, char_id: str) -> Optional[Dict[str, Any]]:
-        """按 char_id 查单个角色，不存在返回 None"""
+    def get_world_tree(self, project_id: str) -> Optional[WorldTreeRow]:
         with get_store().connection() as conn:
             row = conn.execute(
-                "SELECT * FROM characters WHERE id = ? AND project_id = ?",
-                (char_id, project_id),
+                "SELECT * FROM world_tree WHERE project_id = ?",
+                (project_id,),
             ).fetchone()
         if not row:
             return None
-        d = dict(row)
-        d["traits"] = _from_json(d.pop("traits_json", None)) or []
-        d["metadata"] = _from_json(d.pop("metadata_json", None)) or {}
-        return d
+        return WorldTreeRow(**dict(row))
 
-    def update_character(self, project_id: str, char_id: str, data: Dict[str, Any]) -> bool:
-        """增量更新单个角色（diff merge），返回是否找到"""
-        with get_store().connection() as conn:
-            row = conn.execute(
-                "SELECT * FROM characters WHERE id = ? AND project_id = ?",
-                (char_id, project_id),
-            ).fetchone()
-            if not row:
-                return False
-            old = dict(row)
-            conn.execute(
-                """UPDATE characters SET
-                    name=?, role=?, traits_json=?, speech_style=?,
-                    background=?, arc=?, internal_state=?, updated_at=?
-                WHERE id=? AND project_id=?""",
-                (
-                    data.get("name", old["name"]),
-                    data.get("role", old["role"]),
-                    _to_json(data.get("traits", _from_json(old.get("traits_json")) or [])),
-                    data.get("speech_style", old.get("speech_style")),
-                    data.get("background", old.get("background")),
-                    data.get("arc", old.get("arc")),
-                    data.get("internal_state", old.get("internal_state")),
-                    _now(), char_id, project_id,
-                ),
-            )
-        self.log.info("DB character UPDATE: project=%s, char_id=%s", project_id, char_id)
-        return True
-
-    def delete_character(self, project_id: str, char_id: str) -> None:
-        """删除单个角色"""
-        with get_store().connection() as conn:
-            conn.execute(
-                "DELETE FROM characters WHERE id = ? AND project_id = ?",
-                (char_id, project_id),
-            )
-        self.log.info("DB character DELETE: project=%s, char_id=%s", project_id, char_id)
-
-    # ----- Relationship 增量 CRUD -----
-
-    def add_relationship(self, project_id: str, data: Dict[str, Any]) -> str:
-        """新增单个角色关系，返回 rel_id"""
-        rel_id = data.get("id", f"rel-{uuid.uuid4().hex[:8]}")
-        with get_store().connection() as conn:
-            conn.execute(
-                """INSERT INTO character_relationships (
-                    id, project_id, from_char_id, to_char_id, type,
-                    description, evolution_json, metadata_json, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (
-                    rel_id, project_id,
-                    data.get("from_char"), data.get("to_char"),
-                    data.get("type"), data.get("description"),
-                    _to_json(data.get("evolution", [])),
-                    _to_json(data.get("metadata", {})), _now(),
-                ),
-            )
-        self.log.info("DB relationship ADD: project=%s, rel_id=%s", project_id, rel_id)
-        return rel_id
-
-    def delete_relationship(self, project_id: str, rel_id: str) -> None:
-        """删除单个角色关系"""
-        with get_store().connection() as conn:
-            conn.execute(
-                "DELETE FROM character_relationships WHERE id = ? AND project_id = ?",
-                (rel_id, project_id),
-            )
-        self.log.info("DB relationship DELETE: project=%s, rel_id=%s", project_id, rel_id)
-
-    # ----- Core Rule（world_tree.core_rules_json 数组操作）-----
-
-    def get_core_rules(self, project_id: str) -> Optional[List[Dict[str, Any]]]:
-        """读取 core_rules 列表，world_tree 不存在返回 None"""
+    def get_core_rules(self, project_id: str) -> List[Dict[str, Any]]:
         with get_store().connection() as conn:
             row = conn.execute(
                 "SELECT core_rules_json FROM world_tree WHERE project_id = ?",
                 (project_id,),
             ).fetchone()
-        if not row:
-            return None
+        if not row or not row["core_rules_json"]:
+            return []
         return _from_json(row["core_rules_json"]) or []
 
     def save_core_rules(self, project_id: str, rules: List[Dict[str, Any]]) -> None:
-        """将更新后的 core_rules 写回 world_tree"""
         with get_store().connection() as conn:
             conn.execute(
                 "UPDATE world_tree SET core_rules_json = ?, updated_at = ? WHERE project_id = ?",
                 (_to_json(rules), _now(), project_id),
             )
 
-    # ----- Timeline / Geography（world_tree 列级更新）-----
+    # ---------- volumes (1:n) ----------
 
-    def update_timeline(self, project_id: str, data: Dict[str, Any]) -> bool:
-        """更新 world_tree timeline 字段，返回是否找到"""
+    def list_volumes(self, project_id: str) -> List[VolumeRow]:
         with get_store().connection() as conn:
-            row = conn.execute(
-                "SELECT * FROM world_tree WHERE project_id = ?", (project_id,)
-            ).fetchone()
-            if not row:
-                return False
-            conn.execute(
-                """UPDATE world_tree SET
-                    timeline_era=?, anchor_event=?, updated_at=?
-                WHERE project_id=?""",
-                (
-                    data.get("era", row["timeline_era"]),
-                    data.get("anchor_event", row["anchor_event"]),
-                    _now(), project_id,
-                ),
-            )
-        return True
-
-    def update_geography(self, project_id: str, data: Dict[str, Any]) -> bool:
-        """更新 world_tree geography 字段，返回是否找到"""
-        with get_store().connection() as conn:
-            row = conn.execute(
-                "SELECT * FROM world_tree WHERE project_id = ?", (project_id,)
-            ).fetchone()
-            if not row:
-                return False
-            conn.execute(
-                """UPDATE world_tree SET
-                    geography_primary=?, geography_secondary_json=?,
-                    geography_spatial_rules_json=?, updated_at=?
-                WHERE project_id=?""",
-                (
-                    data.get("primary", row["geography_primary"]),
-                    _to_json(data.get("secondary",
-                        _from_json(row["geography_secondary_json"]) or [])),
-                    _to_json(data.get("spatial_rules",
-                        _from_json(row["geography_spatial_rules_json"]) or [])),
-                    _now(), project_id,
-                ),
-            )
-        return True
-
-    # ----- Seed 增量 CRUD -----
-
-    def add_seed(self, project_id: str, data: Dict[str, Any]) -> int:
-        """新增单颗种子，返回 seed.id（自增主键）"""
-        with get_store().connection() as conn:
-            cursor = conn.execute(
-                """INSERT INTO seeds (
-                    project_id, content, name, trigger, payoff,
-                    estimated_chapter, payoff_chapter,
-                    importance_primary, size, planned_interval,
-                    orientation, planted_at_chapter, planted_in_node, planted_context,
-                    last_seen_chapter, weight, status, linked_char_ids_json,
-                    linked_subplot_id, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (
-                    project_id,
-                    data.get("content", ""),
-                    data.get("name"),
-                    data.get("trigger"),
-                    data.get("payoff"),
-                    data.get("estimated_chapter"),
-                    data.get("payoff_chapter"),
-                    data.get("importance_primary", "小巧思"),
-                    data.get("size", "点状"),
-                    data.get("planned_interval"),
-                    data.get("orientation", "氛围营造"),
-                    data.get("planted_at_chapter", 0),
-                    data.get("planted_in_node"),
-                    data.get("planted_context"),
-                    data.get("last_seen_chapter", 0),
-                    data.get("weight", 0.5),
-                    data.get("status", "planted"),
-                    _to_json(data.get("linked_char_ids", [])),
-                    data.get("linked_subplot_id"),
-                    _now(),
-                ),
-            )
-        seed_id = cursor.lastrowid
-        self.log.info("DB seed ADD: project=%s, seed_id=%s", project_id, seed_id)
-        return seed_id
-
-    def update_seed(self, project_id: str, seed_id: int, data: Dict[str, Any]) -> bool:
-        """增量更新单颗种子，返回是否找到"""
-        with get_store().connection() as conn:
-            row = conn.execute(
-                "SELECT * FROM seeds WHERE id = ? AND project_id = ?",
-                (seed_id, project_id),
-            ).fetchone()
-            if not row:
-                return False
-            old = dict(row)
-            conn.execute(
-                """UPDATE seeds SET
-                    content=?, name=?, trigger=?, payoff=?,
-                    estimated_chapter=?, payoff_chapter=?,
-                    importance_primary=?, size=?, planned_interval=?,
-                    orientation=?, weight=?, status=?, updated_at=?
-                WHERE id=? AND project_id=?""",
-                (
-                    data.get("content", old["content"]),
-                    data.get("name", old.get("name")),
-                    data.get("trigger", old.get("trigger")),
-                    data.get("payoff", old.get("payoff")),
-                    data.get("estimated_chapter", old.get("estimated_chapter")),
-                    data.get("payoff_chapter", old.get("payoff_chapter")),
-                    data.get("importance_primary", old["importance_primary"]),
-                    data.get("size", old["size"]),
-                    data.get("planned_interval", old["planned_interval"]),
-                    data.get("orientation", old["orientation"]),
-                    data.get("weight", old["weight"]),
-                    data.get("status", old["status"]),
-                    _now(), seed_id, project_id,
-                ),
-            )
-        self.log.info("DB seed UPDATE: project=%s, seed_id=%s", project_id, seed_id)
-        return True
-
-    def delete_seed(self, project_id: str, seed_id: int) -> None:
-        """删除单颗种子"""
-        with get_store().connection() as conn:
-            conn.execute(
-                "DELETE FROM seeds WHERE id = ? AND project_id = ?",
-                (seed_id, project_id),
-            )
-        self.log.info("DB seed DELETE: project=%s, seed_id=%s", project_id, seed_id)
-
-    # ----- Subplot 增量 CRUD -----
-
-    def add_subplot(self, project_id: str, data: Dict[str, Any]) -> str:
-        """新增单个支线，返回 subplot_id"""
-        sp_id = data.get("id", f"subplot-{uuid.uuid4().hex[:8]}")
-        with get_store().connection() as conn:
-            conn.execute(
-                """INSERT INTO sub_plot (
-                    id, project_id, title, description, parent_beat_id, status, priority,
-                    linked_seeds_json, linked_chars_json, metadata_json, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (
-                    sp_id, project_id,
-                    data.get("title", ""), data.get("description"),
-                    data.get("parent_beat_id"),
-                    data.get("status", "pending"),
-                    data.get("priority", "side"),
-                    _to_json(data.get("linked_seeds", [])),
-                    _to_json(data.get("linked_chars", [])),
-                    _to_json(data.get("metadata", {})),
-                    _now(),
-                ),
-            )
-        self.log.info("DB subplot ADD: project=%s, sp_id=%s", project_id, sp_id)
-        return sp_id
-
-    def delete_subplot(self, project_id: str, sp_id: str) -> None:
-        """删除单个支线"""
-        with get_store().connection() as conn:
-            conn.execute(
-                "DELETE FROM sub_plot WHERE id = ? AND project_id = ?",
-                (sp_id, project_id),
-            )
-        self.log.info("DB subplot DELETE: project=%s, sp_id=%s", project_id, sp_id)
-
-    # ----- Beat（main_plot.beats_json 数组操作）-----
-
-    def get_beats(self, project_id: str) -> Optional[List[Dict[str, Any]]]:
-        """读取 beats 列表，main_plot 不存在返回 None"""
-        with get_store().connection() as conn:
-            row = conn.execute(
-                "SELECT beats_json FROM main_plot WHERE project_id = ?",
+            rows = conn.execute(
+                "SELECT * FROM volumes WHERE project_id = ? ORDER BY volume_num",
                 (project_id,),
+            ).fetchall()
+        return [VolumeRow(**dict(r)) for r in rows]
+
+    def get_volume(self, project_id: str, volume_id: str) -> Optional[VolumeRow]:
+        with get_store().connection() as conn:
+            row = conn.execute(
+                "SELECT * FROM volumes WHERE project_id = ? AND id = ?",
+                (project_id, volume_id),
             ).fetchone()
         if not row:
             return None
-        return _from_json(row["beats_json"]) or []
+        return VolumeRow(**dict(row))
 
-    def save_beats(self, project_id: str, beats: List[Dict[str, Any]]) -> None:
-        """将更新后的 beats 写回 main_plot"""
+    def add_volume(self, project_id: str, data: Dict[str, Any]) -> str:
+        volume_id = data.get("id", f"vol-{uuid.uuid4().hex[:8]}")
+        now = _now()
         with get_store().connection() as conn:
             conn.execute(
-                "UPDATE main_plot SET beats_json = ?, updated_at = ? WHERE project_id = ?",
-                (_to_json(beats), _now(), project_id),
+                """
+                INSERT INTO volumes (id, project_id, volume_num, title, description, planned_chapter_count, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    volume_id, project_id,
+                    data.get("volume_num", 0),
+                    data.get("title", ""),
+                    data.get("description"),
+                    data.get("planned_chapter_count"),
+                    now,
+                ),
+            )
+        self.log.info("DB volume ADD: project=%s, vol_id=%s", project_id, volume_id)
+        return volume_id
+
+    def update_volume(self, project_id: str, volume_id: str, data: Dict[str, Any]) -> None:
+        fields = []
+        values = []
+        for key in ("volume_num", "title", "description", "planned_chapter_count"):
+            if key in data:
+                fields.append(f"{key} = ?")
+                values.append(data[key])
+        if not fields:
+            return
+        fields.append("updated_at = ?")
+        values.append(_now())
+        values.extend([project_id, volume_id])
+        with get_store().connection() as conn:
+            conn.execute(
+                f"UPDATE volumes SET {', '.join(fields)} WHERE project_id = ? AND id = ?",
+                values,
             )
 
+    def delete_volume(self, project_id: str, volume_id: str) -> None:
+        with get_store().connection() as conn:
+            conn.execute(
+                "DELETE FROM volumes WHERE project_id = ? AND id = ?",
+                (project_id, volume_id),
+            )
 
-# ============ DB → dict 序列化 ============
+    # ---------- main_plot (1:n 节点) ----------
 
-def _serialize_world_tree(row: Dict[str, Any]) -> Dict[str, Any]:
-    if not row:
-        return {}
-    timeline = {}
-    if row.get("timeline_era"):
-        timeline["era"] = row["timeline_era"]
-    if row.get("anchor_event"):
-        timeline["anchor_event"] = row["anchor_event"]
-    geography = {}
-    if row.get("geography_primary"):
-        geography["primary"] = row["geography_primary"]
-    if row.get("geography_secondary_json"):
-        geography["secondary"] = _from_json(row["geography_secondary_json"])
-    if row.get("geography_spatial_rules_json"):
-        geography["spatial_rules"] = _from_json(row["geography_spatial_rules_json"])
-    return {
-        "schema_version": row.get("schema_version", "1.0"),
-        "base": {
-            "timeline": timeline,
-            "geography": geography,
-            "core_rules": _from_json(row.get("core_rules_json")) or [],
-        },
-        "metadata": _from_json(row.get("metadata_json")) or {},
-    }
+    def list_main_plot_nodes(self, project_id: str) -> List[MainPlotNodeRow]:
+        with get_store().connection() as conn:
+            rows = conn.execute(
+                "SELECT * FROM main_plot WHERE project_id = ? ORDER BY plot_num",
+                (project_id,),
+            ).fetchall()
+        return [MainPlotNodeRow(**dict(r)) for r in rows]
 
+    def get_main_plot_node(self, project_id: str, node_id: str) -> Optional[MainPlotNodeRow]:
+        with get_store().connection() as conn:
+            row = conn.execute(
+                "SELECT * FROM main_plot WHERE project_id = ? AND id = ?",
+                (project_id, node_id),
+            ).fetchone()
+        if not row:
+            return None
+        return MainPlotNodeRow(**dict(row))
 
-def _serialize_genre_resonance(row: Dict[str, Any]) -> Dict[str, Any]:
-    if not row:
-        return {}
-    return {
-        "schema_version": "1.0",
-        "accept": _from_json(row.get("accept_json")) or [],
-        "reject": _from_json(row.get("reject_json")) or [],
-        "anchors": _from_json(row.get("anchors_json")) or [],
-        "metadata": _from_json(row.get("metadata_json")) or {},
-    }
+    def add_main_plot_node(self, project_id: str, data: Dict[str, Any]) -> str:
+        node_id = data.get("id", f"mp-{uuid.uuid4().hex[:8]}")
+        now = _now()
+        with get_store().connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO main_plot (
+                    id, project_id, volume_id, plot_num, title, description,
+                    estimated_chapter, status, related_char_ids_json,
+                    related_timeline_event_id, related_geography_location_ids_json,
+                    updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    node_id, project_id,
+                    data.get("volume_id"),
+                    data.get("plot_num", 0),
+                    data.get("title"),
+                    data.get("description", ""),
+                    data.get("estimated_chapter"),
+                    data.get("status", "pending"),
+                    _to_json(data.get("related_char_ids", [])),
+                    data.get("related_timeline_event_id"),
+                    _to_json(data.get("related_geography_location_ids", [])),
+                    now,
+                ),
+            )
+        return node_id
 
+    def update_main_plot_node(self, project_id: str, node_id: str, data: Dict[str, Any]) -> None:
+        fields = []
+        values = []
+        for key in ("volume_id", "plot_num", "title", "description", "estimated_chapter", "status",
+                    "related_timeline_event_id"):
+            if key in data:
+                fields.append(f"{key} = ?")
+                values.append(data[key])
+        if "related_char_ids" in data:
+            fields.append("related_char_ids_json = ?")
+            values.append(_to_json(data["related_char_ids"]))
+        if "related_geography_location_ids" in data:
+            fields.append("related_geography_location_ids_json = ?")
+            values.append(_to_json(data["related_geography_location_ids"]))
+        if not fields:
+            return
+        fields.append("updated_at = ?")
+        values.append(_now())
+        values.extend([project_id, node_id])
+        with get_store().connection() as conn:
+            conn.execute(
+                f"UPDATE main_plot SET {', '.join(fields)} WHERE project_id = ? AND id = ?",
+                values,
+            )
 
-def _serialize_main_plot(row: Dict[str, Any]) -> Dict[str, Any]:
-    if not row:
-        return {}
-    return {
-        "schema_version": "1.0",
-        "current_beat": row.get("current_beat", 0),
-        "arc_phrase": row.get("arc_phrase"),
-        "beats": _from_json(row.get("beats_json")) or [],
-        "metadata": _from_json(row.get("metadata_json")) or {},
-    }
+    def delete_main_plot_node(self, project_id: str, node_id: str) -> None:
+        with get_store().connection() as conn:
+            conn.execute(
+                "DELETE FROM main_plot WHERE project_id = ? AND id = ?",
+                (project_id, node_id),
+            )
 
+    # ---------- sub_plot (1:n) ----------
 
-def _serialize_sub_plot(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
-    threads = []
-    for r in rows:
-        threads.append({
-            "id": r["id"],
-            "title": r.get("title", ""),
-            "description": r.get("description"),
-            "parent_beat_id": r.get("parent_beat_id"),
-            "status": r.get("status"),
-            "priority": r.get("priority"),
-            "linked_seeds": _from_json(r.get("linked_seeds_json")) or [],
-            "linked_chars": _from_json(r.get("linked_chars_json")) or [],
-            "metadata": _from_json(r.get("metadata_json")) or {},
-        })
-    return {"schema_version": "1.0", "threads": threads, "metadata": {}}
+    def list_subplots(self, project_id: str) -> List[SubPlotRow]:
+        with get_store().connection() as conn:
+            rows = conn.execute(
+                "SELECT * FROM sub_plot WHERE project_id = ?",
+                (project_id,),
+            ).fetchall()
+        return [SubPlotRow(**dict(r)) for r in rows]
 
+    def get_subplot(self, project_id: str, subplot_id: str) -> Optional[SubPlotRow]:
+        with get_store().connection() as conn:
+            row = conn.execute(
+                "SELECT * FROM sub_plot WHERE project_id = ? AND id = ?",
+                (project_id, subplot_id),
+            ).fetchone()
+        if not row:
+            return None
+        return SubPlotRow(**dict(row))
 
-def _serialize_characters(chars: List[Dict[str, Any]], rels: List[Dict[str, Any]]) -> Dict[str, Any]:
-    characters = []
-    for c in chars:
-        characters.append({
-            "id": c["id"],
-            "name": c.get("name", ""),
-            "role": c.get("role"),
-            "traits": _from_json(c.get("traits_json")) or [],
-            "speech_style": c.get("speech_style"),
-            "background": c.get("background"),
-            "arc": c.get("arc"),
-            "internal_state": c.get("internal_state"),
-            "metadata": _from_json(c.get("metadata_json")) or {},
-        })
-    relationships = []
-    for r in rels:
-        relationships.append({
-            "id": r["id"],
-            "from_char": r.get("from_char_id"),
-            "to_char": r.get("to_char_id"),
-            "type": r.get("type"),
-            "description": r.get("description"),
-            "evolution": _from_json(r.get("evolution_json")) or [],
-            "metadata": _from_json(r.get("metadata_json")) or {},
-        })
-    return {
-        "schema_version": "1.0",
-        "characters": characters,
-        "relationships": relationships,
-        "metadata": {},
-    }
+    def add_subplot(self, project_id: str, data: Dict[str, Any]) -> str:
+        subplot_id = data.get("id", f"sub-{uuid.uuid4().hex[:8]}")
+        now = _now()
+        with get_store().connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO sub_plot (
+                    id, project_id, volume_id, title, description, chapter_start, chapter_end,
+                    status, priority, related_char_ids_json, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    subplot_id, project_id,
+                    data.get("volume_id"),
+                    data.get("title", ""),
+                    data.get("description"),
+                    data.get("chapter_start"),
+                    data.get("chapter_end"),
+                    data.get("status", "pending"),
+                    data.get("priority", "side"),
+                    _to_json(data.get("related_char_ids", [])),
+                    now,
+                ),
+            )
+        return subplot_id
 
+    def update_subplot(self, project_id: str, subplot_id: str, data: Dict[str, Any]) -> None:
+        fields = []
+        values = []
+        for key in ("volume_id", "title", "description", "chapter_start", "chapter_end", "status", "priority"):
+            if key in data:
+                fields.append(f"{key} = ?")
+                values.append(data[key])
+        if "related_char_ids" in data:
+            fields.append("related_char_ids_json = ?")
+            values.append(_to_json(data["related_char_ids"]))
+        if not fields:
+            return
+        fields.append("updated_at = ?")
+        values.append(_now())
+        values.extend([project_id, subplot_id])
+        with get_store().connection() as conn:
+            conn.execute(
+                f"UPDATE sub_plot SET {', '.join(fields)} WHERE project_id = ? AND id = ?",
+                values,
+            )
 
-def _serialize_seeds(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
-    seeds = []
-    for r in rows:
-        seeds.append({
-            "id": r["id"],
-            "content": r.get("content", ""),
-            "name": r.get("name"),
-            "trigger": r.get("trigger"),
-            "payoff": r.get("payoff"),
-            "estimated_chapter": r.get("estimated_chapter"),
-            "payoff_chapter": r.get("payoff_chapter"),
-            "importance": {"primary": r.get("importance_primary")},
-            "size": r.get("size"),
-            "planned_interval": r.get("planned_interval"),
-            "orientation": r.get("orientation"),
-            "planted_at_chapter": r.get("planted_at_chapter", 0),
-            "planted_in_node": r.get("planted_in_node"),
-            "planted_context": r.get("planted_context"),
-            "last_seen_chapter": r.get("last_seen_chapter", 0),
-            "weight": r.get("weight", 0.5),
-            "status": r.get("status"),
-            "linked_char_ids": _from_json(r.get("linked_char_ids_json")) or [],
-            "linked_subplot_id": r.get("linked_subplot_id"),
-        })
-    return {"schema_version": "1.0", "seeds": seeds, "metadata": {}}
+    def delete_subplot(self, project_id: str, subplot_id: str) -> None:
+        with get_store().connection() as conn:
+            conn.execute(
+                "DELETE FROM sub_plot WHERE project_id = ? AND id = ?",
+                (project_id, subplot_id),
+            )
+
+    # ---------- timeline_events (1:n) ----------
+
+    def list_timeline_events(self, project_id: str) -> List[TimelineEventRow]:
+        with get_store().connection() as conn:
+            rows = conn.execute(
+                "SELECT * FROM timeline_events WHERE project_id = ? "
+                "ORDER BY era_order, event_order",
+                (project_id,),
+            ).fetchall()
+        return [TimelineEventRow(**dict(r)) for r in rows]
+
+    def add_timeline_event(self, project_id: str, data: Dict[str, Any]) -> str:
+        event_id = data.get("id", f"evt-{uuid.uuid4().hex[:8]}")
+        now = _now()
+        with get_store().connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO timeline_events (
+                    id, project_id, era_name, era_order, event_name, description,
+                    event_order, start_year, end_year,
+                    related_main_plot_node_id, related_char_ids_json, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    event_id, project_id,
+                    data.get("era_name", ""),
+                    data.get("era_order"),
+                    data.get("event_name", ""),
+                    data.get("description"),
+                    data.get("event_order"),
+                    data.get("start_year"),
+                    data.get("end_year"),
+                    data.get("related_main_plot_node_id"),
+                    _to_json(data.get("related_char_ids", [])),
+                    now,
+                ),
+            )
+        return event_id
+
+    def update_timeline_event(self, project_id: str, event_id: str, data: Dict[str, Any]) -> None:
+        fields = []
+        values = []
+        for key in ("era_name", "era_order", "event_name", "description", "event_order",
+                    "start_year", "end_year", "related_main_plot_node_id"):
+            if key in data:
+                fields.append(f"{key} = ?")
+                values.append(data[key])
+        if "related_char_ids" in data:
+            fields.append("related_char_ids_json = ?")
+            values.append(_to_json(data["related_char_ids"]))
+        if not fields:
+            return
+        fields.append("updated_at = ?")
+        values.append(_now())
+        values.extend([project_id, event_id])
+        with get_store().connection() as conn:
+            conn.execute(
+                f"UPDATE timeline_events SET {', '.join(fields)} WHERE project_id = ? AND id = ?",
+                values,
+            )
+
+    def delete_timeline_event(self, project_id: str, event_id: str) -> None:
+        with get_store().connection() as conn:
+            conn.execute(
+                "DELETE FROM timeline_events WHERE project_id = ? AND id = ?",
+                (project_id, event_id),
+            )
+
+    # ---------- geography_locations (1:n) ----------
+
+    def list_geography_locations(self, project_id: str) -> List[GeographyLocationRow]:
+        with get_store().connection() as conn:
+            rows = conn.execute(
+                "SELECT * FROM geography_locations WHERE project_id = ?",
+                (project_id,),
+            ).fetchall()
+        return [GeographyLocationRow(**dict(r)) for r in rows]
+
+    def add_geography_location(self, project_id: str, data: Dict[str, Any]) -> str:
+        location_id = data.get("id", f"loc-{uuid.uuid4().hex[:8]}")
+        now = _now()
+        with get_store().connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO geography_locations (
+                    id, project_id, name, category, description, significance,
+                    parent_location_id, related_char_ids_json, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    location_id, project_id,
+                    data.get("name", ""),
+                    data.get("category", "region"),
+                    data.get("description"),
+                    data.get("significance"),
+                    data.get("parent_location_id"),
+                    _to_json(data.get("related_char_ids", [])),
+                    now,
+                ),
+            )
+        return location_id
+
+    def update_geography_location(self, project_id: str, location_id: str, data: Dict[str, Any]) -> None:
+        fields = []
+        values = []
+        for key in ("name", "category", "description", "significance", "parent_location_id"):
+            if key in data:
+                fields.append(f"{key} = ?")
+                values.append(data[key])
+        if "related_char_ids" in data:
+            fields.append("related_char_ids_json = ?")
+            values.append(_to_json(data["related_char_ids"]))
+        if not fields:
+            return
+        fields.append("updated_at = ?")
+        values.append(_now())
+        values.extend([project_id, location_id])
+        with get_store().connection() as conn:
+            conn.execute(
+                f"UPDATE geography_locations SET {', '.join(fields)} WHERE project_id = ? AND id = ?",
+                values,
+            )
+
+    def delete_geography_location(self, project_id: str, location_id: str) -> None:
+        with get_store().connection() as conn:
+            conn.execute(
+                "DELETE FROM geography_locations WHERE project_id = ? AND id = ?",
+                (project_id, location_id),
+            )
+
+    # ---------- world_entries (1:n) ----------
+
+    def list_world_entries(self, project_id: str, category: Optional[str] = None) -> List[WorldEntryRow]:
+        with get_store().connection() as conn:
+            if category:
+                rows = conn.execute(
+                    "SELECT * FROM world_entries WHERE project_id = ? AND category = ?",
+                    (project_id, category),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM world_entries WHERE project_id = ?",
+                    (project_id,),
+                ).fetchall()
+        return [WorldEntryRow(**dict(r)) for r in rows]
+
+    def add_world_entry(self, project_id: str, data: Dict[str, Any]) -> str:
+        entry_id = data.get("id", f"we-{uuid.uuid4().hex[:8]}")
+        now = _now()
+        with get_store().connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO world_entries (
+                    id, project_id, category, title, content,
+                    related_char_ids_json, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    entry_id, project_id,
+                    data.get("category", "other"),
+                    data.get("title", ""),
+                    data.get("content", ""),
+                    _to_json(data.get("related_char_ids", [])),
+                    now,
+                ),
+            )
+        return entry_id
+
+    def update_world_entry(self, project_id: str, entry_id: str, data: Dict[str, Any]) -> None:
+        fields = []
+        values = []
+        for key in ("category", "title", "content"):
+            if key in data:
+                fields.append(f"{key} = ?")
+                values.append(data[key])
+        if "related_char_ids" in data:
+            fields.append("related_char_ids_json = ?")
+            values.append(_to_json(data["related_char_ids"]))
+        if not fields:
+            return
+        fields.append("updated_at = ?")
+        values.append(_now())
+        values.extend([project_id, entry_id])
+        with get_store().connection() as conn:
+            conn.execute(
+                f"UPDATE world_entries SET {', '.join(fields)} WHERE project_id = ? AND id = ?",
+                values,
+            )
+
+    def delete_world_entry(self, project_id: str, entry_id: str) -> None:
+        with get_store().connection() as conn:
+            conn.execute(
+                "DELETE FROM world_entries WHERE project_id = ? AND id = ?",
+                (project_id, entry_id),
+            )
+
+    # ---------- characters (1:n) ----------
+
+    def list_characters(self, project_id: str) -> List[CharacterRow]:
+        with get_store().connection() as conn:
+            rows = conn.execute(
+                "SELECT * FROM characters WHERE project_id = ?",
+                (project_id,),
+            ).fetchall()
+        return [CharacterRow(**dict(r)) for r in rows]
+
+    def get_character(self, project_id: str, char_id: str) -> Optional[CharacterRow]:
+        with get_store().connection() as conn:
+            row = conn.execute(
+                "SELECT * FROM characters WHERE id = ? AND project_id = ?",
+                (char_id, project_id),
+            ).fetchone()
+        if not row:
+            return None
+        return CharacterRow(**dict(row))
+
+    def add_character(self, project_id: str, data: Dict[str, Any]) -> str:
+        char_id = data.get("id", f"char-{uuid.uuid4().hex[:8]}")
+        now = _now()
+        with get_store().connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO characters (
+                    id, project_id, name, role, traits_json, speech_style, background, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    char_id, project_id,
+                    data.get("name", ""),
+                    data.get("role", "supporting"),
+                    _to_json(data.get("traits", [])),
+                    data.get("speech_style"),
+                    data.get("background"),
+                    now,
+                ),
+            )
+        return char_id
+
+    def update_character(self, project_id: str, char_id: str, data: Dict[str, Any]) -> None:
+        fields = []
+        values = []
+        for key in ("name", "role", "speech_style", "background"):
+            if key in data:
+                fields.append(f"{key} = ?")
+                values.append(data[key])
+        if "traits" in data:
+            fields.append("traits_json = ?")
+            values.append(_to_json(data["traits"]))
+        if not fields:
+            return
+        fields.append("updated_at = ?")
+        values.append(_now())
+        values.extend([project_id, char_id])
+        with get_store().connection() as conn:
+            conn.execute(
+                f"UPDATE characters SET {', '.join(fields)} WHERE project_id = ? AND id = ?",
+                values,
+            )
+
+    def delete_character(self, project_id: str, char_id: str) -> None:
+        with get_store().connection() as conn:
+            conn.execute(
+                "DELETE FROM characters WHERE project_id = ? AND id = ?",
+                (project_id, char_id),
+            )
+
+    # ---------- character_relationships (1:n) ----------
+
+    def list_relationships(self, project_id: str) -> List[CharacterRelationshipRow]:
+        with get_store().connection() as conn:
+            rows = conn.execute(
+                "SELECT * FROM character_relationships WHERE project_id = ?",
+                (project_id,),
+            ).fetchall()
+        return [CharacterRelationshipRow(**dict(r)) for r in rows]
+
+    def add_relationship(self, project_id: str, data: Dict[str, Any]) -> str:
+        rel_id = data.get("id", f"rel-{uuid.uuid4().hex[:8]}")
+        # 规范化：保证 char_a_id < char_b_id
+        a = data.get("char_a_id", "")
+        b = data.get("char_b_id", "")
+        if a >= b:
+            a, b = b, a
+        now = _now()
+        with get_store().connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO character_relationships (
+                    id, project_id, char_a_id, char_b_id, rel_type, description, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    rel_id, project_id, a, b,
+                    data.get("rel_type", "friend"),
+                    data.get("description"),
+                    now,
+                ),
+            )
+        return rel_id
+
+    def delete_relationship(self, project_id: str, rel_id: str) -> None:
+        with get_store().connection() as conn:
+            conn.execute(
+                "DELETE FROM character_relationships WHERE project_id = ? AND id = ?",
+                (project_id, rel_id),
+            )
+
+    # ---------- seeds (1:n, 单表含运行时状态) ----------
+
+    def list_seeds(self, project_id: str, status: Optional[str] = None) -> List[SeedRow]:
+        with get_store().connection() as conn:
+            if status:
+                rows = conn.execute(
+                    "SELECT * FROM seeds WHERE project_id = ? AND status = ?",
+                    (project_id, status),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM seeds WHERE project_id = ?",
+                    (project_id,),
+                ).fetchall()
+        return [SeedRow(**dict(r)) for r in rows]
+
+    def get_seed(self, project_id: str, seed_id: int) -> Optional[SeedRow]:
+        with get_store().connection() as conn:
+            row = conn.execute(
+                "SELECT * FROM seeds WHERE project_id = ? AND id = ?",
+                (project_id, seed_id),
+            ).fetchone()
+        if not row:
+            return None
+        return SeedRow(**dict(row))
+
+    def add_seed(self, project_id: str, data: Dict[str, Any]) -> int:
+        now = _now()
+        with get_store().connection() as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO seeds (
+                    project_id, name, content, trigger, payoff,
+                    category, scope, estimated_plant_chapter, estimated_payoff_chapter,
+                    related_char_ids_json, related_main_plot_node_id, related_sub_plot_id,
+                    status, weight, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    project_id,
+                    data.get("name", ""),
+                    data.get("content", ""),
+                    data.get("trigger"),
+                    data.get("payoff"),
+                    data.get("category", "plot"),
+                    data.get("scope", "mid"),
+                    data.get("estimated_plant_chapter"),
+                    data.get("estimated_payoff_chapter"),
+                    _to_json(data.get("related_char_ids", [])),
+                    data.get("related_main_plot_node_id"),
+                    data.get("related_sub_plot_id"),
+                    data.get("status", "pending"),
+                    data.get("weight", 0.5),
+                    now,
+                ),
+            )
+            return cursor.lastrowid
+
+    def update_seed(self, project_id: str, seed_id: int, data: Dict[str, Any]) -> None:
+        fields = []
+        values = []
+        for key in ("name", "content", "trigger", "payoff", "category", "scope",
+                    "estimated_plant_chapter", "estimated_payoff_chapter",
+                    "related_main_plot_node_id", "related_sub_plot_id",
+                    "status", "weight",
+                    "planted_at_chapter", "planted_context", "last_seen_chapter"):
+            if key in data:
+                fields.append(f"{key} = ?")
+                values.append(data[key])
+        if "related_char_ids" in data:
+            fields.append("related_char_ids_json = ?")
+            values.append(_to_json(data["related_char_ids"]))
+        if not fields:
+            return
+        fields.append("updated_at = ?")
+        values.append(_now())
+        values.extend([project_id, seed_id])
+        with get_store().connection() as conn:
+            conn.execute(
+                f"UPDATE seeds SET {', '.join(fields)} WHERE project_id = ? AND id = ?",
+                values,
+            )
+
+    def delete_seed(self, project_id: str, seed_id: int) -> None:
+        with get_store().connection() as conn:
+            conn.execute(
+                "DELETE FROM seeds WHERE project_id = ? AND id = ?",
+                (project_id, seed_id),
+            )
+
+    # ---------- 综合查询（context builder 用） ----------
+
+    def load_all_artifacts(self, project_id: str) -> Dict[str, Any]:
+        """一次性读所有世界树基座表（context builder 用）
+
+        v003：返回新 schema 的字段集
+        """
+        return {
+            "world_tree": self.get_world_tree(project_id),
+            "project_state": self.get_project_state(project_id),
+            "volumes": self.list_volumes(project_id),
+            "main_plot": self.list_main_plot_nodes(project_id),
+            "sub_plot": self.list_subplots(project_id),
+            "characters": self.list_characters(project_id),
+            "character_relationships": self.list_relationships(project_id),
+            "seeds": self.list_seeds(project_id),
+            "world_entries": self.list_world_entries(project_id),
+            "timeline_events": self.list_timeline_events(project_id),
+            "geography_locations": self.list_geography_locations(project_id),
+        }

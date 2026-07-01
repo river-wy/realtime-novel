@@ -1,4 +1,16 @@
-"""持久化层 Pydantic Schema"""
+"""持久化层 Pydantic Schema
+
+v003 重构（spec: .spec/db-refactor/spec.md）
+- 删除：projects.palette / projects.current_pov → 迁入 project_state
+- 删除：world_tree.timeline_era / anchor_event / geography_* / metadata_json → 拆入 timeline_events / geography_locations
+- 删除：characters.arc / internal_state / metadata_json
+- 删除：seeds.importance_primary / size / orientation / planned_interval / linked_subplot_id
+- 删除：character_relationships.evolution_json / metadata_json
+- 删除：chapters.detailed_summary / actor_feedback / actor_character
+- 删除：旧 main_plot（PK=project_id 单行结构）→ 改 1:n 节点表
+- 删除：genre_resonance / projects_deleted / style_charter / chapter_seed_changes / chapter_character_states
+- 新增：project_state / volumes / main_plot（1:n）/ world_entries / timeline_events / geography_locations
+"""
 from __future__ import annotations
 
 from datetime import datetime
@@ -26,7 +38,7 @@ class ChapterState(str, Enum):
 class ConversationStatus(str, Enum):
     ACTIVE = "active"
     INVALIDATED = "invalidated"
-    ARCHIVED = "archived"
+    ARCHARCHIVED = "archived"
 
 
 class CharacterRole(str, Enum):
@@ -37,16 +49,47 @@ class CharacterRole(str, Enum):
     MINOR = "minor"
 
 
+class CharacterRelationshipType(str, Enum):
+    FAMILY = "family"
+    LOVER = "lover"
+    FRIEND = "friend"
+    ALLY = "ally"
+    RIVAL = "rival"
+    ENEMY = "enemy"
+    MENTOR = "mentor"
+    SUBORDINATE = "subordinate"
+
+
 class SeedStatus(str, Enum):
+    PENDING = "pending"
     PLANTED = "planted"
     RESONATING = "resonating"
     HARVESTED = "harvested"
     ABANDONED = "abandoned"
 
 
-class SubplotStatus(str, Enum):
-    ACTIVE = "active"
+class SeedCategory(str, Enum):
+    PLOT = "plot"
+    CHARACTER = "character"
+    WORLD = "world"
+    MINOR = "minor"
+
+
+class SeedScope(str, Enum):
+    LONG = "long"
+    MID = "mid"
+    SHORT = "short"
+
+
+class MainPlotStatus(str, Enum):
     PENDING = "pending"
+    ACTIVE = "active"
+    COMPLETED = "completed"
+
+
+class SubplotStatus(str, Enum):
+    PENDING = "pending"
+    ACTIVE = "active"
     COMPLETED = "completed"
     ABANDONED = "abandoned"
 
@@ -55,6 +98,35 @@ class SubplotPriority(str, Enum):
     MAIN = "main"
     SIDE = "side"
     MINOR = "minor"
+
+
+class GeographyCategory(str, Enum):
+    REALM = "realm"
+    CONTINENT = "continent"
+    COUNTRY = "country"
+    REGION = "region"
+    CITY = "city"
+    SECT = "sect"
+    LANDMARK = "landmark"
+    OTHER = "other"
+
+
+class WorldEntryCategory(str, Enum):
+    MAGIC = "magic"
+    TECH = "tech"
+    SOCIAL = "social"
+    POLITICS = "politics"
+    ECONOMY = "economy"
+    MYTHOLOGY = "mythology"
+    HISTORY = "history"
+    GEOGRAPHY = "geography"
+    OTHER = "other"
+
+
+class OnboardingInfoState(str, Enum):
+    COLLECTING = "collecting"
+    WTM_PENDING = "wtm_pending"
+    READY = "ready"
 
 
 # ============ conversations / messages ============
@@ -78,7 +150,7 @@ class Message(BaseModel):
     content: Optional[str] = None
     tool_calls: Optional[dict[str, Any]] = None
     tool_results: Optional[dict[str, Any]] = None
-    agent_name: Optional[str] = None   # 处理该消息的 agent：novel_steward / novel_writer / world_tree_manager
+    agent_name: Optional[str] = None
     created_at: datetime
 
 
@@ -108,22 +180,13 @@ class ChapterStatus(BaseModel):
     error: Optional[str] = None
 
 
-class ProjectDeleted(BaseModel):
-    project_id: str
-    original_name: str
-    palette: str
-    deleted_at: datetime
-    trash_path: Optional[str] = None
-
-
-# ============ projects + 6 件基座 ============
+# ============ projects + project_state ============
 
 class Project(BaseModel):
+    """项目元信息（低频写）"""
     id: str
     name: str
-    palette: str = ""
     exploration_level: str = "standard"
-    current_pov: Optional[str] = None       # char_id，由 switch_pov 维护
     cover_image_url: Optional[str] = None
     style_pack_id: Optional[str] = None
     created_at: datetime
@@ -131,51 +194,73 @@ class Project(BaseModel):
     deleted_at: Optional[datetime] = None
 
 
+class ProjectState(BaseModel):
+    """项目运行时状态（高频写，1:1）"""
+    project_id: str
+    current_pov: Optional[str] = None
+    current_chapter: int = 0
+    current_volume_id: Optional[str] = None
+    current_timeline_event_id: Optional[str] = None
+    current_geography_location_ids_json: Optional[str] = None
+    last_generated_at: Optional[datetime] = None
+    updated_at: datetime
+
+
+# ============ 世界树基座 ============
+
 class WorldTreeRow(BaseModel):
+    """世界树（5 字段最终态）"""
     project_id: str
-    timeline_era: Optional[str] = None
-    anchor_event: Optional[str] = None
-    geography_primary: Optional[str] = None
-    geography_secondary_json: Optional[str] = None
-    geography_spatial_rules_json: Optional[str] = None
+    story_core: Optional[str] = None
+    genre_tags_json: Optional[str] = None
     core_rules_json: Optional[str] = None
-    metadata_json: Optional[str] = None
     updated_at: datetime
 
 
-class GenreResonanceRow(BaseModel):
-    project_id: str
-    accept_json: Optional[str] = None
-    reject_json: Optional[str] = None
-    anchors_json: Optional[str] = None
-    metadata_json: Optional[str] = None
-    updated_at: datetime
-
-
-class MainPlotRow(BaseModel):
-    project_id: str
-    current_beat: int = 0
-    arc_phrase: Optional[str] = None
-    beats_json: Optional[str] = None
-    metadata_json: Optional[str] = None
-    updated_at: datetime
-
-
-class SubPlotRow(BaseModel):
+class TimelineEventRow(BaseModel):
+    """时间线事件（拆自 world_tree）"""
     id: str
     project_id: str
-    title: str
+    era_name: str
+    era_order: Optional[int] = None
+    event_name: str
     description: Optional[str] = None
-    parent_beat_id: Optional[str] = None
-    status: SubplotStatus
-    priority: SubplotPriority
-    linked_seeds_json: Optional[str] = None
-    linked_chars_json: Optional[str] = None
-    metadata_json: Optional[str] = None
+    event_order: Optional[int] = None
+    start_year: Optional[str] = None  # TEXT：支持"男主 15 岁那年"
+    end_year: Optional[str] = None
+    related_main_plot_node_id: Optional[str] = None
+    related_char_ids_json: Optional[str] = None
     updated_at: datetime
 
 
+class GeographyLocationRow(BaseModel):
+    """地理场景（拆自 world_tree，支持嵌套）"""
+    id: str
+    project_id: str
+    name: str
+    category: GeographyCategory = GeographyCategory.REGION
+    description: Optional[str] = None
+    significance: Optional[str] = None
+    parent_location_id: Optional[str] = None
+    related_char_ids_json: Optional[str] = None
+    updated_at: datetime
+
+
+class WorldEntryRow(BaseModel):
+    """世界百科条目（world_entries）"""
+    id: str
+    project_id: str
+    category: WorldEntryCategory
+    title: str
+    content: str
+    related_char_ids_json: Optional[str] = None
+    updated_at: datetime
+
+
+# ============ 角色 + 关系 ============
+
 class CharacterRow(BaseModel):
+    """角色（精简：删 arc / internal_state / metadata_json）"""
     id: str
     project_id: str
     name: str
@@ -183,87 +268,125 @@ class CharacterRow(BaseModel):
     traits_json: Optional[str] = None
     speech_style: Optional[str] = None
     background: Optional[str] = None
-    arc: Optional[str] = None
-    internal_state: Optional[str] = None
-    metadata_json: Optional[str] = None
     updated_at: datetime
 
 
 class CharacterRelationshipRow(BaseModel):
+    """角色关系（极简化保留，删 evolution_json / metadata_json）"""
     id: str
     project_id: str
-    from_char_id: str
-    to_char_id: str
-    type: Optional[str] = None
+    char_a_id: str
+    char_b_id: str
+    rel_type: CharacterRelationshipType
     description: Optional[str] = None
-    evolution_json: Optional[str] = None
-    metadata_json: Optional[str] = None
     updated_at: datetime
 
+
+# ============ 卷 / 主线 / 支线 ============
+
+class VolumeRow(BaseModel):
+    """卷（1:n）"""
+    id: str
+    project_id: str
+    volume_num: int
+    title: str
+    description: Optional[str] = None
+    planned_chapter_count: Optional[int] = None
+    updated_at: datetime
+
+
+class MainPlotNodeRow(BaseModel):
+    """主线节点（1:n，从旧 beats_json 拆出）"""
+    id: str
+    project_id: str
+    volume_id: Optional[str] = None
+    plot_num: int
+    title: Optional[str] = None
+    description: str
+    estimated_chapter: Optional[int] = None
+    status: MainPlotStatus = MainPlotStatus.PENDING
+    related_char_ids_json: Optional[str] = None
+    related_timeline_event_id: Optional[str] = None
+    related_geography_location_ids_json: Optional[str] = None
+    updated_at: datetime
+
+
+class SubPlotRow(BaseModel):
+    """支线（1:n，字段精简：删 parent_beat_id / metadata_json / linked_seeds_json / linked_chars_json）"""
+    id: str
+    project_id: str
+    volume_id: Optional[str] = None
+    title: str
+    description: Optional[str] = None
+    chapter_start: Optional[int] = None
+    chapter_end: Optional[int] = None
+    status: SubplotStatus = SubplotStatus.PENDING
+    priority: SubplotPriority = SubplotPriority.SIDE
+    related_char_ids_json: Optional[str] = None
+    updated_at: datetime
+
+
+# ============ 伏笔（seeds 合并 seed_states 单表） ============
 
 class SeedRow(BaseModel):
+    """伏笔（定义 + 运行时状态合并到单表）"""
     id: int
     project_id: str
+    name: str
     content: str
-    name: Optional[str] = None
     trigger: Optional[str] = None
     payoff: Optional[str] = None
-    estimated_chapter: Optional[int] = None
-    payoff_chapter: Optional[int] = None
-    importance_primary: str
-    size: str
-    planned_interval: Optional[int] = None
-    orientation: str
-    planted_at_chapter: int = 0
-    planted_in_node: Optional[str] = None
+    category: SeedCategory = SeedCategory.PLOT
+    scope: SeedScope = SeedScope.MID
+    estimated_plant_chapter: Optional[int] = None
+    estimated_payoff_chapter: Optional[int] = None
+    related_char_ids_json: Optional[str] = None
+    related_main_plot_node_id: Optional[str] = None
+    related_sub_plot_id: Optional[str] = None
+    status: SeedStatus = SeedStatus.PENDING
+    planted_at_chapter: Optional[int] = None
     planted_context: Optional[str] = None
-    last_seen_chapter: int = 0
+    last_seen_chapter: Optional[int] = None
     weight: float = 0.5
-    status: SeedStatus
-    linked_char_ids_json: Optional[str] = None
-    linked_subplot_id: Optional[str] = None
     updated_at: datetime
 
 
+# ============ 章节 ============
+
 class ChapterRow(BaseModel):
-    """章节 metadata（正文存文件 data/projects/{id}/chapters/chapter_NNN.md）"""
+    """章节 metadata（正文存文件）
+
+    v003：删 actor_feedback / actor_character / detailed_summary
+    """
     project_id: str
     chapter_num: int
+    volume_id: Optional[str] = None
     title: Optional[str] = None
     summary: Optional[str] = None
-    detailed_summary: Optional[str] = None
     word_count: int = 0
     file_path: str
     intervention: Optional[str] = None
-    actor_feedback: Optional[str] = None
-    actor_character: Optional[str] = None
     generated_at: datetime
     updated_at: datetime
 
 
+# ============ Onboarding 状态 ============
+
 class OnboardingStateRow(BaseModel):
+    """Onboarding 状态（v003 重设计：info_state 三态）
+
+    字段映射：
+    - current_step 保留（向后兼容，不依赖）
+    - info_state 新增（collecting / wtm_pending / ready）
+    - payload_json 替代旧 state_json（管家调工具暂存的信息）
+    """
     project_id: str
+    info_state: OnboardingInfoState = OnboardingInfoState.COLLECTING
+    payload_json: Optional[str] = None
+    last_activity_at: Optional[datetime] = None
+    created_at: datetime
+    updated_at: datetime
+    # 兼容旧字段
     current_step: int = 0
     started_at: Optional[datetime] = None
-    updated_at: datetime
-    state_json: str
-
-
-class ChapterSeedChangeRow(BaseModel):
-    id: int
-    project_id: str
-    chapter_num: int
-    seed_id: int
-    change_type: Literal["planted", "resonating", "harvested"]
-    context: Optional[str] = None
-    created_at: datetime
-
-
-class ChapterCharacterStateRow(BaseModel):
-    id: int
-    project_id: str
-    chapter_num: int
-    character_id: str
-    state_text: Optional[str] = None
-    updated_at: datetime
-
+    state_json: Optional[str] = None

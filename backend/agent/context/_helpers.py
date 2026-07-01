@@ -153,28 +153,96 @@ def _format_chapter_summaries_graded(chapters: list, detailed_window: int = 20) 
 
 
 def _format_world_tree_compact(world_tree: dict) -> str:
-    """压缩 world_tree 为字符串（架构师/文笔家用）"""
+    """压缩 world_tree 为字符串（架构师/文笔家用）
+
+    v003 重构（spec §5.4）：
+    - timeline / geography 等已拆表的数据由调用方通过 repo.list_timeline_events / list_geography_locations 单独注入
+    - 本函数仅承担 world_tree 5 字段（story_core / genre_tags / core_rules）的格式化
+    """
     if not world_tree:
         return "（世界树为空）"
-    base = world_tree.get("base", {}) or {}
-    timeline = base.get("timeline", {}) or {}
-    geography = base.get("geography", {}) or {}
-    core_rules = base.get("core_rules", []) or []
 
     parts = []
-    if timeline.get("era"):
-        parts.append(f"时代: {timeline['era']}")
-    if timeline.get("anchor_event"):
-        parts.append(f"锚定事件: {timeline['anchor_event']}")
-    if geography.get("primary"):
-        parts.append(f"主场景: {geography['primary']}")
+
+    story_core = world_tree.get("story_core")
+    if story_core:
+        parts.append(f"故事核心: {story_core}")
+
+    genre_tags = world_tree.get("genre_tags", [])
+    if genre_tags:
+        parts.append(f"题材: {', '.join(genre_tags)}")
+
+    core_rules = world_tree.get("core_rules", []) or []
     if core_rules:
-        rules_str = "; ".join([f"{r.get('id', '')}: {r.get('statement', '')}" for r in core_rules[:5]])
-        parts.append(f"核心规则: {rules_str}")
+        rules_str = "; ".join([f"{r.get('id', '')}: {r.get('statement', '')}" for r in core_rules])
+        parts.append(f"硬约束清单: {rules_str}")
+
     return "\n".join(parts) if parts else "（世界树无核心信息）"
 
 
 # s1.4 新增: 5 个 helper 格式化 7 件基座其余字段
+
+
+def _format_world_tree_baseline(
+    world_tree: Optional[Dict[str, Any]],
+    world_entries: List[Any],
+    timeline_events: List[Any],
+    geography_locations: List[Any],
+    max_world_entries: int = 20,
+    max_timeline_events: int = 10,
+    max_geography_locations: int = 10,
+) -> str:
+    """世界树基座完整上下文（spec §5.4 注入顺序）
+
+    顺序：
+    1. core_rules（硬约束清单）
+    2. world_entries（知识库）
+    3. timeline_events（时间线）
+    4. geography_locations（地理场景）
+    5. world_tree.story_core / genre_tags
+
+    v003 新增
+    """
+    parts = []
+
+    # 1. core_rules 硬约束
+    core_rules = (world_tree or {}).get("core_rules", []) or []
+    if core_rules:
+        rules_str = "; ".join([f"{r.get('id', '')}: {r.get('statement', '')}" for r in core_rules])
+        parts.append(f"硬约束清单: {rules_str}")
+
+    # 2. world_entries 知识库
+    if world_entries:
+        we_str = "; ".join([
+            f"[{e.category}] {e.title}: {(e.content or '')[:80]}"
+            for e in world_entries[:max_world_entries]
+        ])
+        parts.append(f"知识库: {we_str}")
+
+    # 3. timeline_events 时间线
+    if timeline_events:
+        te_str = "; ".join([
+            f"[{e.era_name or ''}] {e.event_name or ''}"
+            for e in timeline_events[:max_timeline_events]
+        ])
+        parts.append(f"时间线: {te_str}")
+
+    # 4. geography_locations 地理场景
+    if geography_locations:
+        gl_str = "; ".join([
+            f"[{l.category}] {l.name}"
+            for l in geography_locations[:max_geography_locations]
+        ])
+        parts.append(f"地理场景: {gl_str}")
+
+    # 5. story_core + genre_tags
+    if world_tree:
+        if world_tree.get("story_core"):
+            parts.append(f"故事核心: {world_tree['story_core']}")
+        if world_tree.get("genre_tags"):
+            parts.append(f"题材: {', '.join(world_tree['genre_tags'])}")
+
+    return "\n".join(parts) if parts else "（世界树为空）"
 
 
 def _format_main_plot(main_plot: dict) -> str:

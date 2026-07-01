@@ -236,9 +236,7 @@ from backend.agent.specialists.specialists import generate_chapter_via_specialis
 
 result = await generate_chapter_via_specialist(
     project_id=project_id,
-    intervention=intervention,         # 可选
-    actor_feedback=actor_feedback,     # 可选
-    actor_character=actor_character,   # 可选
+    intervention=intervention,         # 可选（v003 删 actor_feedback/actor_character）
 )
 # 返回 {num, title, content, file_path, word_count, summary}
 ```
@@ -303,7 +301,7 @@ load_history_messages
 | 风格 | `style_tools.py` | `adjust_style` |
 | 图片 | `image_tools.py` | `generate_image` |
 | 通用 | `edit_artifact_tool.py` | `edit_artifact` |
-| Onboarding | `onboarding_tools.py` | `onboarding_propose_step` `onboarding_user_confirm` `onboarding_generate_chapter` |
+| Onboarding（v003 委托模式）| `onboarding_tools.py` | `delegate_to_wtm` `verify_world_tree_baseline` |
 | **委托** | **`delegation_tools.py`** | **`delegate_to_agent`** `dispatch_background_task` |
 | Schema | `schemas.py` | — |
 | Registry | `registry.py` | — |

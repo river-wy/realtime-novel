@@ -24,9 +24,8 @@ _cs_repo = ChapterStatusRepository()
 # ============ /interventions ============
 
 class InterventionRequest(BaseModel):
+    # v003：删 actor_feedback / actor_character 字段
     intervention: Optional[str] = None
-    actor_feedback: Optional[str] = None
-    actor_character: Optional[str] = None
 
 
 class InterventionResponse(BaseModel):
@@ -42,8 +41,6 @@ async def submit_intervention(project_id: str, req: InterventionRequest):
         result = await _intervention.add(
             project_id,
             req.intervention,
-            req.actor_feedback,
-            req.actor_character,
         )
     except Exception as e:
         raise HTTPException(500, str(e))
@@ -57,8 +54,6 @@ async def submit_intervention(project_id: str, req: InterventionRequest):
             "name": "intervene",
             "args": {
                 "intervention": req.intervention,
-                "actor_feedback": req.actor_feedback,
-                "actor_character": req.actor_character,
             },
             "result": result if isinstance(result, dict) else {"raw": str(result)},
         },

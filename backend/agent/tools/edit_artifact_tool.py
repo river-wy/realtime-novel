@@ -34,16 +34,17 @@ class EditArtifactTool(BaseTool):
 
             handler = {
                 "project_name": self._edit_project_name,
-                "project_palette": self._edit_project_palette,
                 "current_pov": self._edit_current_pov,
                 "character": self._edit_character,
                 "relationship": self._edit_relationship,
                 "core_rule": self._edit_core_rule,
-                "timeline": self._edit_timeline,
-                "geography": self._edit_geography,
+                "timeline_event": self._edit_timeline_event,
+                "geography_location": self._edit_geography_location,
+                "world_entry": self._edit_world_entry,
                 "seed": self._edit_seed,
                 "subplot": self._edit_subplot,
-                "beat": self._edit_beat,
+                "main_plot_node": self._edit_main_plot_node,
+                "volume": self._edit_volume,
             }.get(input.target)
 
             if handler is None:
@@ -93,28 +94,6 @@ class EditArtifactTool(BaseTool):
             error=f"project_name only supports update (got {input.operation})",
         )
 
-    async def _edit_project_palette(self, input: EditArtifactInput) -> EditArtifactResult:
-        repo = ProjectRepository()
-        if input.operation == "update":
-            new_palette = (input.data or {}).get("palette", "")
-            if not new_palette:
-                return EditArtifactResult(
-                    project_id=input.project_id, target=input.target,
-                    operation=input.operation, success=False,
-                    error="data.palette is required",
-                )
-            repo.update_palette(input.project_id, new_palette)
-            return EditArtifactResult(
-                project_id=input.project_id, target=input.target,
-                operation=input.operation, success=True,
-                affected={"new_palette": new_palette},
-            )
-        return EditArtifactResult(
-            project_id=input.project_id, target=input.target,
-            operation=input.operation, success=False,
-            error=f"project_palette only supports update (got {input.operation})",
-        )
-
     async def _edit_current_pov(self, input: EditArtifactInput) -> EditArtifactResult:
         """current_pov 存 char_id，写入前校验角色存在"""
         repo = ProjectRepository()
@@ -133,11 +112,12 @@ class EditArtifactTool(BaseTool):
                     operation=input.operation, success=False,
                     error=f"角色 {char_id} 不存在，请先用 edit_artifact(target=character, operation=add) 创建",
                 )
-            repo.update_current_pov(input.project_id, char_id)
+            # v003：current_pov 迁入 project_state
+            repo.upsert_project_state(input.project_id, current_pov=char_id)
             return EditArtifactResult(
                 project_id=input.project_id, target=input.target,
                 operation=input.operation, success=True,
-                affected={"new_pov_char_id": char_id, "new_pov_name": char.get("name", "")},
+                affected={"new_pov_char_id": char_id, "new_pov_name": char.name if char else ""},
             )
         return EditArtifactResult(
             project_id=input.project_id, target=input.target,
@@ -286,34 +266,205 @@ class EditArtifactTool(BaseTool):
             affected={"rule_count": len(rules)},
         )
 
-    # ============ Timeline / Geography ============
-
-    async def _edit_timeline(self, input: EditArtifactInput) -> EditArtifactResult:
+    # ============ Timeline / Geography / WorldEntry（v003 拆为事件/地点级）============
+    # ============ WorldEntry（v003 新增）============
+    async def _edit_world_entry(self, input: EditArtifactInput) -> EditArtifactResult:
         repo = ProjectRepository()
-        found = repo.update_timeline(input.project_id, input.data or {})
-        if not found:
+        data = input.data or {}
+
+        if input.operation == "add":
+            entry_id = repo.add_world_entry(input.project_id, data)
             return EditArtifactResult(
                 project_id=input.project_id, target=input.target,
-                operation=input.operation, success=False, error="world_tree not found",
+                operation=input.operation, identifier=entry_id, success=True,
+                affected={"entry_id": entry_id},
+            )
+        elif input.operation == "update":
+            if not input.identifier:
+                return EditArtifactResult(
+                    project_id=input.project_id, target=input.target,
+                    operation=input.operation, success=False, error="identifier required",
+                )
+            repo.update_world_entry(input.project_id, input.identifier, data)
+            return EditArtifactResult(
+                project_id=input.project_id, target=input.target,
+                operation=input.operation, identifier=input.identifier, success=True,
+            )
+        elif input.operation == "delete":
+            if not input.identifier:
+                return EditArtifactResult(
+                    project_id=input.project_id, target=input.target,
+                    operation=input.operation, success=False, error="identifier required",
+                )
+            repo.delete_world_entry(input.project_id, input.identifier)
+            return EditArtifactResult(
+                project_id=input.project_id, target=input.target,
+                operation=input.operation, identifier=input.identifier, success=True,
             )
         return EditArtifactResult(
             project_id=input.project_id, target=input.target,
-            operation="update", success=True,
-            affected={"era": (input.data or {}).get("era")},
+            operation=input.operation, success=False,
+            error=f"world_entry only supports add/update/delete (got {input.operation})",
         )
 
-    async def _edit_geography(self, input: EditArtifactInput) -> EditArtifactResult:
+    # ============ TimelineEvent（v003 拆为事件级）============
+    async def _edit_timeline_event(self, input: EditArtifactInput) -> EditArtifactResult:
         repo = ProjectRepository()
-        found = repo.update_geography(input.project_id, input.data or {})
-        if not found:
+        data = input.data or {}
+
+        if input.operation == "add":
+            event_id = repo.add_timeline_event(input.project_id, data)
             return EditArtifactResult(
                 project_id=input.project_id, target=input.target,
-                operation=input.operation, success=False, error="world_tree not found",
+                operation=input.operation, identifier=event_id, success=True,
+                affected={"event_id": event_id},
+            )
+        elif input.operation == "update":
+            if not input.identifier:
+                return EditArtifactResult(
+                    project_id=input.project_id, target=input.target,
+                    operation=input.operation, success=False, error="identifier required",
+                )
+            repo.update_timeline_event(input.project_id, input.identifier, data)
+            return EditArtifactResult(
+                project_id=input.project_id, target=input.target,
+                operation=input.operation, identifier=input.identifier, success=True,
+            )
+        elif input.operation == "delete":
+            if not input.identifier:
+                return EditArtifactResult(
+                    project_id=input.project_id, target=input.target,
+                    operation=input.operation, success=False, error="identifier required",
+                )
+            repo.delete_timeline_event(input.project_id, input.identifier)
+            return EditArtifactResult(
+                project_id=input.project_id, target=input.target,
+                operation=input.operation, identifier=input.identifier, success=True,
             )
         return EditArtifactResult(
             project_id=input.project_id, target=input.target,
-            operation="update", success=True,
-            affected={"primary": (input.data or {}).get("primary")},
+            operation=input.operation, success=False,
+            error=f"timeline_event only supports add/update/delete (got {input.operation})",
+        )
+
+    # ============ GeographyLocation（v003 拆为地点级）============
+    async def _edit_geography_location(self, input: EditArtifactInput) -> EditArtifactResult:
+        repo = ProjectRepository()
+        data = input.data or {}
+
+        if input.operation == "add":
+            location_id = repo.add_geography_location(input.project_id, data)
+            return EditArtifactResult(
+                project_id=input.project_id, target=input.target,
+                operation=input.operation, identifier=location_id, success=True,
+                affected={"location_id": location_id},
+            )
+        elif input.operation == "update":
+            if not input.identifier:
+                return EditArtifactResult(
+                    project_id=input.project_id, target=input.target,
+                    operation=input.operation, success=False, error="identifier required",
+                )
+            repo.update_geography_location(input.project_id, input.identifier, data)
+            return EditArtifactResult(
+                project_id=input.project_id, target=input.target,
+                operation=input.operation, identifier=input.identifier, success=True,
+            )
+        elif input.operation == "delete":
+            if not input.identifier:
+                return EditArtifactResult(
+                    project_id=input.project_id, target=input.target,
+                    operation=input.operation, success=False, error="identifier required",
+                )
+            repo.delete_geography_location(input.project_id, input.identifier)
+            return EditArtifactResult(
+                project_id=input.project_id, target=input.target,
+                operation=input.operation, identifier=input.identifier, success=True,
+            )
+        return EditArtifactResult(
+            project_id=input.project_id, target=input.target,
+            operation=input.operation, success=False,
+            error=f"geography_location only supports add/update/delete (got {input.operation})",
+        )
+
+    # ============ Volume（v003 新增）============
+    async def _edit_volume(self, input: EditArtifactInput) -> EditArtifactResult:
+        repo = ProjectRepository()
+        data = input.data or {}
+
+        if input.operation == "add":
+            volume_id = repo.add_volume(input.project_id, data)
+            return EditArtifactResult(
+                project_id=input.project_id, target=input.target,
+                operation=input.operation, identifier=volume_id, success=True,
+                affected={"volume_id": volume_id},
+            )
+        elif input.operation == "update":
+            if not input.identifier:
+                return EditArtifactResult(
+                    project_id=input.project_id, target=input.target,
+                    operation=input.operation, success=False, error="identifier required",
+                )
+            repo.update_volume(input.project_id, input.identifier, data)
+            return EditArtifactResult(
+                project_id=input.project_id, target=input.target,
+                operation=input.operation, identifier=input.identifier, success=True,
+            )
+        elif input.operation == "delete":
+            if not input.identifier:
+                return EditArtifactResult(
+                    project_id=input.project_id, target=input.target,
+                    operation=input.operation, success=False, error="identifier required",
+                )
+            repo.delete_volume(input.project_id, input.identifier)
+            return EditArtifactResult(
+                project_id=input.project_id, target=input.target,
+                operation=input.operation, identifier=input.identifier, success=True,
+            )
+        return EditArtifactResult(
+            project_id=input.project_id, target=input.target,
+            operation=input.operation, success=False,
+            error=f"volume only supports add/update/delete (got {input.operation})",
+        )
+
+    # ============ MainPlotNode（v003 新增 1:n 节点级）============
+    async def _edit_main_plot_node(self, input: EditArtifactInput) -> EditArtifactResult:
+        repo = ProjectRepository()
+        data = input.data or {}
+
+        if input.operation == "add":
+            node_id = repo.add_main_plot_node(input.project_id, data)
+            return EditArtifactResult(
+                project_id=input.project_id, target=input.target,
+                operation=input.operation, identifier=node_id, success=True,
+                affected={"node_id": node_id},
+            )
+        elif input.operation == "update":
+            if not input.identifier:
+                return EditArtifactResult(
+                    project_id=input.project_id, target=input.target,
+                    operation=input.operation, success=False, error="identifier required",
+                )
+            repo.update_main_plot_node(input.project_id, input.identifier, data)
+            return EditArtifactResult(
+                project_id=input.project_id, target=input.target,
+                operation=input.operation, identifier=input.identifier, success=True,
+            )
+        elif input.operation == "delete":
+            if not input.identifier:
+                return EditArtifactResult(
+                    project_id=input.project_id, target=input.target,
+                    operation=input.operation, success=False, error="identifier required",
+                )
+            repo.delete_main_plot_node(input.project_id, input.identifier)
+            return EditArtifactResult(
+                project_id=input.project_id, target=input.target,
+                operation=input.operation, identifier=input.identifier, success=True,
+            )
+        return EditArtifactResult(
+            project_id=input.project_id, target=input.target,
+            operation=input.operation, success=False,
+            error=f"main_plot_node only supports add/update/delete (got {input.operation})",
         )
 
     # ============ Seed ============

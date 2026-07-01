@@ -40,9 +40,9 @@ AGENT_TOOLS: Dict[str, List[str]] = {
         "update_exploration_level",    # v0.6.2 补：调整项目/全局探索度
         "list_style_packs",            # 查询可用笔风列表（Onboarding/调整笔风时先读）
         "adjust_style",                # 写入/更新 style_pack_id
-        "onboarding_propose_step",
-        "onboarding_user_confirm",
-        "onboarding_generate_chapter",
+        # v003 委托模式（v0.7 旧 5 步工具已删除：onboarding_propose_step / onboarding_user_confirm / onboarding_generate_chapter）
+        "delegate_to_wtm",             # v003：管家收集足够信息后委托 WTM 输出完整世界树基座
+        "verify_world_tree_baseline",  # v003：委托 WTM 前后校验世界树基座完整性
         "delegate_to_agent",           # 同步委托专家（用户等待结果）
         "dispatch_background_task",    # 异步派发后台任务（管家自主识别）
     ],

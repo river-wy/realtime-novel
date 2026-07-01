@@ -7,7 +7,7 @@
 2. 【写作笔风】— 从 style_pack 库查出的完整笔风框架
 3. 【写作法则】— 全局必备 + 本笔风定向关联
 4. 【绝对禁止】— 8 条红线
-5. 【项目基座定调】— world_tree + genre_resonance 摘要（定调用，完整 7 件走 context）
+5. 【项目基座定调】— world_tree 5 字段 + genre_tags 摘要（定调用，完整世界树基座走 context）
 
 不负责拼接的内容（由 executor 的 _build_system_prompt 统一处理）：
 - 工具清单（动态，含 extra_tools）
@@ -15,7 +15,7 @@
 - project_id / context dict
 
 另外提供：
-- build_project_context_message(): 7 件基座完整数据 + 章节摘要 → 独立 user message
+- build_project_context_message(): 世界树基座完整数据 + 章节摘要 → 独立 user message
 """
 from __future__ import annotations
 
@@ -43,13 +43,13 @@ _logger = logging.getLogger(__name__)
 _WRITER_IDENTITY = """你是「小说文笔家」。
 
 【职责】
-在 7 件基座（world_tree / style_pack / genre_resonance / main_plot / sub_plots / character_card / seed_table）的约束下，生成下一章小说正文，并通过工具落盘。
+在 世界树基座（world_tree 5 字段 + characters + main_plot 1:n 节点 + sub_plot + seeds + volumes + world_entries + timeline_events + geography_locations）的约束下，生成下一章小说正文，并通过工具落盘。
 
 【工作流】
-1. system_prompt 已注入笔风、写作法则、基座定调；context 已注入完整 7 件基座 + chapter_summaries
+1. system_prompt 已注入笔风、写作法则、基座定调；context 已注入完整 世界树基座 + chapter_summaries
 2. 如有需要（如用户明确要求查某章详情），可调 read_chapter 检索上下文
 3. 写正文（3000-4500 字，严格遵守下方笔风和法则）
-4. 调 generate_chapter(content=正文, project_id=xxx, intervention=?, actor_feedback=?, actor_character=?) 落盘
+4. 调 generate_chapter(content=正文, project_id=xxx, intervention=?) 落盘
 5. 调 summarize_chapter(content=正文, project_id=xxx) 抽 1 句话 summary（自动写入 DB）
 6. final_response 是「已落盘第 N 章《XXX》, 摘要: ...」（不要把全文塞进 final_response）
 
@@ -59,7 +59,7 @@ _WRITER_IDENTITY = """你是「小说文笔家」。
 - final_response 是一句话总结：「已落盘第 N 章《XXX》（X 字），摘要：...」
 
 【关键约束】
-- 严格遵守 7 件基座 + 下方笔风法则
+- 严格遵守 世界树基座 + 下方笔风法则
 - 修改基座前不要直接调 edit_artifact/update_base —— 这是架构师（world_tree_manager）职责，文笔家只读
 - 不决定剧情走向（走向由世界树管理维护）
 - 章节字数硬约束：3000-4500 字
@@ -76,19 +76,19 @@ _WORLDTREE_IDENTITY = """你是「世界树管理」。
 
 【可用基座 7 件】
 1. world_tree - 时间线、地理、核心规则
-2. style_pack - 写作笔风（第 7 件基座）
-3. genre_resonance - 题材、情绪基调
+2. style_pack - 写作笔风（第 世界树基座）
+3. world_tree.genre_tags - 题材、情绪基调
 4. main_plot - 主线弧线
 5. sub_plots - 支线
-6. character_card - 角色卡
-7. seed_table - 伏笔种子
+6. characters - 角色卡
+7. seeds - 伏笔种子
 
 【典型工作流】
-1. 调用 load_project 获取当前 7 件基座（如 context 未预注入）
+1. 调用 load_project 获取当前 世界树基座（如 context 未预注入）
 2. 分析用户干预的影响：
    - 涉及哪些基座的哪些字段？
    - 是否影响主线弧线（main_plot）？
-   - 是否需要埋伏笔（seed_table）？
+   - 是否需要埋伏笔（seeds）？
    - 是否引发 7 件之间的矛盾？
 4. 调用对应 tool 执行修改：
    - 简单字段改 → update_base
@@ -99,15 +99,15 @@ _WORLDTREE_IDENTITY = """你是「世界树管理」。
 
 【关键约束】
 - 修改基座前必须先 load_project 看清现状（或查看 context 预注入的基座）
-- 不能让 7 件基座内部矛盾（如改完 character_card 让 world_tree 冲突）
-- 长程伏笔（seed_table）必须明确 trigger + payoff + estimated_chapter
+- 不能让 世界树基座内部矛盾（如改完 characters 让 world_tree 冲突）
+- 长程伏笔（seeds）必须明确 trigger + payoff + estimated_chapter
 - 多个改动可并行调用 tool
 - 最终 JSON 必须是合法 JSON，不要包含 markdown 包裹
 
 【一致性原则】
-- world_tree 与 character_card 不能矛盾（如世界规则说「无魔法」，角色不能会魔法）
+- world_tree 与 characters 不能矛盾（如世界规则说「无魔法」，角色不能会魔法）
 - main_plot 与 sub_plots 不能矛盾
-- seed_table 的 payoff 不能超出 main_plot 范围
+- seeds 的 payoff 不能超出 main_plot 范围
 """
 
 
@@ -247,7 +247,7 @@ def _format_red_lines(red_lines: List[Dict[str, Any]]) -> str:
 
 
 def _format_base_summary(project_data: Dict[str, Any]) -> str:
-    """格式化基座摘要（world_tree + genre_resonance），定调用
+    """格式化基座摘要（world_tree + genre_tags），定调用
 
     完整 7 件走 context message，这里只放精简定调信息。
     """
@@ -260,23 +260,14 @@ def _format_base_summary(project_data: Dict[str, Any]) -> str:
     parts.append(wt_str)
     parts.append("")
 
-    # genre_resonance 摘要
-    gr = project_data.get("genre_resonance", {})
-    if gr:
-        parts.append("【题材共振】")
-        accept = gr.get("accept", [])
-        reject = gr.get("reject", [])
-        anchors = gr.get("anchors", [])
-        if accept:
-            parts.append(f"  接纳：{', '.join(str(a) for a in accept[:5])}")
-        if reject:
-            parts.append(f"  拒绝：{', '.join(str(r) for r in reject[:5])}")
-        if anchors:
-            parts.append(f"  锚点：{', '.join(str(a) for a in anchors[:5])}")
+    # v003: genre_tags 改读 world_tree.genre_tags_json（不再有 genre_resonance 表）
+    genre_tags = wt.get("genre_tags", []) or []
+    if genre_tags:
+        parts.append("【题材】")
+        parts.append("  " + "、".join(str(a) for a in genre_tags))
         parts.append("")
 
     return "\n".join(parts)
-
 
 # ============ 公开 API ============
 
@@ -332,7 +323,7 @@ def build_writer_system_prompt(project_id: str) -> str:
     base_summary = _format_base_summary(project_data)
     if base_summary.strip():
         parts.append("【项目基座定调】")
-        parts.append("（完整 7 件基座已注入 context 上下文，以下是精简定调）")
+        parts.append("（完整 世界树基座已注入 context 上下文，以下是精简定调）")
         parts.append("")
         parts.append(base_summary)
 
@@ -398,7 +389,7 @@ def build_worldtree_system_prompt(project_id: str) -> str:
     base_summary = _format_base_summary(project_data)
     if base_summary.strip():
         parts.append("【项目基座定调】")
-        parts.append("（完整 7 件基座已注入 context 上下文，以下是精简定调）")
+        parts.append("（完整 世界树基座已注入 context 上下文，以下是精简定调）")
         parts.append("")
         parts.append(base_summary)
 
@@ -406,10 +397,10 @@ def build_worldtree_system_prompt(project_id: str) -> str:
 
 
 def build_project_context_message(project_id: str, agent_name: str) -> str:
-    """组装项目上下文 message（7 件基座完整数据 + 章节摘要）
+    """组装项目上下文 message（世界树基座完整数据 + 章节摘要）
 
     作为独立 user message 注入 messages 列表，不进 system_prompt。
-    完整 7 件基座 + 章节摘要（分级/简短，按 agent 类型选）。
+    完整 世界树基座 + 章节摘要（分级/简短，按 agent 类型选）。
 
     Args:
         project_id: 项目 ID
@@ -430,7 +421,7 @@ def build_project_context_message(project_id: str, agent_name: str) -> str:
     chapters = project_data.get("chapters", [])
 
     parts: List[str] = []
-    parts.append("【项目上下文】以下是当前项目的完整 7 件基座 + 章节摘要，请基于这些数据工作。")
+    parts.append("【项目上下文】以下是当前项目的完整 世界树基座 + 章节摘要，请基于这些数据工作。")
     parts.append("")
 
     # 1. world_tree
@@ -448,48 +439,77 @@ def build_project_context_message(project_id: str, agent_name: str) -> str:
     parts.append(f"  标语: {pack['tagline']}")
     parts.append("")
 
-    # 3. genre_resonance
-    gr = project_data.get("genre_resonance", {})
-    parts.append("── 3. genre_resonance（题材共振）──")
-    if gr:
-        accept = gr.get("accept", [])
-        reject = gr.get("reject", [])
-        anchors = gr.get("anchors", [])
-        if accept:
-            parts.append(f"  接纳: {', '.join(str(a) for a in accept)}")
-        if reject:
-            parts.append(f"  拒绝: {', '.join(str(r) for r in reject)}")
-        if anchors:
-            parts.append(f"  锚点: {', '.join(str(a) for a in anchors)}")
+    # v003: 字段直读 list（list_main_plot_nodes / list_subplots / list_characters / list_seeds 返回 list of Row）
+    # 3. main_plot（1:n 节点列表）
+    main_plot_nodes = project_data.get("main_plot", []) or []
+    parts.append("── 3. main_plot（主线节点）──")
+    if main_plot_nodes:
+        for n in main_plot_nodes[:10]:
+            title = getattr(n, "title", "")
+            desc = getattr(n, "description", "")
+            status = getattr(n, "status", "")
+            line = f"  - {title}"
+            if desc:
+                line += f": {desc[:80]}"
+            if status:
+                line += f" [{status}]"
+            parts.append(line)
     else:
         parts.append("  （空）")
     parts.append("")
 
-    # 4. main_plot
-    mp = project_data.get("main_plot", {})
-    parts.append("── 4. main_plot（主线）──")
-    parts.append(_format_main_plot(mp))
+    # 4. sub_plot
+    sub_plots = project_data.get("sub_plot", []) or []
+    parts.append("── 4. sub_plot（支线）──")
+    if sub_plots:
+        for s in sub_plots[:8]:
+            title = getattr(s, "title", "")
+            desc = getattr(s, "description", "")
+            status = getattr(s, "status", "")
+            line = f"  - {title}"
+            if desc:
+                line += f": {desc[:80]}"
+            if status:
+                line += f" [{status}]"
+            parts.append(line)
+    else:
+        parts.append("  （空）")
     parts.append("")
 
-    # 5. sub_plot
-    sp = project_data.get("sub_plot", {})
-    sp_threads = sp.get("threads", []) if isinstance(sp, dict) else []
-    parts.append("── 5. sub_plot（支线）──")
-    parts.append(_format_sub_plot(sp_threads))
+    # 5. characters
+    characters = project_data.get("characters", []) or []
+    parts.append("── 5. characters（角色）──")
+    if characters:
+        for c in characters[:8]:
+            name = getattr(c, "name", "")
+            role = getattr(c, "role", "")
+            background = getattr(c, "background", "")
+            line = f"  - {name}"
+            if role:
+                line += f" ({role})"
+            if background:
+                line += f": {background[:60]}"
+            parts.append(line)
+    else:
+        parts.append("  （空）")
     parts.append("")
 
-    # 6. character_card
-    cc = project_data.get("character_card", {})
-    cc_chars = cc.get("characters", []) if isinstance(cc, dict) else []
-    parts.append("── 6. character_card（角色卡）──")
-    parts.append(_format_characters(cc_chars))
-    parts.append("")
-
-    # 7. seed_table
-    st = project_data.get("seed_table", {})
-    st_seeds = st.get("seeds", []) if isinstance(st, dict) else []
-    parts.append("── 7. seed_table（伏笔种子）──")
-    parts.append(_format_seeds(st_seeds))
+    # 6. seeds
+    seeds = project_data.get("seeds", []) or []
+    parts.append("── 6. seeds（伏笔）──")
+    if seeds:
+        for s in seeds[:8]:
+            name = getattr(s, "name", "")
+            content = getattr(s, "content", "")
+            status = getattr(s, "status", "")
+            line = f"  - {name}"
+            if content:
+                line += f": {content[:60]}"
+            if status:
+                line += f" [{status}]"
+            parts.append(line)
+    else:
+        parts.append("  （空）")
     parts.append("")
 
     # 章节摘要

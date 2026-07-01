@@ -32,6 +32,9 @@ class ChapterOutput(BaseModel):
     chapter_num: Optional[int] = None
     title: Optional[str] = None
     word_count: Optional[int] = None
+    # v003: consistency_checker 两阶段校验结果（arch-plan §5.4）
+    consistency_hard_rules: Optional[dict] = None
+    consistency_world_entries: Optional[dict] = None
 
 
 # ============ NovelWriter 主类 ============
@@ -147,72 +150,68 @@ class NovelWriter:
         )
 
 
-# ============ 7 件基座完整性校验 ============
+# ============ 世界树基座完整性校验 ============
 
 def _validate_world_tree_completeness(project_id: str) -> Optional[str]:
-    """章节生成前的 7 件基座完整性校验（含笔风）
+    """章节生成前的世界树基座完整性校验（含笔风）
 
-    检查规则：
-    - world_tree:      base.core_rules 非空
-    - genre_resonance: accept 非空
-    - main_plot:       arc_phrase 或 beats 至少有一项非空
-    - sub_plot:        threads 非空
-    - character_card:  characters 非空（至少有一个角色）
-    - seed_table:      seeds 非空
-    - style_pack_id:   projects.style_pack_id 非空
+    v003 重构（spec §5.6）：
+    - world_tree: story_core / genre_tags_json / core_rules_json 非空
+    - characters: 至少 1 个 protagonist
+    - main_plot: 至少 1 个 pending 节点
+    - volumes: 至少 1 个卷
+    - style_pack_id: projects.style_pack_id 非空
 
     Returns:
         None     — 校验通过
         str      — 校验失败原因（供 ChapterOutput.error 使用）
     """
     try:
-        from backend.agent.context._helpers import _load_project_data
         from backend.persistence import ProjectRepository
 
-        data = _load_project_data(project_id)
+        repo = ProjectRepository()
         missing: list[str] = []
 
-        # 1. world_tree
-        wt = data.get("world_tree") or {}
-        wt_base = wt.get("base") or {}
-        if not wt_base.get("core_rules"):
-            missing.append("world_tree.base.core_rules（世界树核心规则）")
+        # 1. world_tree 5 字段最终态
+        wt = repo.get_world_tree(project_id)
+        if not wt:
+            missing.append("world_tree（世界树）")
+        else:
+            if not wt.story_core:
+                missing.append("world_tree.story_core（故事核心）")
+            if not wt.genre_tags_json:
+                missing.append("world_tree.genre_tags_json（题材标签）")
+            if not wt.core_rules_json:
+                missing.append("world_tree.core_rules_json（世界核心规则）")
 
-        # 2. genre_resonance
-        gr = data.get("genre_resonance") or {}
-        if not gr.get("accept"):
-            missing.append("genre_resonance.accept（题材共振接纳列表）")
+        # 2. characters 至少 1 个 protagonist
+        characters = repo.list_characters(project_id)
+        if not characters:
+            missing.append("characters（成员列表）")
+        elif not any(c.role == "protagonist" for c in characters):
+            missing.append("characters（至少 1 个 protagonist）")
 
-        # 3. main_plot
-        mp = data.get("main_plot") or {}
-        if not mp.get("arc_phrase") and not mp.get("beats"):
-            missing.append("main_plot.arc_phrase / beats（主线弧光）")
+        # 3. main_plot 至少 1 个 pending 节点
+        main_plot_nodes = repo.list_main_plot_nodes(project_id)
+        if not main_plot_nodes:
+            missing.append("main_plot（主线节点）")
+        elif not any(n.status == "pending" for n in main_plot_nodes):
+            missing.append("main_plot（至少 1 个 pending 节点）")
 
-        # 4. sub_plot
-        sp = data.get("sub_plot") or {}
-        if not (sp.get("threads") or []):
-            missing.append("sub_plot.threads（支线列表）")
+        # 4. volumes 至少 1 个
+        volumes = repo.list_volumes(project_id)
+        if not volumes:
+            missing.append("volumes（卷规划）")
 
-        # 5. character_card
-        cc = data.get("character_card") or {}
-        if not (cc.get("characters") or []):
-            missing.append("character_card.characters（角色列表）")
-
-        # 6. seed_table
-        st = data.get("seed_table") or {}
-        if not (st.get("seeds") or []):
-            missing.append("seed_table.seeds（伏笔种子）")
-
-        # 7. style_pack_id（笔风）
-        if not ProjectRepository().get_style_pack_id(project_id):
+        # 5. style_pack_id（笔风）
+        if not repo.get_style_pack_id(project_id):
             missing.append("style_pack_id（写作笔风，请通过 adjust_style 工具设置）")
 
         if missing:
-            return f"以下基座数据缺失或为空：{', '.join(missing)}"
+            return f"以下世界树基座缺失或为空：{', '.join(missing)}"
         return None
 
     except Exception as e:
-        # 校验本身报错，记日志但不阻断（容错：DB 读取异常不应阻止生成）
         import logging
         logging.getLogger(__name__).warning(
             "_validate_world_tree_completeness: 校验异常（非阻断）project_id=%s: %s",
@@ -227,36 +226,23 @@ def _validate_world_tree_completeness(project_id: str) -> Optional[str]:
 async def delegate_chapter_generation(
     project_id: str,
     intervention: Optional[str] = None,
-    actor_feedback: Optional[str] = None,
-    actor_character: Optional[str] = None,
     source: str = "unknown",
     extra_context: Optional[str] = None,
 ) -> ChapterOutput:
     """章节生成委托入口
 
-    所有章节生成请求都通过此入口，走文笔家 ReAct loop + generate_chapter 工具落盘。
-
-    调用方：
-        - chapter_routes.py (POST /api/projects/{id}/chapters) → source="page_button"
-        - tools/onboarding_tools.py OnboardingGenerateChapterTool → source="onboarding_step5"
-        - delegation_tools.py _delegate_novel_writer → source="steward_react"
+    v003：删 actor_feedback / actor_character 入参
     """
     user_message_parts = [f"请生成下一章（触发源: {source}）"]
     if intervention:
         user_message_parts.append(f"用户干预: {intervention}")
-    if actor_feedback:
-        user_message_parts.append(f"演员反馈: {actor_feedback}")
-    if actor_character:
-        user_message_parts.append(f"演员角色: {actor_character}")
     if extra_context:
         user_message_parts.append(f"额外上下文: {extra_context}")
     user_message = "\n".join(user_message_parts)
 
     delegate_chapter_generation.log.info(
-        "delegate_chapter_generation START: project_id=%s, source=%s, "
-        "intervention=%s, actor_feedback=%s, actor_character=%s",
-        project_id, source,
-        bool(intervention), bool(actor_feedback), bool(actor_character),
+        "delegate_chapter_generation START: project_id=%s, source=%s, intervention=%s",
+        project_id, source, bool(intervention),
     )
 
     # ── 7 件基座完整性校验（含笔风），任一缺失直接熔断，不让 LLM 用空占位符生成 ──
@@ -273,6 +259,48 @@ async def delegate_chapter_generation(
         project_id=project_id,
         user_message=user_message,
     )
+
+    # ── 一致性两阶段校验（arch-plan §5.4：spec §5.4 要求）─────────────────
+    # 阶段 1: 硬约束违例扫描（致命可阻断）
+    # 阶段 2: 知识库矛盾检测（警告不阻断）
+    # v003 bugfix: 之前漏掉了这两步
+    if not result.error and result.chapter_content:
+        try:
+            from backend.services.consistency_checker import ConsistencyChecker
+            checker = ConsistencyChecker(project_id)
+
+            # 阶段 1: 硬约束违例
+            hr_result = checker.check_hard_rules(
+                chapter_text=result.chapter_content,
+                character_actions=None,
+            )
+            result.consistency_hard_rules = hr_result.model_dump()
+
+            delegate_chapter_generation.log.info(
+                "consistency check_hard_rules: project_id=%s, violations=%d, has_fatal=%s",
+                project_id, len(hr_result.violations), hr_result.has_fatal,
+            )
+
+            # 阶段 2: 知识库矛盾
+            we_result = checker.check_world_entries(
+                chapter_text=result.chapter_content,
+                category=None,
+            )
+            result.consistency_world_entries = we_result.model_dump()
+
+            delegate_chapter_generation.log.info(
+                "consistency check_world_entries: project_id=%s, conflicts=%d, has_warnings=%s",
+                project_id, len(we_result.conflicts), we_result.has_warnings,
+            )
+
+            # 默认不阻断（欧尼酱拍板：只检测不阻断，避免误伤）
+            # 若后续需求变更需要硬阻断，返 ChapterOutput(error=...)
+        except Exception as e:
+            delegate_chapter_generation.log.warning(
+                "consistency check failed: project_id=%s, error=%s",
+                project_id, e,
+            )
+            # 一致性检查失败不影响章节落盘
 
     delegate_chapter_generation.log.info(
         "delegate_chapter_generation DONE: project_id=%s, source=%s, chapter_num=%s, error=%s",

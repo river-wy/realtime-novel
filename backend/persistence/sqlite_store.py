@@ -44,7 +44,7 @@ class SQLiteStore:
                         else:
                             raise
                     conn.execute(
-                        "INSERT INTO migrations (version, applied_at) VALUES (?, ?)",
+                        "INSERT OR IGNORE INTO migrations (version, applied_at) VALUES (?, ?)",
                         (version, datetime.now()),
                     )
 

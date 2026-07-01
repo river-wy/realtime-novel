@@ -195,6 +195,61 @@ class WorldTreeManager:
 
     def __init__(self, executor: Optional[AgentExecutor] = None):
         self.executor = executor or get_agent_executor()
+        # v003: 注册 8 个 add_* 工具供 WTM Agent LLM 调用（arch-plan §2.1）
+        self.tools = {
+            "add_world_entry": self._add_world_entry,
+            "add_timeline_event": self._add_timeline_event,
+            "add_geography_location": self._add_geography_location,
+            "add_main_plot_node": self._add_main_plot_node,
+            "add_sub_plot": self._add_sub_plot,
+            "add_volume": self._add_volume,
+            "add_character": self._add_character,
+            "add_seed": self._add_seed,
+        }
+
+    # ============ v003: 8 个 _add_* 工具方法（arch-plan §2.1）============
+    # 这些方法是 WTM Agent LLM 在 ReAct loop 中可调用的「写库」工具
+    # 返回的字符串是新增条目的 ID（varchar 随机），供后续 update/delete 使用
+
+    async def _add_world_entry(self, project_id: str, data: Dict[str, Any]) -> str:
+        """WTM 工具: 新增世界百科条目（知识库）"""
+        from backend.persistence import ProjectRepository
+        return ProjectRepository().add_world_entry(project_id, data)
+
+    async def _add_timeline_event(self, project_id: str, data: Dict[str, Any]) -> str:
+        """WTM 工具: 新增时间线事件"""
+        from backend.persistence import ProjectRepository
+        return ProjectRepository().add_timeline_event(project_id, data)
+
+    async def _add_geography_location(self, project_id: str, data: Dict[str, Any]) -> str:
+        """WTM 工具: 新增地理位置"""
+        from backend.persistence import ProjectRepository
+        return ProjectRepository().add_geography_location(project_id, data)
+
+    async def _add_main_plot_node(self, project_id: str, data: Dict[str, Any]) -> str:
+        """WTM 工具: 新增主线节点（v003 1:n 结构）"""
+        from backend.persistence import ProjectRepository
+        return ProjectRepository().add_main_plot_node(project_id, data)
+
+    async def _add_sub_plot(self, project_id: str, data: Dict[str, Any]) -> str:
+        """WTM 工具: 新增支线"""
+        from backend.persistence import ProjectRepository
+        return ProjectRepository().add_subplot(project_id, data)
+
+    async def _add_volume(self, project_id: str, data: Dict[str, Any]) -> str:
+        """WTM 工具: 新增卷"""
+        from backend.persistence import ProjectRepository
+        return ProjectRepository().add_volume(project_id, data)
+
+    async def _add_character(self, project_id: str, data: Dict[str, Any]) -> str:
+        """WTM 工具: 新增角色"""
+        from backend.persistence import ProjectRepository
+        return ProjectRepository().add_character(project_id, data)
+
+    async def _add_seed(self, project_id: str, data: Dict[str, Any]) -> int:
+        """WTM 工具: 新增伏笔（add_seed 返回 int 主键）"""
+        from backend.persistence import ProjectRepository
+        return ProjectRepository().add_seed(project_id, data)
 
     async def initialize_world_tree(
         self,
@@ -215,8 +270,7 @@ class WorldTreeManager:
                     "genres": list[str],          # 题材
                     "styles": list[str],           # 风格
                     "tone": str,                   # 基调
-                    "story_core": str,             # 故事核心
-                    "opening_scene": str,          # 开篇场景
+                    "story_core": str,             # 故事核心（v003 删 opening_scene）
                     "characters": str,             # 主要角色（每行一个，格式：名字-身份-特质）
                     "main_arc": str,               # 主线节点（每行一个）
                     "sub_plots": str,              # 支线
@@ -253,9 +307,6 @@ class WorldTreeManager:
 
 【故事核心】
 {_fmt(onboarding_payload.get('story_core'))}
-
-【开篇场景】
-{_fmt(onboarding_payload.get('opening_scene'))}
 
 【主要角色】（每行：名字 - 身份/角色 - 核心特质）
 {_fmt(onboarding_payload.get('characters'))}
@@ -600,3 +651,159 @@ def get_world_tree_manager() -> WorldTreeManager:
     if _manager_instance is None:
         _manager_instance = WorldTreeManager()
     return _manager_instance
+
+# ============ v003 WTM 主入口：generate_full_world_tree_baseline ============
+
+async def generate_full_world_tree_baseline(
+    project_id: str,
+    steward_payload: Dict[str, Any],
+) -> Dict[str, Any]:
+    """WTM Agent 主入口：输出完整世界树基座（spec §5.8）
+
+    接收管家调工具暂存的信息，输出 9 张表的内容：
+    - world_tree (story_core / genre_tags / core_rules)
+    - characters（含主角/配角关系网）
+    - volumes（卷规划）
+    - main_plot（主线节点含卷划分）
+    - sub_plot（可选）
+    - timeline_events（可选）
+    - geography_locations（可选）
+    - world_entries（世界百科）
+    - seeds（可选）
+
+    v003 新增
+    """
+    from backend.persistence import ProjectRepository
+
+    repo = ProjectRepository()
+    summary: Dict[str, int] = {
+        "world_tree_set": 0,
+        "characters_count": 0,
+        "main_plot_nodes_count": 0,
+        "volumes_count": 0,
+        "world_entries_count": 0,
+        "timeline_events_count": 0,
+        "geography_locations_count": 0,
+        "sub_plots_count": 0,
+        "seeds_count": 0,
+    }
+
+    try:
+        # 提取管家提供的 hint
+        story_core = steward_payload.get("story_core_hint", "") or steward_payload.get("story_core", "")
+        characters_hint = steward_payload.get("characters_hint", []) or []
+        world_setting_hint = steward_payload.get("world_setting_hint", {}) or {}
+        core_rules_hint = steward_payload.get("core_rules_hint", []) or []
+        style_hint = steward_payload.get("style_hint", {}) or {}
+
+        # 1. world_tree 5 字段
+        if story_core or core_rules_hint:
+            _upsert_world_tree_minimal(
+                project_id,
+                story_core=story_core,
+                genre_tags=style_hint.get("genres", []) or style_hint.get("styles", []) or [],
+                core_rules=core_rules_hint,
+            )
+            summary["world_tree_set"] = 1
+
+        # 2. characters
+        for ch in characters_hint:
+            if isinstance(ch, str):
+                # 简单字符串格式：自动归为 protagonist
+                repo.add_character(project_id, {
+                    "name": ch.split("-")[0].strip(),
+                    "role": "protagonist",
+                    "background": ch,
+                })
+            elif isinstance(ch, dict):
+                repo.add_character(project_id, ch)
+        summary["characters_count"] = len(repo.list_characters(project_id))
+
+        # 3. volumes（默认 1 个）
+        if not repo.list_volumes(project_id):
+            repo.add_volume(project_id, {
+                "volume_num": 1,
+                "title": "第一卷",
+                "description": story_core[:100] if story_core else "开篇",
+                "planned_chapter_count": 20,
+            })
+        summary["volumes_count"] = len(repo.list_volumes(project_id))
+
+        # 4. main_plot（默认 3 个节点）
+        if not repo.list_main_plot_nodes(project_id):
+            volumes = repo.list_volumes(project_id)
+            volume_id = volumes[0].id if volumes else None
+            for i, beat_title in enumerate(["开场", "冲突", "高潮"], start=1):
+                repo.add_main_plot_node(project_id, {
+                    "volume_id": volume_id,
+                    "plot_num": i,
+                    "title": beat_title,
+                    "description": f"主线节点 {i}",
+                    "status": "active" if i == 1 else "pending",
+                })
+        summary["main_plot_nodes_count"] = len(repo.list_main_plot_nodes(project_id))
+
+        # 5. world_entries（从 world_setting_hint 提取）
+        for category, entries in world_setting_hint.items():
+            if not isinstance(entries, list):
+                continue
+            for entry in entries:
+                if isinstance(entry, dict):
+                    repo.add_world_entry(project_id, {
+                        "category": category,
+                        "title": entry.get("title", ""),
+                        "content": entry.get("content", ""),
+                    })
+                elif isinstance(entry, str):
+                    repo.add_world_entry(project_id, {
+                        "category": category,
+                        "title": entry[:30],
+                        "content": entry,
+                    })
+        summary["world_entries_count"] = len(repo.list_world_entries(project_id))
+
+        return {
+            "success": True,
+            "summary": summary,
+            "error": None,
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "summary": summary,
+            "error": str(e),
+        }
+
+
+def _upsert_world_tree_minimal(
+    project_id: str,
+    story_core: str = "",
+    genre_tags: Optional[List[str]] = None,
+    core_rules: Optional[List[Dict[str, Any]]] = None,
+) -> None:
+    """upsert world_tree 5 字段（供 WTM 主入口使用）"""
+    from backend.persistence import get_store
+    import json as _json
+    from datetime import datetime as _dt
+
+    now = _dt.now()
+    with get_store().connection() as conn:
+        conn.execute(
+            """
+            INSERT INTO world_tree (
+                project_id, story_core, genre_tags_json, core_rules_json, updated_at
+            ) VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(project_id) DO UPDATE SET
+                story_core=excluded.story_core,
+                genre_tags_json=excluded.genre_tags_json,
+                core_rules_json=excluded.core_rules_json,
+                updated_at=excluded.updated_at
+            """,
+            (
+                project_id,
+                story_core,
+                _json.dumps(genre_tags or [], ensure_ascii=False),
+                _json.dumps(core_rules or [], ensure_ascii=False),
+                now,
+            ),
+        )

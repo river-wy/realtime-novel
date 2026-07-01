@@ -100,8 +100,6 @@ class GenerateChapterTool(BaseTool):
                     content_text=None,
                     word_count=len(chapter_content),
                     intervention=input.intervention,
-                    actor_feedback=input.actor_feedback,
-                    actor_character=input.actor_character,
                     summary=None,  # 由文笔家在 ReAct loop 里调 summarize_chapter 工具填
                 )
 

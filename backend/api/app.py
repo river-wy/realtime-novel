@@ -3,9 +3,13 @@
 Phase 1: system_routes（health + info）
 Phase 2-3: ws_channel（WS /api/chat）
 Phase 4: http_routes（12 个 RESTful 端点）
+
+v003: 启动时显式触发 SQLiteStore._init_schema() 建表，
+      避免「重启后第一次业务请求才建表」的体验问题。
 """
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -23,17 +27,30 @@ from backend.api.chapter_routes import router as chapter_router
 from backend.api.action_routes import router as action_router
 
 # v0.6.2: onboarding_routes 已删除（HTTP 路由 + WS handler 都不再用）
-# 项目 onboard 创建全部走管家 Agent 对接 (onboarding_propose_step / onboarding_user_confirm 工具)
+# v003: 旧 5 步 onboarding 工具已删除（onboarding_propose_step / onboarding_user_confirm / onboarding_generate_chapter）
+# 项目 onboard 创建走管家 Agent 对接 (delegate_to_wtm / verify_world_tree_baseline 工具)
 
 # 触发领域事件 handler 注册（import 即注册，无需显式调用）
 import backend.agent.onboarding.hooks  # noqa: F401
 
 # === FastAPI app ===
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """v003: 启动时显式触发 DB 建表
+    - 避免「重启后第一次业务请求才建表」的体验问题
+    - data/novel.db 删了之后重启能自动恢复
+    """
+    from backend.persistence.sqlite_store import get_store
+    get_store()  # 触发 _init_schema()，按 v003_init.sql 建表
+    yield
+
+
 app = FastAPI(
     title="realtime-novel API",
     description="实时生成 + 可干预小说产品 · 后端 API",
     version="0.4.0",
+    lifespan=lifespan,
 )
 
 # CORS

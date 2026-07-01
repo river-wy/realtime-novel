@@ -12,7 +12,7 @@ v0.6.1 适配:
 - step 枚举: "1", "2", "3", "4", "5" (不是 1a/1b)
 - Step 1 payload: {genres, styles, tone} (List[str])
 - Step 2 payload: {palette} (str)
-- Step 3 payload: {story_core, characters, opening_scene}
+- Step 3 payload: {story_core, characters}
 - Step 4 payload: {main_arc, sub_plots, seeds, reader_feeling}
 - Step 5 payload: {}
 - ChapterInfo 字段: num (不是 chapter_num)
@@ -69,7 +69,6 @@ async def main():
             "step": "3", "payload": {
                 "story_core": "AI 觉醒时代, 黑客主角发现父亲在数据黑市失踪, 追查中发现父亲不是普通人",
                 "characters": "林渊 - 主角, 独立黑客 - 偏执天才\n卖家 - 神秘线人 - 真实目的不明\n导师 - 父亲导师 - 隐藏身份",
-                "opening_scene": "主角在数据废墟的服务器机房醒来, 手上有被加密的血迹",
             },
         })
         assert r.status_code == 200, f"Step 3 失败: {r.text}"

@@ -44,15 +44,15 @@ class ProjectDetail(BaseModel):
 
 class GenerateChapterInput(BaseModel):
     """LLM 在 ReAct loop 里写正文，工具只负责落盘
-    
+
     - content: LLM 写的章节正文（3000-4500 字）
-    - intervention/actor_feedback/actor_character: 用户干预信息（可选，写入 DB）
+    - intervention: 用户干预信息（可选，写入 DB）
+
+    v003：删 actor_feedback / actor_character
     """
     project_id: str = Field(..., min_length=1)
     content: str = Field(..., min_length=100, description="章节正文（3000-4500 字）")
     intervention: Optional[str] = None
-    actor_feedback: Optional[str] = None
-    actor_character: Optional[str] = None
 
 
 class ReadChapterInput(BaseModel):
@@ -213,39 +213,9 @@ class WeavePlotResult(BaseModel):
     next_chapter_plan: dict[str, Any]
 
 
-# ============ Onboarding 工具 ============
 
-class OnboardingProposeStepInput(BaseModel):
-    project_id: str = Field(..., min_length=1)
-    step: int = Field(..., ge=1, le=5)
-    user_response: Optional[str] = Field(default="")
+# ============ Onboarding 工具（v003 委托模式）============
+# v003 变更（2026-07-01 完整删除旧 5 步工具）：
+# - 旧 6 个 schema（OnboardingProposeStep/UserConfirm/GenerateChapter × 2）已删
+# - 新 schema 集中在 onboarding_tools.py 顶部（DelegateToWTMInput/Output / VerifyWorldTreeBaselineInput/Output）
 
-
-class OnboardingProposeStepOutput(BaseModel):
-    step: int
-    proposed_fields: dict[str, Any] = Field(default_factory=dict)
-    expected_user_input_hint: str = ""
-
-
-class OnboardingUserConfirmInput(BaseModel):
-    project_id: str = Field(..., min_length=1)
-    step: int = Field(..., ge=1, le=5)
-    user_response: str = Field(..., min_length=1)
-
-
-class OnboardingUserConfirmOutput(BaseModel):
-    step: int
-    recorded: bool
-    next_step: Optional[int] = None
-
-
-class OnboardingGenerateChapterInput(BaseModel):
-    project_id: str = Field(..., min_length=1)
-
-
-class OnboardingGenerateChapterOutput(BaseModel):
-    chapter_num: int
-    title: str
-    word_count: int
-    summary: str = ""
-    project_name: str = ""

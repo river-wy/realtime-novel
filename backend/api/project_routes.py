@@ -8,7 +8,7 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 from typing import Optional, Any, Literal
 
-from backend.persistence import ProjectDeletedRepository, ConversationRepository, MessageRole  # noqa: F401
+from backend.persistence import ConversationRepository, MessageRole  # noqa: F401
 from backend.services.project_manager import ProjectManager
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])

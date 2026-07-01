@@ -1,11 +1,9 @@
 """OnboardingRepository：onboarding_state 表 CRUD
 
-表结构：
-    project_id   TEXT PRIMARY KEY
-    current_step INTEGER
-    started_at   DATETIME
-    updated_at   DATETIME
-    state_json   TEXT — JSON blob，含 payload + project_name + updated_at
+v003 重构（spec §5.8.6）：
+- 新增字段：info_state (collecting / wtm_pending / ready), payload_json, last_activity_at
+- 旧字段：current_step, state_json 保留（向后兼容，但不依赖）
+- 新增方法：set_info_state, get_info_state, upsert_info_state
 """
 from __future__ import annotations
 
@@ -39,76 +37,113 @@ class OnboardingRepository:
             return None
         return OnboardingStateRow(**dict(row))
 
-    def get_state_json(self, project_id: str) -> Optional[Dict[str, Any]]:
-        """读 state_json blob，不存在返回 None"""
+    def get_payload(self, project_id: str) -> Dict[str, Any]:
+        """读 payload_json（管家调工具暂存的信息），不存在返回空 dict"""
         with get_store().connection() as conn:
             row = conn.execute(
-                "SELECT state_json FROM onboarding_state WHERE project_id = ?",
+                "SELECT payload_json FROM onboarding_state WHERE project_id = ?",
+                (project_id,),
+            ).fetchone()
+        if row is None or not row["payload_json"]:
+            return {}
+        try:
+            return json.loads(row["payload_json"])
+        except Exception:
+            return {}
+
+    def get_info_state(self, project_id: str) -> str:
+        """读 info_state（spec §5.8.5）"""
+        with get_store().connection() as conn:
+            row = conn.execute(
+                "SELECT info_state FROM onboarding_state WHERE project_id = ?",
+                (project_id,),
+            ).fetchone()
+        if row is None:
+            return "collecting"
+        return row["info_state"]
+
+    def get_state_json(self, project_id: str) -> Optional[Dict[str, Any]]:
+        """兼容旧方法：从 state_json 读（v003 优先读 payload_json）"""
+        # 优先返回 payload_json
+        with get_store().connection() as conn:
+            row = conn.execute(
+                "SELECT payload_json, state_json FROM onboarding_state WHERE project_id = ?",
                 (project_id,),
             ).fetchone()
         if row is None:
             return None
-        return json.loads(row["state_json"])
-
-    def get_payload(self, project_id: str) -> Dict[str, Any]:
-        """读 state_json.payload（Step 1-4 合并后的全部字段），不存在返回空 dict"""
-        state_data = self.get_state_json(project_id)
-        if state_data is None:
-            return {}
-        return state_data.get("payload", {}) or {}
-
-    def list_current_steps(self) -> Dict[str, int]:
-        """批量读所有项目的 current_step（list_projects N+1 优化用）"""
-        with get_store().connection() as conn:
-            rows = conn.execute(
-                "SELECT project_id, current_step FROM onboarding_state"
-            ).fetchall()
-        result: Dict[str, int] = {}
-        for r in rows:
+        if row["payload_json"]:
             try:
-                result[r["project_id"]] = int(r["current_step"])
+                return json.loads(row["payload_json"])
             except Exception:
                 pass
-        return result
+        if row["state_json"]:
+            try:
+                return json.loads(row["state_json"])
+            except Exception:
+                pass
+        return None
 
     # ------------------------------------------------------------------ #
     # 写
     # ------------------------------------------------------------------ #
 
-    def upsert_step(
+    def upsert_info_state(
         self,
         project_id: str,
-        step_num: int,
-        state_data: Dict[str, Any],
+        info_state: str,
+        payload: Optional[Dict[str, Any]] = None,
     ) -> None:
-        """upsert onboarding_state 行（step 推进）
+        """upsert onboarding_state 行（v003 主入口）
 
         Args:
             project_id: 项目 ID
-            step_num:   步骤编号（1-5）
-            state_data: 完整的 state_json dict（由调用方构造）
+            info_state: collecting / wtm_pending / ready
+            payload: 管家调工具暂存的信息（可选）
         """
+        if info_state not in ("collecting", "wtm_pending", "ready"):
+            raise ValueError(f"info_state 必须是 collecting/wtm_pending/ready, 收到: {info_state!r}")
+
         now = _now()
-        state_json_str = json.dumps(state_data, ensure_ascii=False)
+        payload_str = json.dumps(payload or {}, ensure_ascii=False) if payload is not None else None
+
         with get_store().connection() as conn:
             existing = conn.execute(
-                "SELECT 1 FROM onboarding_state WHERE project_id = ?",
+                "SELECT payload_json, current_step, state_json FROM onboarding_state WHERE project_id = ?",
                 (project_id,),
             ).fetchone()
+
             if existing:
+                # 增量 UPDATE
+                fields = ["info_state = ?", "last_activity_at = ?", "updated_at = ?"]
+                values: list = [info_state, now, now]
+                if payload_str is not None:
+                    fields.append("payload_json = ?")
+                    values.append(payload_str)
+                values.append(project_id)
                 conn.execute(
-                    "UPDATE onboarding_state "
-                    "SET current_step = ?, state_json = ?, updated_at = ? "
-                    "WHERE project_id = ?",
-                    (step_num, state_json_str, now, project_id),
+                    f"UPDATE onboarding_state SET {', '.join(fields)} WHERE project_id = ?",
+                    values,
                 )
             else:
                 conn.execute(
-                    "INSERT INTO onboarding_state "
-                    "(project_id, current_step, started_at, updated_at, state_json) "
-                    "VALUES (?, ?, ?, ?, ?)",
-                    (project_id, step_num, now, now, state_json_str),
+                    """
+                    INSERT INTO onboarding_state (
+                        project_id, info_state, payload_json,
+                        last_activity_at, created_at, updated_at,
+                        current_step, state_json
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        project_id, info_state, payload_str,
+                        now, now, now,
+                        0, None,
+                    ),
                 )
+
+    def set_info_state(self, project_id: str, info_state: str) -> None:
+        """仅设置 info_state（保留 payload 不变）"""
+        self.upsert_info_state(project_id, info_state, payload=None)
 
     def merge_payload(
         self,
@@ -116,52 +151,51 @@ class OnboardingRepository:
         step_num: int,
         fields: Dict[str, Any],
     ) -> Dict[str, Any]:
-        """将 fields 合并到 state_json.payload（已有字段保留，新字段追加/覆盖）
+        """将 fields 合并到 payload_json（已有字段保留，新字段追加/覆盖）
 
-        Returns:
-            merged_payload: 合并后的完整 payload
+        v003：state_json 不再使用，改为 payload_json
         """
         now = _now()
         with get_store().connection() as conn:
             row = conn.execute(
-                "SELECT state_json FROM onboarding_state WHERE project_id = ?",
+                "SELECT payload_json FROM onboarding_state WHERE project_id = ?",
                 (project_id,),
             ).fetchone()
-            if not row:
-                raise ValueError(f"onboarding state not found for project: {project_id}")
-            state_data = json.loads(row["state_json"])
-            existing_payload = state_data.get("payload", {}) or {}
+            existing_payload: Dict[str, Any] = {}
+            if row and row["payload_json"]:
+                try:
+                    existing_payload = json.loads(row["payload_json"]) or {}
+                except Exception:
+                    existing_payload = {}
             merged = {**existing_payload, **fields}
-            state_data["payload"] = merged
-            state_data["updated_at"] = now.isoformat()
-            conn.execute(
-                "UPDATE onboarding_state "
-                "SET current_step = ?, state_json = ?, updated_at = ? "
-                "WHERE project_id = ?",
-                (step_num, json.dumps(state_data, ensure_ascii=False), now, project_id),
-            )
+
+            if row:
+                conn.execute(
+                    """
+                    UPDATE onboarding_state
+                    SET payload_json = ?, current_step = ?, last_activity_at = ?, updated_at = ?
+                    WHERE project_id = ?
+                    """,
+                    (
+                        json.dumps(merged, ensure_ascii=False),
+                        step_num, now, now,
+                        project_id,
+                    ),
+                )
+            else:
+                conn.execute(
+                    """
+                    INSERT INTO onboarding_state (
+                        project_id, info_state, payload_json,
+                        last_activity_at, created_at, updated_at,
+                        current_step, state_json
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        project_id, "collecting",
+                        json.dumps(merged, ensure_ascii=False),
+                        now, now, now,
+                        step_num, None,
+                    ),
+                )
         return merged
-
-    def update_project_name(self, project_id: str, new_name: str) -> None:
-        """将自动生成的项目名写入 state_json.project_name
-
-        注意：projects.name 由 ProjectRepository.update_name() 负责，这里只写 state_json。
-        """
-        now = _now()
-        with get_store().connection() as conn:
-            row = conn.execute(
-                "SELECT state_json FROM onboarding_state WHERE project_id = ?",
-                (project_id,),
-            ).fetchone()
-            if not row:
-                return
-            state_data = json.loads(row["state_json"])
-            state_data["project_name"] = new_name
-            state_data["updated_at"] = now.isoformat()
-            conn.execute(
-                "UPDATE onboarding_state "
-                "SET state_json = ?, updated_at = ? "
-                "WHERE project_id = ?",
-                (json.dumps(state_data, ensure_ascii=False), now, project_id),
-            )
-
