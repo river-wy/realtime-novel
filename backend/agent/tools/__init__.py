@@ -14,6 +14,7 @@
 - delegation_tools:   delegate_to_agent / dispatch_background_task  ← v0.6.2 新增
 - summarize_chapter_tool: summarize_chapter                       ← v0.6.2 新增
 - exploration_tools:  update_exploration_level                     ← v0.6.2 新增
+- volume_tools:       generate_volume_summary                      ← v0.9.5 新增
 """
 # 触发工具注册（side-effect import）—— 顺序不重要，注册到全局 _tools dict
 from backend.agent.tools import (
@@ -26,6 +27,7 @@ from backend.agent.tools import (
     delegation_tools,   # v0.6.2: 专家委托工具（同步 + 异步）
     summarize_chapter_tool,  # v0.6.2: 章节 summary 抽取工具
     exploration_tools,  # v0.6.2: 探索度调整工具
+    volume_tools,       # v0.9.5: 卷总结生成工具
 )
 from backend.agent.tools.base import (
     BaseTool, ToolError, register_tool, get_tool, list_tools, reset_tools,

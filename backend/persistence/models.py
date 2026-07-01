@@ -94,6 +94,16 @@ class SubplotStatus(str, Enum):
     ABANDONED = "abandoned"
 
 
+class VolumeStatus(str, Enum):
+    """v004 新增：卷状态（欧尼酱 20:16 拍板）
+
+    in_progress: 卷进行中（默认）
+    completed:   卷已完结（summary 必填）
+    """
+    IN_PROGRESS = "in_progress"
+    COMPLETED = "completed"
+
+
 class SubplotPriority(str, Enum):
     MAIN = "main"
     SIDE = "side"
@@ -285,13 +295,20 @@ class CharacterRelationshipRow(BaseModel):
 # ============ 卷 / 主线 / 支线 ============
 
 class VolumeRow(BaseModel):
-    """卷（1:n）"""
+    """卷（1:n）
+
+    v004 增强（欧尼酱 20:16 拍板）：
+    - status: 卷是否已完结（in_progress / completed）
+    - summary: 整卷 1000 字总结，卷完结时由 generate_volume_summary 写入
+    """
     id: str
     project_id: str
     volume_num: int
     title: str
     description: Optional[str] = None
     planned_chapter_count: Optional[int] = None
+    status: VolumeStatus = VolumeStatus.IN_PROGRESS
+    summary: Optional[str] = None
     updated_at: datetime
 
 

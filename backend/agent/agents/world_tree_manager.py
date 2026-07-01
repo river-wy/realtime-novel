@@ -207,6 +207,170 @@ class WorldTreeManager:
         from backend.persistence import ProjectRepository
         return ProjectRepository().add_seed(project_id, data)
 
+    # ============ v004: volume 总结 + 完结（欧尼酱 20:16 拍板）============
+    # 背景：之前卷没有 status/summary 字段，_format_chapter_summaries_by_volume
+    #       拿不到卷状态。现在加 generate_volume_summary (1000字) + complete_volume
+    # 设计：WTM 是结构层 agent（卷、主线都是结构层），卷总结由 WTM 负责
+    async def generate_volume_summary(
+        self,
+        project_id: str,
+        volume_id: str,
+        max_iterations: int = 8,
+    ) -> str:
+        """生成卷总结（1000字左右）
+
+        Args:
+            project_id: 项目 ID
+            volume_id:   卷 ID
+            max_iterations: ReAct loop 迭代上限
+
+        Returns:
+            卷总结文本（~1000 字）
+
+        流程：
+        1. 拉卷信息（volume_num / title / description / planned_chapter_count）
+        2. 拉该卷下所有章节 summary
+        3. 走 executor.execute() ReAct loop，WTM LLM 自主调 load_project / read_chapter
+        4. 调 LLM 生成 1000 字总结
+        5. 回写 VolumeRow.summary
+        """
+        from backend.persistence import ProjectRepository
+        from backend.agent.prompts.agent_prompt_factory import (
+            build_project_context_message,
+        )
+        from backend.agent.prompts import _VOLUME_SUMMARY_PROMPT  # 专用 prompt
+        from backend.adapters import get_default_adapter
+        from backend.adapters.types import LLMRequest, ModelRole
+        import json as _json
+
+        repo = ProjectRepository()
+
+        # 1. 验证卷存在
+        vol = repo.get_volume(project_id, volume_id)
+        if not vol:
+            raise ValueError(f"volume 不存在: {project_id}/{volume_id}")
+
+        # 2. 拉该卷下所有章节（按 chapter_num 升序）
+        from backend.persistence import ChapterRepository
+        chap_repo = ChapterRepository()
+        all_chapters = chap_repo.list_by_project(project_id, limit=500)
+        vol_chapters = [
+            ch for ch in all_chapters if getattr(ch, "volume_id", None) == volume_id
+        ]
+        vol_chapters.sort(key=lambda c: c.chapter_num)
+
+        self.log.info(
+            "WTM.generate_volume_summary START: project_id=%s, volume_id=%s, "
+            "vol_num=%d, chapters=%d",
+            project_id, volume_id, vol.volume_num, len(vol_chapters),
+        )
+
+        # 3. 拼上下文：卷信息 + 章节 summary 列表
+        chap_summaries_text = "\n".join(
+            f"第{ch.chapter_num}章 {getattr(ch, 'title', '') or ''}: "
+            f"{getattr(ch, 'summary', '') or ''}".rstrip()
+            for ch in vol_chapters
+        )
+        user_message = f"""请为《{vol.title}》（第 {vol.volume_num} 卷）生成 ~1000 字总结。
+
+【卷描述】
+{getattr(vol, 'description', '') or '（无）'}
+
+【本卷所有章节 summary】（共 {len(vol_chapters)} 章）
+{chap_summaries_text or '（无章节）'}
+
+【输出要求】
+- 1000 字左右（允许 800-1200 字）
+- 从剧情、主线发展、角色弧线、伏笔、新引入元素几个维度总结
+- 重点突出「本卷完结后的状态」，为下一卷衔接做准备
+- 不需要列章节列表（已有上面 summary 了）
+- 不需要 markdown 标题，正文连贯描述即可
+"""
+
+        # 4. 调 LLM 直接生成（不走 ReAct loop，不需要工具）
+        llm = get_default_adapter()
+        resp = await llm.complete(LLMRequest(
+            messages=[
+                {"role": "system", "content": _VOLUME_SUMMARY_PROMPT},
+                {"role": "user", "content": user_message},
+            ],
+            max_tokens=2000,  # 1000 中文字 ~ 1500 tokens
+            temperature=0.4,
+            role=ModelRole.TEXT,
+        ))
+
+        summary_text = (resp.content or "").strip()
+
+        # 5. 回写 VolumeRow.summary（不修改 status，summary 可以在卷未完结时就生成）
+        repo.update_volume(project_id, volume_id, {"summary": summary_text})
+
+        self.log.info(
+            "WTM.generate_volume_summary DONE: project_id=%s, volume_id=%s, "
+            "summary_len=%d",
+            project_id, volume_id, len(summary_text),
+        )
+
+        return summary_text
+
+    async def complete_volume(
+        self,
+        project_id: str,
+        volume_id: str,
+        auto_generate_summary: bool = True,
+        max_iterations: int = 8,
+    ) -> Dict[str, Any]:
+        """完结卷（v004）
+
+        Args:
+            project_id: 项目 ID
+            volume_id:   卷 ID
+            auto_generate_summary: True=自动生成 summary 再完结；False=只改 status
+            max_iterations: generate_volume_summary 的迭代上限
+
+        Returns:
+            {"volume_id": ..., "summary": ..., "summary_len": ..., "status": "completed"}
+
+        流程：
+        1. 如果 auto_generate_summary=True 且 volume.summary 为空 → 先 generate_volume_summary
+        2. update_volume({status: "completed"})
+        """
+        from backend.persistence import ProjectRepository
+
+        repo = ProjectRepository()
+        vol = repo.get_volume(project_id, volume_id)
+        if not vol:
+            raise ValueError(f"volume 不存在: {project_id}/{volume_id}")
+
+        summary_text = getattr(vol, "summary", None)
+
+        # 自动生成 summary
+        if auto_generate_summary and not summary_text:
+            summary_text = await self.generate_volume_summary(
+                project_id=project_id,
+                volume_id=volume_id,
+                max_iterations=max_iterations,
+            )
+            # 重新读（generate 已回写）
+            vol = repo.get_volume(project_id, volume_id)
+            summary_text = getattr(vol, "summary", None)
+
+        # 改 status = completed
+        repo.update_volume(project_id, volume_id, {"status": "completed"})
+
+        self.log.info(
+            "WTM.complete_volume DONE: project_id=%s, volume_id=%s, "
+            "auto_generate_summary=%s, summary_len=%d",
+            project_id, volume_id, auto_generate_summary, len(summary_text or ""),
+        )
+
+        return {
+            "volume_id": volume_id,
+            "summary": summary_text,
+            "summary_len": len(summary_text or ""),
+            "status": "completed",
+        }
+
+
     async def analyze_intervention(
         self,
         project_id: str,

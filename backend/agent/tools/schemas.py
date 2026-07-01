@@ -92,6 +92,34 @@ class SummarizeChapterOutput(BaseModel):
     method: str = Field(default="sentinel", description="sentinel / fallback_truncate / llm_fallback")
 
 
+# ============ 卷总结工具（v0.9.5）============
+
+class GenerateVolumeSummaryInput(BaseModel):
+    """卷总结工具输入
+
+    v0.9.5 欧尼酱 20:30 拍板：给文笔家
+    - 章节写完时，文笔家 LLM 调本工具生成卷的 1000 字总结
+    - volume_id 必填（文笔家应从上下文拿）
+    - auto_complete_volume=False：只生成 summary，保留 status=in_progress
+    - auto_complete_volume=True：生成 summary + 改 status=completed（**双向走热路径**）
+    """
+    project_id: str = Field(..., min_length=1)
+    volume_id: str = Field(..., min_length=1)
+    auto_complete_volume: bool = Field(
+        default=False,
+        description="是否同时完结卷（仅在本卷所有章节都生成完时为 True）",
+    )
+
+
+class GenerateVolumeSummaryOutput(BaseModel):
+    """卷总结工具输出"""
+    volume_id: str = Field(..., description="卷 ID")
+    summary: str = Field(..., description="1000 字总结（800-1200 字）")
+    summary_len: int = Field(..., description="总结字数")
+    auto_completed: bool = Field(default=False, description="是否同时完结了卷")
+    status: str = Field(default="in_progress", description="卷最终状态")
+
+
 # ============ Base Edit 工具（6 件基座）============
 
 class UpdateBaseInput(BaseModel):

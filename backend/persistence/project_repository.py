@@ -335,7 +335,8 @@ class ProjectRepository:
     def update_volume(self, project_id: str, volume_id: str, data: Dict[str, Any]) -> None:
         fields = []
         values = []
-        for key in ("volume_num", "title", "description", "planned_chapter_count"):
+        # v004 增强：允许更新 status / summary（欧尼酱 20:16）
+        for key in ("volume_num", "title", "description", "planned_chapter_count", "status", "summary"):
             if key in data:
                 fields.append(f"{key} = ?")
                 values.append(data[key])

@@ -56,6 +56,7 @@ AGENT_TOOLS: Dict[str, List[str]] = {
         "read_chapter",
         "generate_chapter",       # v0.6.2 新增：纯落盘（写文件 + 入 DB）
         "summarize_chapter",      # v0.6.2 新增：抽 1 句话 summary
+        "generate_volume_summary",  # v0.9.5 新增：生成卷 1000 字总结
     ],
     # ── 世界树管理（可调多 tool 自主推演）──────────────
     "world_tree_manager": [
