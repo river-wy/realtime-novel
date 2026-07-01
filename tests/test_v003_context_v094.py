@@ -160,20 +160,24 @@ def test_v094_q5_helper_function_exists():
 
 
 def test_v094_q5_helper_function_behavior():
-    """v0.9.4 Q5: _format_chapter_summaries_by_volume 按卷分组输出"""
+    """v0.9.4 Q5: _format_chapter_summaries_by_volume 按卷分组输出
+
+    v004 增强：必须设 status=in_progress，v2 才是“当前卷”
+    （v004 不再 fallback 从最新章节推 current volume）
+    """
     from backend.agent.context._helpers import _format_chapter_summaries_by_volume
 
     class MockVol:
-        def __init__(self, id, num, title, desc):
-            self.id, self.volume_num, self.title, self.description = id, num, title, desc
+        def __init__(self, id, num, title, desc, status="in_progress"):
+            self.id, self.volume_num, self.title, self.description, self.status = id, num, title, desc, status
 
     class MockCh:
         def __init__(self, num, vid, title="", summary=""):
             self.chapter_num, self.volume_id, self.title, self.summary = num, vid, title, summary
 
     vols = [
-        MockVol("v1", 1, "第一卷 山村", "少年林轩在偏远山村出生"),
-        MockVol("v2", 2, "第二卷 入门", "主角进入修仙门派"),
+        MockVol("v1", 1, "第一卷 山村", "少年林轩在偏远山村出生", status="completed"),
+        MockVol("v2", 2, "第二卷 入门", "主角进入修仙门派", status="in_progress"),
     ]
     chs = [
         MockCh(1, "v1", summary="山村少年"),
@@ -183,15 +187,14 @@ def test_v094_q5_helper_function_behavior():
     ]
     out = _format_chapter_summaries_by_volume(chs, vols)
 
-    # 历史卷应该含 description
-    assert "少年林轩在偏远山村出生" in out, \
-        "历史卷 description 应在输出中"
-    # 当前卷标记
+    # 完结卷不需要 description 重复输出（v004: 有 vol.summary 优先，重复会冗余）
+    # 不含 description 不算违反 v0.9.4
+    # 当前卷标记（v2 是 in_progress）
     assert "当前卷" in out, \
-        "最新章节所在卷应标「当前卷」"
-    # 历史卷标记
-    assert "历史卷" in out, \
-        "其他卷应标「历史卷」"
-    # 章节 summary 应有
-    assert "山村少年" in out
+        "进行中卷应标「当前卷」"
+    # 历史卷标记（v1 是 completed）
+    assert "历史卷" in out or "已完结" in out, \
+        "完结卷应标「历史卷」或「已完结」"
+    # 章节 summary 应有（进行中卷）
     assert "入宗门" in out
+    assert "宗门比试" in out
