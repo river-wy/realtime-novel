@@ -27,6 +27,7 @@ from backend.agent.context._helpers import (
     _format_world_tree_compact,
     _format_chapter_summaries_graded,
     _format_chapter_summaries_short,
+    _format_chapter_summaries_by_volume,  # v0.9.4 漏 import，欧尼酱 20:39 指出
     _format_main_plot,
     _format_sub_plot,
     _format_characters,
@@ -405,22 +406,18 @@ def _format_base_summary(project_data: Dict[str, Any]) -> str:
     """格式化基座摘要（world_tree + genre_tags），定调用
 
     完整 7 件走 context message，这里只放精简定调信息。
+
+    v0.9.6 修：去重 _format_world_tree_compact 内部已含 genre_tags（"题材: ..."），
+    这里不再重复追加【题材】段。
     """
     parts: List[str] = []
 
-    # world_tree 摘要
+    # world_tree 摘要（_format_world_tree_compact 内部已含 故事核心 + 题材 + 硬约束清单）
     wt = project_data.get("world_tree", {})
     wt_str = _format_world_tree_compact(wt)
     parts.append("【世界树定调】")
     parts.append(wt_str)
     parts.append("")
-
-    # v003: genre_tags 改读 world_tree.genre_tags_json（不再有 genre_resonance 表）
-    genre_tags = wt.get("genre_tags", []) or []
-    if genre_tags:
-        parts.append("【题材】")
-        parts.append("  " + "、".join(str(a) for a in genre_tags))
-        parts.append("")
 
     return "\n".join(parts)
 

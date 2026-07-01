@@ -581,14 +581,15 @@ def _format_chapter_summaries_by_volume(chapters: list, volumes: list) -> str:
                     else:
                         lines.append(f"  - 第{ch.chapter_num}章: {ch.summary}".rstrip())
         elif is_completed:
-            # 完结卷：优先用 volume.summary（1000 字总结足够）
-            # 如果有 summary，不重复列章节 summary（避免重复）
+            # 完结卷：只保留 vol.summary，不列章节（v0.9.6 拍板：欧尼酱 21:24）
+            # 设计：vol.summary (1000字) 已足够描述整卷全部内容
+            #       章节 detail 在 vol.summary 里都已涵盖，不需要再列
             if vol:
                 lines.append(f"【历史卷 {vol.volume_num}：{vol.title}】（已完结）")
                 if vol_summary:
                     lines.append(f"  总结: {vol_summary}")
                 else:
-                    # fallback：没 summary 时用 description + 章节
+                    # fallback：没 vol_summary 时用 description + 章节列表
                     vol_desc = getattr(vol, "description", "") or ""
                     if vol_desc:
                         lines.append(f"  {vol_desc}")

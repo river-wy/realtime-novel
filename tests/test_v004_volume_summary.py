@@ -177,6 +177,7 @@ def test_v004_format_completed_no_chapter_duplicate():
 
     背景：vol.summary 1000 字足够表述整卷，不需再重复列章节 summary
     （避免冗余浪费 token）
+    v0.9.6 拍板：只保留「已完结卷的 summary」+「当前卷的每个章节 summary」
     """
     from backend.agent.context._helpers import _format_chapter_summaries_by_volume
 
@@ -192,7 +193,7 @@ def test_v004_format_completed_no_chapter_duplicate():
     out = _format_chapter_summaries_by_volume(chs, vols)
     # 有 vol.summary 时不应该重复列章节 summary
     assert "1000字总结内容" in out
-    assert "章1 summary" not in out, "有 vol.summary 时不应重复列章节 summary"
+    assert "章1 summary" not in out, "v0.9.6 拍板：完结卷有 vol.summary 时不列章节"
 
 
 def test_v004_format_completed_fallback_no_summary():

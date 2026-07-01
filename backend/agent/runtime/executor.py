@@ -268,19 +268,25 @@ class AgentExecutor:
             from backend.agent.runtime.session_cache import get_session_cache_manager
             cache_mgr = get_session_cache_manager()
 
-            # 解析 session_key → user_id / conv_id / agent_name
+            # 解析 session_key → user_id / conv_id
+            # v0.9.6 欧尼酱指出脆弱性：make_key 是 3 段（user_id:conv_id:agent_name），
+            # 本解析只取前 2 段，agent_name 独立从 agent.agent_name 传。
+            # 当前 writer 路径能对上（conv_id="novel_writer"），但 key 格式变更会静默错位。
+            # 未来重构：execute() 签名加 (user_id, conversation_id, agent_name) 三参。
             _parts = session_key.split(":")
             _user_id = _parts[0] if len(_parts) > 0 else "default"
             _conv_id = _parts[1] if len(_parts) > 1 else ""
 
             # 先用轻量 TTL 检查判断是否命中，cache HIT 时跳过 system_prompt 组装
             if cache_mgr.has_valid_cache(_user_id, _conv_id, agent.agent_name):
-                # ── cache HIT：直接复用，跳过 _build_system_prompt ──
-                # 不做 sys_prompt hash 校验，避免为此重新组装 prompt
-                session_cache_obj = cache_mgr.get_without_prompt_check(
+                # ── cache HIT：复用 + 校验 sys_prompt hash（v0.9.6 欧尼酱指出）──────────
+                # v0.9.6 修：不绕过 hash 校验——改 style_pack 时 sys_prompt 会变
+                #             hash 变化 → patch_sys_prompt 原地替换 messages[0]
+                session_cache_obj = cache_mgr.get(
                     user_id=_user_id,
                     conversation_id=_conv_id,
                     agent_name=agent.agent_name,
+                    sys_prompt=agent.system_prompt,  # v0.9.6 加上：hash 校验依赖
                 )
                 if session_cache_obj is not None:
                     self.log.info(

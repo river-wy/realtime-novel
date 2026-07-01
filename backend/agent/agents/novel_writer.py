@@ -323,12 +323,14 @@ async def delegate_chapter_generation(
                 project_id, result.chapter_num, validation.summary,
             )
             # retry：把 issues 注入 user_message，让文笔家重写
+            # v0.9.6: session_key 加 chapter_num 隔离（避免多章 retry 累积在同一 cache）
             retry_result = await _retry_chapter_generation(
                 project_id=project_id,
                 source=source,
                 intervention=intervention,
                 extra_context=extra_context,
                 validation_issues=validation.issues,
+                chapter_num=result.chapter_num,  # v0.9.6 新增
             )
             if retry_result.chapter_content:
                 result = retry_result
@@ -364,11 +366,16 @@ async def _retry_chapter_generation(
     intervention: Optional[str],
     extra_context: Optional[str],
     validation_issues: list,
+    chapter_num: Optional[int] = None,  # v0.9.6 新增：用于 session_key 隔离
 ) -> ChapterOutput:
     """Validator BLOCKED 时 retry 一次
 
     把 issues 注入 user_message，让文笔家重写
+
+    v0.9.6: session_key 加 chapter_num（多章 retry 互不污染）
     """
+    # v0.9.6: 用 chapter_num 隔离 retry cache（避免不同章 retry 累积在同一 cache）
+    chapter_suffix = f":retry:ch{chapter_num}" if chapter_num else ":retry"
     issues_text = "\n".join(
         f"- [{i.severity.value}] {i.table}.{i.field}: {i.description}（建议: {i.suggested_fix or '无'}）"
         for i in validation_issues
@@ -389,6 +396,15 @@ async def _retry_chapter_generation(
     )
     from backend.agent.runtime.executor import AgentConfig
 
+    # v0.9.6: retry 路径也调完整性校验（防上 retry 期间基座被并发删）
+    validation_error = _validate_world_tree_completeness(project_id)
+    if validation_error:
+        _retry_chapter_generation.log.error(
+            "_retry_chapter_generation BLOCKED by completeness: project_id=%s, reason=%s",
+            project_id, validation_error,
+        )
+        return ChapterOutput(error=f"基座完整性校验失败，无法 retry 章节：{validation_error}")
+
     system_prompt = build_writer_system_prompt(project_id)
     context_message = build_project_context_message(project_id, "novel_writer")
 
@@ -402,7 +418,7 @@ async def _retry_chapter_generation(
         user_message=retry_user_msg,
         project_id=project_id,
         context_message=context_message,
-        session_key=f"{project_id}:novel_writer:retry",
+        session_key=f"{project_id}:novel_writer{chapter_suffix}",
         max_iterations=15,
     )
 
