@@ -558,14 +558,20 @@ def build_worldtree_system_prompt(
 
 
 def build_project_context_message(project_id: str, agent_name: str) -> str:
-    """组装项目上下文 message（世界树基座完整数据 + 章节摘要）
+    """组装项目上下文 message（v0.9.4 重构）
+
+    设计原则（v0.9.4 欧尼酱拍板）：
+    1. 【Q1】不在 context 重复 world_tree / style_pack（完整信息已在 sys_prompt）
+    2. 【Q2】main_plot / sub_plot 只写未完成（status != completed）
+    3. 【Q3】characters 全量写入（未来支持重要等级/活跃度多级过滤，当前上限 16）
+    4. 【Q4】seeds 只写未了结（status not in harvested/abandoned）
+    5. 【Q5】detailed_summary 字段已删 → 改用「历史卷维度 description」+「当前卷下所有章节 summary」
 
     作为独立 user message 注入 messages 列表，不进 system_prompt。
-    完整 世界树基座 + 章节摘要（分级/简短，按 agent 类型选）。
 
     Args:
         project_id: 项目 ID
-        agent_name: agent 名称（novel_writer 用分级摘要，world_tree_manager 用简短摘要）
+        agent_name: agent 名称（当前所有 agent 都用同一套结构）
 
     Returns:
         context message 文本
@@ -579,33 +585,23 @@ def build_project_context_message(project_id: str, agent_name: str) -> str:
         )
         return f"【项目上下文】\n（基座加载失败: {e}）"
 
-    chapters = project_data.get("chapters", [])
+    chapters = project_data.get("chapters", []) or []
+    volumes = project_data.get("volumes", []) or []
 
     parts: List[str] = []
-    parts.append("【项目上下文】以下是当前项目的完整 世界树基座 + 章节摘要，请基于这些数据工作。")
+    parts.append("【项目上下文】v0.9.4 重构：世界树/笔风完整信息已在 system_prompt，这里只补全运行时数据。")
     parts.append("")
 
-    # 1. world_tree
-    wt = project_data.get("world_tree", {})
-    parts.append("── 1. world_tree（世界树）──")
-    parts.append(_format_world_tree_compact(wt))
-    parts.append("")
+    # v0.9.4 【Q1】删 world_tree 段（sys_prompt 已有定调）
+    # v0.9.4 【Q1】删 style_pack 段（sys_prompt 已有完整笔风）
+    # （_format_world_tree_compact / _get_project_style_pack_id 不再调用）
 
-    # 2. style_pack（笔风 id + 名称，完整笔风在 system_prompt 里）
-    pack_id = _get_project_style_pack_id(project_id)
-    pack = get_style_pack_or_default(pack_id)
-    parts.append("── 2. style_pack（写作笔风）──")
-    parts.append(f"  id: {pack['id']}")
-    parts.append(f"  名称: {pack['name']}")
-    parts.append(f"  标语: {pack['tagline']}")
-    parts.append("")
-
-    # v003: 字段直读 list（list_main_plot_nodes / list_subplots / list_characters / list_seeds 返回 list of Row）
-    # 3. main_plot（1:n 节点列表）
+    # v0.9.4 【Q2】main_plot 只写未完成（status != completed）
     main_plot_nodes = project_data.get("main_plot", []) or []
-    parts.append("── 3. main_plot（主线节点）──")
-    if main_plot_nodes:
-        for n in main_plot_nodes[:10]:
+    pending_main_plot = [n for n in main_plot_nodes if str(getattr(n, "status", "")) != "completed"]
+    parts.append("── 1. main_plot（未完成的主线节点）──")
+    if pending_main_plot:
+        for n in pending_main_plot[:10]:
             title = getattr(n, "title", "")
             desc = getattr(n, "description", "")
             status = getattr(n, "status", "")
@@ -619,11 +615,12 @@ def build_project_context_message(project_id: str, agent_name: str) -> str:
         parts.append("  （空）")
     parts.append("")
 
-    # 4. sub_plot
+    # v0.9.4 【Q2】sub_plot 只写未完成（status not in completed/abandoned）
     sub_plots = project_data.get("sub_plot", []) or []
-    parts.append("── 4. sub_plot（支线）──")
-    if sub_plots:
-        for s in sub_plots[:8]:
+    active_sub_plot = [s for s in sub_plots if str(getattr(s, "status", "")) not in ("completed", "abandoned")]
+    parts.append("── 2. sub_plot（未完成的支线）──")
+    if active_sub_plot:
+        for s in active_sub_plot[:8]:
             title = getattr(s, "title", "")
             desc = getattr(s, "description", "")
             status = getattr(s, "status", "")
@@ -637,11 +634,11 @@ def build_project_context_message(project_id: str, agent_name: str) -> str:
         parts.append("  （空）")
     parts.append("")
 
-    # 5. characters
+    # v0.9.4 【Q3】characters 全量写入（上限 16，未来支持重要等级/活跃度多级过滤）
     characters = project_data.get("characters", []) or []
-    parts.append("── 5. characters（角色）──")
+    parts.append(f"── 3. characters（全量，最多 16）──")
     if characters:
-        for c in characters[:8]:
+        for c in characters[:16]:
             name = getattr(c, "name", "")
             role = getattr(c, "role", "")
             background = getattr(c, "background", "")
@@ -655,11 +652,12 @@ def build_project_context_message(project_id: str, agent_name: str) -> str:
         parts.append("  （空）")
     parts.append("")
 
-    # 6. seeds
+    # v0.9.4 【Q4】seeds 只写未了结（status not in harvested/abandoned）
     seeds = project_data.get("seeds", []) or []
-    parts.append("── 6. seeds（伏笔）──")
-    if seeds:
-        for s in seeds[:8]:
+    open_seeds = [s for s in seeds if str(getattr(s, "status", "")) not in ("harvested", "abandoned")]
+    parts.append("── 4. seeds（未了结的伏笔）──")
+    if open_seeds:
+        for s in open_seeds[:8]:
             name = getattr(s, "name", "")
             content = getattr(s, "content", "")
             status = getattr(s, "status", "")
@@ -673,12 +671,9 @@ def build_project_context_message(project_id: str, agent_name: str) -> str:
         parts.append("  （空）")
     parts.append("")
 
-    # 章节摘要
-    parts.append("── 章节摘要 ──")
-    if agent_name == "novel_writer":
-        parts.append(_format_chapter_summaries_graded(chapters))
-    else:
-        parts.append(_format_chapter_summaries_short(chapters))
+    # v0.9.4 【Q5】detailed_summary 字段已删 → 改用「历史卷维度 description」+「当前卷下所有章节 summary」
+    parts.append("── 5. 章节摘要（历史卷 + 当前卷）──")
+    parts.append(_format_chapter_summaries_by_volume(chapters, volumes))
 
     return "\n".join(parts)
 

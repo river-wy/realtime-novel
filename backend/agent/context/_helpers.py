@@ -495,3 +495,73 @@ async def load_chat_history(
         logging.warning(f"load_chat_history: session 加载失败: {e}", exc_info=True)
 
     return result
+
+
+# v0.9.4 新增：detailed_summary 字段已删 → 改用「历史卷维度 description」+「当前卷下所有章节 summary」
+def _format_chapter_summaries_by_volume(chapters: list, volumes: list) -> str:
+    """按卷维度组织章节摘要（v0.9.4 欧尼酱拍板）
+
+    设计：
+    - 当前卷 = 最新章节的 volume_id
+    - 历史卷 = volume_id != 当前卷 的章节，按卷聚合（卷 description + 卷内章节 summary）
+    - 当前卷 = 列出该卷下所有章节 summary
+
+    节省 token 的同时保留关键信息：
+    - 历史卷 1 句描述（VolumeRow.description）+ 卷内章节 1 句 summary
+    - 当前卷所有章节 1 句 summary（最近上下文）
+    """
+    if not chapters:
+        return "（暂无章节）"
+
+    # 1. 找当前卷 = 最新章节的 volume_id
+    sorted_chs = sorted(chapters, key=lambda c: c.chapter_num, reverse=True)
+    current_volume_id = None
+    for ch in sorted_chs:
+        if getattr(ch, "volume_id", None):
+            current_volume_id = ch.volume_id
+            break
+
+    # 2. 按 volume_id 分组章节
+    by_volume: Dict[str, list] = {}
+    for ch in chapters:
+        vid = getattr(ch, "volume_id", None) or "__no_volume__"
+        by_volume.setdefault(vid, []).append(ch)
+
+    # 3. volume_id → VolumeRow 映射
+    vol_map: Dict[str, Any] = {v.id: v for v in (volumes or []) if getattr(v, "id", None)}
+
+    # 4. 按 volume_num 升序输出
+    sorted_volumes = sorted(
+        by_volume.keys(),
+        key=lambda v: (vol_map[v].volume_num if v in vol_map else 9999, v),
+    )
+
+    lines = []
+    for vid in sorted_volumes:
+        vol_chapters = sorted(by_volume[vid], key=lambda c: c.chapter_num)
+        vol = vol_map.get(vid)
+        is_current = (vid == current_volume_id)
+
+        if is_current:
+            # 当前卷：列出所有章节
+            if vol:
+                lines.append(f"【当前卷：{vol.title}】")
+            else:
+                lines.append("【当前卷】")
+            for ch in vol_chapters:
+                if getattr(ch, "summary", None):
+                    title = getattr(ch, "title", "") or ""
+                    lines.append(f"  - 第{ch.chapter_num}章 {title}: {ch.summary}".rstrip())
+        else:
+            # 历史卷：卷 description + 章节列表
+            if vol:
+                vol_desc = getattr(vol, "description", "") or ""
+                lines.append(f"【历史卷 {vol.volume_num}：{vol.title}】{vol_desc}")
+            else:
+                lines.append("【历史卷】")
+            for ch in vol_chapters:
+                if getattr(ch, "summary", None):
+                    lines.append(f"  - 第{ch.chapter_num}章: {ch.summary}")
+            lines.append("")  # 历史卷之间空行分隔
+
+    return "\n".join(lines) if lines else "（暂无章节）"
