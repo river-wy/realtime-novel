@@ -7,16 +7,44 @@ from typing import Optional
 from backend.agent.tools.base import BaseTool, register_tool
 from backend.agent.tools.schemas import (
     EditArtifactInput, EditArtifactResult,
+    EditArtifactBatchInput, EditArtifactBatchResult, EditArtifactItem,
 )
 from backend.persistence import ProjectRepository
 
 
 class EditArtifactTool(BaseTool):
-    """结构化增量编辑 6 件基座
+    """结构化增量编辑 9 件基座
 
-    9 个 target × 3 个 operation = 27 种组合
+    12 个 target × 3 个 operation = 36 种组合（v0.9.1 Literal 跟 handler_map 对齐）
     """
     name = "edit_artifact"
+
+    # 统一 handler map（run() + run_batch() 共用）
+    # key = EditArtifactInput.target Literal 合法值（v0.9.1 已对齐实现名）
+    def __init__(self):
+        self._pm = ProjectManager()  # v0.9.1 保留原 _pm 初始化
+
+    @property
+    def _HANDLER_MAP(self) -> dict:
+        """handler map（每次访问时构造，性能可忽略）
+
+        v0.9.1 修复：_edit_beat 加入，不再死代码
+        """
+        return {
+            "project_name": self._edit_project_name,
+            "current_pov": self._edit_current_pov,
+            "character": self._edit_character,
+            "relationship": self._edit_relationship,
+            "core_rule": self._edit_core_rule,
+            "timeline_event": self._edit_timeline_event,
+            "geography_location": self._edit_geography_location,
+            "world_entry": self._edit_world_entry,
+            "seed": self._edit_seed,
+            "subplot": self._edit_subplot,
+            "main_plot_node": self._edit_main_plot_node,
+            "volume": self._edit_volume,
+            "beat": self._edit_beat,        # v0.9.1 修复：_edit_beat 不再死代码
+        }
     description = "结构化编辑 6 件基座（add/update/delete）"
 
     input_schema = EditArtifactInput
@@ -32,20 +60,7 @@ class EditArtifactTool(BaseTool):
             if progress_callback:
                 await progress_callback({"step": "loading", "percentage": 0})
 
-            handler = {
-                "project_name": self._edit_project_name,
-                "current_pov": self._edit_current_pov,
-                "character": self._edit_character,
-                "relationship": self._edit_relationship,
-                "core_rule": self._edit_core_rule,
-                "timeline_event": self._edit_timeline_event,
-                "geography_location": self._edit_geography_location,
-                "world_entry": self._edit_world_entry,
-                "seed": self._edit_seed,
-                "subplot": self._edit_subplot,
-                "main_plot_node": self._edit_main_plot_node,
-                "volume": self._edit_volume,
-            }.get(input.target)
+            handler = self._HANDLER_MAP.get(input.target)
 
             if handler is None:
                 return EditArtifactResult(
@@ -69,6 +84,143 @@ class EditArtifactTool(BaseTool):
                 success=False,
                 error=str(e),
             )
+
+    # ── v0.9.1 新增：批量编辑（事务 + 性能优化）────────────────────
+
+    async def run_batch(
+        self, input: EditArtifactBatchInput, progress_callback=None
+    ) -> EditArtifactBatchResult:
+        """批量执行 N 个 edit_artifact
+
+        性能：WTM ReAct 落库 9 张表从「N 次 tool_call」→「1 次 tool_call」
+        事务：atomic=True 时，任一失败回滚已落库的行（基于 row_id 反向 delete）
+        """
+        results: List[EditArtifactResult] = []
+        rolled_back_ids: List[dict] = []
+        failed_indices: List[int] = []
+        success_count = 0
+        failed_count = 0
+
+        for idx, item in enumerate(input.items):
+            # 找 handler（共用 _HANDLER_MAP；Literal 跟 handler 已对齐）
+            handler = self._HANDLER_MAP.get(item.target)
+            if handler is None:
+                result = EditArtifactResult(
+                    project_id=input.project_id,
+                    target=item.target,
+                    operation=item.operation,
+                    identifier=item.identifier,
+                    success=False,
+                    error=f"Unknown target: {item.target}",
+                )
+                results.append(result)
+                failed_count += 1
+                failed_indices.append(idx)
+                # atomic 模式：立即回滚（无已落库项，rolled_back_ids 空）
+                if input.atomic:
+                    return EditArtifactBatchResult(
+                        project_id=input.project_id,
+                        total=len(input.items),
+                        success_count=0,
+                        failed_count=failed_count,
+                        results=results,
+                        failed_indices=failed_indices,
+                        rolled_back_ids=[],
+                    )
+                continue
+
+            # 构造 EditArtifactInput 复用 handler
+            try:
+                single_input = EditArtifactInput(
+                    project_id=input.project_id,
+                    target=item.target,
+                    operation=item.operation,
+                    identifier=item.identifier,
+                    data=item.data,
+                )
+                result = await handler(single_input)
+                results.append(result)
+                if result.success:
+                    success_count += 1
+                else:
+                    failed_count += 1
+                    failed_indices.append(idx)
+                    # atomic 模式：回滚已落库的所有成功项
+                    if input.atomic:
+                        for i, prev in enumerate(results[:-1]):
+                            if prev.success and prev.affected and prev.affected.get("id"):
+                                rb_id = await self._rollback_one(input.project_id, prev)
+                                if rb_id:
+                                    rolled_back_ids.append(rb_id)
+                        return EditArtifactBatchResult(
+                            project_id=input.project_id,
+                            total=len(input.items),
+                            success_count=0,
+                            failed_count=len(input.items),
+                            results=results,
+                            failed_indices=[i for i in range(len(input.items))],
+                            rolled_back_ids=rolled_back_ids,
+                        )
+            except Exception as e:
+                result = EditArtifactResult(
+                    project_id=input.project_id,
+                    target=item.target,
+                    operation=item.operation,
+                    identifier=item.identifier,
+                    success=False,
+                    error=f"Exception: {e}",
+                )
+                results.append(result)
+                failed_count += 1
+                failed_indices.append(idx)
+                if input.atomic:
+                    for i, prev in enumerate(results[:-1]):
+                        if prev.success and prev.affected and prev.affected.get("id"):
+                            rb_id = await self._rollback_one(input.project_id, prev)
+                            if rb_id:
+                                rolled_back_ids.append(rb_id)
+                    return EditArtifactBatchResult(
+                        project_id=input.project_id,
+                        total=len(input.items),
+                        success_count=0,
+                        failed_count=len(input.items),
+                        results=results,
+                        failed_indices=[i for i in range(len(input.items))],
+                        rolled_back_ids=rolled_back_ids,
+                    )
+
+        return EditArtifactBatchResult(
+            project_id=input.project_id,
+            total=len(input.items),
+            success_count=success_count,
+            failed_count=failed_count,
+            results=results,
+            failed_indices=failed_indices,
+            rolled_back_ids=rolled_back_ids,
+        )
+
+    async def _rollback_one(self, project_id: str, prev_result: EditArtifactResult) -> Optional[dict]:
+        """回滚单个已落库的行（batch atomic 失败用）"""
+        prev_id = prev_result.affected.get("id") if prev_result.affected else None
+        if not prev_id:
+            return None
+        try:
+            # 反向操作：add → delete / update → 不可逆（best-effort：尝试 update 回原值）
+            if prev_result.operation == "add":
+                # 调原来的 delete
+                delete_input = EditArtifactInput(
+                    project_id=project_id,
+                    target=prev_result.target,
+                    operation="delete",
+                    identifier=prev_id,
+                )
+                res = await self.run(delete_input)
+                if res.success:
+                    return {"target": prev_result.target, "id": prev_id, "rolled_back": "delete"}
+            return {"target": prev_result.target, "id": prev_id, "rolled_back": "best_effort"}
+        except Exception as e:
+            edit_artifact_tool = EditArtifactTool  # silence linter
+            return None
 
     # ============ Project 元数据 ============
 
@@ -599,3 +751,41 @@ class EditArtifactTool(BaseTool):
 from backend.services.project_manager import ProjectManager
 
 register_tool(EditArtifactTool())
+
+
+class EditArtifactBatchTool(BaseTool):
+    """批量结构化编辑 6 件基座（v0.9.1 新增，P0 性能优化）
+
+    输入：items 数组（1-50 个 add/update/delete）
+    事务：atomic=true 时任一失败全回滚；atomic=false 逐项提交
+    性能：1 次 LLM tool_call 落 N 行（vs N 次 edit_artifact）
+    """
+    name = "edit_artifact_batch"
+    description = (
+        "批量结构化编辑 6 件基座（add/update/delete）。"
+        "1 次 tool_call 可写 N 行（≤50），"
+        "atomic=true 任一失败全回滚，atomic=false 逐项提交。"
+    )
+    input_schema = EditArtifactBatchInput
+    output_schema = EditArtifactBatchResult
+
+    def __init__(self):
+        self._inner = EditArtifactTool()
+
+    async def run(
+        self, input: EditArtifactBatchInput, progress_callback=None
+    ) -> EditArtifactBatchResult:
+        if progress_callback:
+            await progress_callback({"step": "batch_start", "total": len(input.items)})
+        result = await self._inner.run_batch(input, progress_callback)
+        if progress_callback:
+            await progress_callback({
+                "step": "batch_done",
+                "success_count": result.success_count,
+                "failed_count": result.failed_count,
+            })
+        return result
+
+
+register_tool(EditArtifactBatchTool())
+

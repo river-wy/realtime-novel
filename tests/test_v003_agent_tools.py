@@ -75,18 +75,22 @@ def test_tc_agent_tools_001_timeline_event_handler():
 
 
 def test_tc_agent_tools_008_target_list_updated():
-    """edit_artifact target 列表更新含 timeline_event / geography_location / world_entry"""
+    """edit_artifact target 列表更新含 timeline_event / geography_location / world_entry
+
+    v0.9.1 修复：handler map 抽到 _HANDLER_MAP property（run() / run_batch() 共用），
+    改测 _HANDLER_MAP 含新 key 且不含旧 key。
+    """
     from backend.agent.tools.edit_artifact_tool import EditArtifactTool
     tool = EditArtifactTool()
-    # run() 函数体内引用这些 target
-    import inspect
-    src = inspect.getsource(EditArtifactTool.run)
-    assert "timeline_event" in src
-    assert "geography_location" in src
-    assert "world_entry" in src
+    handler_keys = set(tool._HANDLER_MAP.keys())
+    assert "timeline_event" in handler_keys
+    assert "geography_location" in handler_keys
+    assert "world_entry" in handler_keys
     # 旧 target 不存在
-    assert '"timeline"' not in src
-    assert '"geography"' not in src
+    assert "timeline" not in handler_keys
+    assert "geography" not in handler_keys
+    # v0.9.1：project_palette 死 Literal 也已删
+    assert "project_palette" not in handler_keys
 
 
 def test_tc_agent_tools_volume_method():

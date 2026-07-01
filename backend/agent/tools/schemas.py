@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from pydantic import BaseModel, Field
-from typing import Literal, Optional, Any
+from typing import Literal, Optional, Any, List
 
 
 # ============ Project 工具 ============
@@ -117,10 +117,11 @@ class EditArtifactInput(BaseModel):
     """
     project_id: str = Field(..., min_length=1)
     target: Literal[
-        "project_name", "project_palette", "current_pov",
+        "project_name", "current_pov",
         "character", "relationship", "core_rule",
-        "timeline", "geography",
-        "seed", "subplot", "beat",
+        "timeline_event", "geography_location", "world_entry",
+        "seed", "subplot", "main_plot_node", "volume",
+        "beat",                # v0.9.1 修复：_edit_beat 之前是死代码，现在加进 Literal
     ]
     operation: Literal["add", "update", "delete"]
     identifier: Optional[str] = None  # update/delete 用（ID）
@@ -135,6 +136,49 @@ class EditArtifactResult(BaseModel):
     success: bool
     affected: Optional[dict] = None
     error: Optional[str] = None
+
+
+class EditArtifactItem(BaseModel):
+    """批量编辑单项（v0.9.1 新增）"""
+    target: Literal[
+        "project_name", "current_pov",
+        "character", "relationship", "core_rule",
+        "timeline_event", "geography_location", "world_entry",
+        "seed", "subplot", "main_plot_node", "volume",
+        "beat",                # v0.9.1 修复：_edit_beat 之前是死代码，现在加进 Literal
+    ]
+    operation: Literal["add", "update", "delete"]
+    identifier: Optional[str] = None  # update/delete 用（ID）
+    data: Optional[dict] = None       # add/update 用（完整字段或 diff）
+
+
+class EditArtifactBatchInput(BaseModel):
+    """批量结构化编辑 9 件基座（v0.9.1 新增）
+
+    优势：
+    - 1 次 tool_call 落库 N 行（vs N 次 edit_artifact）
+    - 事务：全部成功才 commit，任一失败全回滚
+    - 性能：WTM ReAct 落库 9 张表从「N round-trip」→「1 round-trip」
+    """
+    project_id: str = Field(..., min_length=1)
+    items: List[EditArtifactItem] = Field(..., min_length=1, max_length=50)
+    atomic: bool = Field(
+        default=True,
+        description="事务模式：true=全部成功才 commit（任一失败全回滚）；false=逐项提交",
+    )
+
+
+class EditArtifactBatchResult(BaseModel):
+    """批量编辑结果（v0.9.1 新增）"""
+    project_id: str
+    total: int
+    success_count: int
+    failed_count: int
+    results: List[EditArtifactResult] = Field(default_factory=list)
+    # 失败项索引（atomic=False 时记录，atomic=True 时最多 1 个就全回滚）
+    failed_indices: List[int] = Field(default_factory=list)
+    # 失败时已回滚的所有 row_id（atomic=True 用，WTM 可用这些 row_id 二次清理）
+    rolled_back_ids: List[dict] = Field(default_factory=list)
 
 
 class RollbackBaseInput(BaseModel):

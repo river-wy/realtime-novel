@@ -34,6 +34,7 @@ AGENT_TOOLS: Dict[str, List[str]] = {
     #   调基座 = delegate_to_agent(agent="world_tree_manager", intent="intervention" | "initial_baseline", task/payload=...)
     "novel_steward": [
         "load_project",
+        "list_projects",               # v0.9.1 新增：列项目（管家"我有什么项目"用）
         "create_project",
         "delete_project",              # v0.6.2 补：删除项目（软删 → .trash/）
         "generate_image",
@@ -60,6 +61,7 @@ AGENT_TOOLS: Dict[str, List[str]] = {
     "world_tree_manager": [
         "load_project",
         "edit_artifact",
+        "edit_artifact_batch",   # v0.9.1 新增：批量编辑（1 tool_call 落 N 行）
         "update_base",
         "weave_plot",
         "introspect_character",
