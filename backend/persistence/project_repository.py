@@ -248,12 +248,26 @@ class ProjectRepository:
             return []
         return _from_json(row["core_rules_json"]) or []
 
-    def save_core_rules(self, project_id: str, rules: List[Dict[str, Any]]) -> None:
+    def save_core_rules(self, project_id: str, rules: List[Dict[str, Any]]) -> bool:
+        """保存 core_rules 到 world_tree.core_rules_json
+
+        改 UPSERT：项目初始化时没 world_tree 行也能 INSERT（修复 _edit_core_rule 静默
+        写 0 行的问题：之前是 UPDATE WHERE project_id=？，对不存在的项目影响 0 行
+        仍 return success=True 误报）。
+        Returns: True if affected > 0
+        """
         with get_store().connection() as conn:
-            conn.execute(
-                "UPDATE world_tree SET core_rules_json = ?, updated_at = ? WHERE project_id = ?",
-                (_to_json(rules), _now(), project_id),
+            cur = conn.execute(
+                """
+                INSERT INTO world_tree (project_id, core_rules_json, updated_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(project_id) DO UPDATE SET
+                    core_rules_json = excluded.core_rules_json,
+                    updated_at = excluded.updated_at
+                """,
+                (project_id, _to_json(rules), _now()),
             )
+            return cur.rowcount > 0
 
     # ---------- volumes (1:n) ----------
 
@@ -278,6 +292,19 @@ class ProjectRepository:
     def add_volume(self, project_id: str, data: Dict[str, Any]) -> str:
         volume_id = data.get("id", f"vol-{uuid.uuid4().hex[:8]}")
         now = _now()
+        # 字段名兼容: LLM 有时传 volume_number，不是 volume_num
+        volume_num = data.get("volume_num")
+        if volume_num is None:
+            volume_num = data.get("volume_number")
+        if volume_num is None:
+            # 自动取 max+1（避免默认 0 造成 UNIQUE 冲突连环）
+            with get_store().connection() as conn:
+                row = conn.execute(
+                    "SELECT COALESCE(MAX(volume_num), -1) + 1 AS next_num FROM volumes WHERE project_id = ?",
+                    (project_id,),
+                ).fetchone()
+                volume_num = row["next_num"]
+            self.log.info("add_volume: 自动分配 volume_num=%d project_id=%s (未传)", volume_num, project_id)
         with get_store().connection() as conn:
             conn.execute(
                 """
@@ -286,14 +313,14 @@ class ProjectRepository:
                 """,
                 (
                     volume_id, project_id,
-                    data.get("volume_num", 0),
+                    int(volume_num),
                     data.get("title", ""),
                     data.get("description"),
                     data.get("planned_chapter_count"),
                     now,
                 ),
             )
-        self.log.info("DB volume ADD: project=%s, vol_id=%s", project_id, volume_id)
+        self.log.info("DB volume ADD: project=%s, vol_id=%s, volume_num=%s", project_id, volume_id, volume_num)
         return volume_id
 
     def update_volume(self, project_id: str, volume_id: str, data: Dict[str, Any]) -> None:

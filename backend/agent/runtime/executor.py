@@ -504,14 +504,27 @@ class AgentExecutor:
                     try:
                         input_obj = tool_instance.input_schema(**args_dict)
                     except Exception as e:
+                        # Pydantic ValidationError: 逐个 error 拆开打字段名 + msg
+                        err_msg = str(e)
+                        if hasattr(e, "errors"):
+                            try:
+                                errs = e.errors()
+                                details = "; ".join(
+                                    f"{'.'.join(str(p) for p in err.get('loc', []))}: {err.get('msg', '')} (input={err.get('input', '')[:100] if err.get('input') else ''})"
+                                    for err in errs
+                                )
+                                if details:
+                                    err_msg = f"{type(e).__name__} [{details}]"
+                            except Exception:
+                                pass
                         self.log.warning(
-                            "AgentExecutor[%s]: tool '%s' 参数验证失败: %s",
-                            agent.agent_name, tool_name, e,
+                            "AgentExecutor[%s]: tool '%s' 参数验证失败: %s | args=%s",
+                            agent.agent_name, tool_name, err_msg, tool_args,
                         )
                         tool_msg = make_tool_message(
                             tool_call_id=tool_call_id,
                             tool_name=tool_name,
-                            result={"error": f"参数验证失败: {e}"},
+                            result={"error": f"参数验证失败: {err_msg}", "tool": tool_name, "args": tool_args},
                         )
                         messages.append(tool_msg)
                         tool_calls_history.append({
@@ -558,7 +571,14 @@ class AgentExecutor:
                                 error_msg, tool_duration_ms,
                             )
                         else:
-                            tool_result = tool_output.model_dump() if hasattr(tool_output, "model_dump") else tool_output
+                            # model_dump(mode='json') 把 datetime/UUID 转 str，避免 json.dumps 崩溃
+                            if hasattr(tool_output, "model_dump"):
+                                try:
+                                    tool_result = tool_output.model_dump(mode="json")
+                                except TypeError:
+                                    tool_result = tool_output.model_dump()
+                            else:
+                                tool_result = tool_output
                             status = "success"
                             self.log.info(
                                 "AgentExecutor[%s]: tool '%s' SUCCESS (%dms)",

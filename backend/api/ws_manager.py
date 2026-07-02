@@ -245,13 +245,19 @@ async def handle_user_message(ws: WebSocket, user_id: str, data: dict):
 
     except asyncio.CancelledError:
         log.info(f"ws_manager: handle_user_message cancelled user_id={user_id}")
+        # ws 可能已被 close（用户中途断开），发送会报错但属正常路径
         try:
             await ws.send_json({
                 "type": "interrupted",
                 "message": "已中断",
             })
         except Exception as e:
-            log.warning("ws interrupted 通知发送失败: user_id=%s, error=%s", user_id, e, exc_info=True)
+            # 区分是 ws 关闭还是其他错误：close code 1001 / 1006 属正常
+            err_str = str(e).lower()
+            if "websocket.close" in err_str or "already completed" in err_str or "1001" in err_str or "1006" in err_str:
+                log.info("ws_manager: 用户已断开, 跳过 interrupted 通知 user_id=%s", user_id)
+            else:
+                log.warning("ws interrupted 通知发送失败: user_id=%s, error=%s", user_id, e, exc_info=True)
             pass
     except Exception as e:
         log.error(f"ws_manager: handle_user_message failed: {e}", exc_info=True)

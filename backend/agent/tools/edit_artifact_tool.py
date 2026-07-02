@@ -404,16 +404,35 @@ class EditArtifactTool(BaseTool):
     async def _edit_core_rule(self, input: EditArtifactInput) -> EditArtifactResult:
         repo = ProjectRepository()
         rules = repo.get_core_rules(input.project_id)
-        if rules is None:
-            return EditArtifactResult(
-                project_id=input.project_id, target=input.target,
-                operation=input.operation, success=False,
-                error="world_tree not found",
-            )
 
         if input.operation == "add":
-            rule = input.data or {}
-            rule["id"] = rule.get("id", f"rule-{uuid.uuid4().hex[:6]}")
+            raw = input.data or {}
+            # 字段名兼容：LLM 实际传过 rule_name/rule_content/name/content/title/body，
+            # 统一标准化到 name/content
+            name = (
+                raw.get("name")
+                or raw.get("rule_name")
+                or raw.get("title")
+                or ""
+            )
+            content = (
+                raw.get("content")
+                or raw.get("rule_content")
+                or raw.get("body")
+                or raw.get("description")
+                or ""
+            )
+            if not name:
+                return EditArtifactResult(
+                    project_id=input.project_id, target=input.target,
+                    operation=input.operation, success=False,
+                    error="core_rule 需要 name 或 rule_name 字段",
+                )
+            rule = {
+                "id": raw.get("id", f"rule-{uuid.uuid4().hex[:6]}"),
+                "name": name,
+                "content": content,
+            }
             rules.append(rule)
         elif input.operation == "update":
             if not input.identifier:
@@ -424,7 +443,16 @@ class EditArtifactTool(BaseTool):
             found = False
             for i, r in enumerate(rules):
                 if r.get("id") == input.identifier:
-                    rules[i] = {**r, **(input.data or {})}
+                    # 更新时同样兼容字段名
+                    patch = {}
+                    for k, v in (input.data or {}).items():
+                        if k in ("rule_name",) and v:
+                            patch["name"] = v
+                        elif k in ("rule_content", "body", "description") and v:
+                            patch["content"] = v
+                        else:
+                            patch[k] = v
+                    rules[i] = {**r, **patch}
                     found = True
                     break
             if not found:
@@ -441,7 +469,22 @@ class EditArtifactTool(BaseTool):
                 )
             rules = [r for r in rules if r.get("id") != input.identifier]
 
-        repo.save_core_rules(input.project_id, rules)
+        # 修复：检查 save 实际影响行数（之前 UPDATE WHERE 0 行不报错导致误报 SUCCESS）
+        saved = repo.save_core_rules(input.project_id, rules)
+        if not saved:
+            self.log.error(
+                "edit_artifact core_rule: save_core_rules 失败 project_id=%s",
+                input.project_id,
+            )
+            return EditArtifactResult(
+                project_id=input.project_id, target=input.target,
+                operation=input.operation, success=False,
+                error="save_core_rules 写库失败（0 行受影响）",
+            )
+        log.info(
+            "edit_artifact core_rule OK: project_id=%s, op=%s, rule_count=%d",
+            input.project_id, input.operation, len(rules),
+        )
         return EditArtifactResult(
             project_id=input.project_id, target=input.target,
             operation=input.operation, identifier=input.identifier, success=True,

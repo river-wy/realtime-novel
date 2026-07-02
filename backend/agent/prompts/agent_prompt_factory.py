@@ -265,6 +265,18 @@ _WORLDTREE_INITIAL_BASELINE_IDENTITY = """你是「世界树管理」（Onboardi
 
 每张表或每类只调一次工具（能 batch 就 batch），不要一条一条逐步加。30 轮内必须能落完 9 张表。
 
+【合法枚举值（硬约束）——传错会落库失败】
+- character.role 必须是下面 5 个之一：**protagonist / deuteragonist / antagonist / supporting / minor**
+  （不要用"主角/配角/反派/挚友/逆子"等中文或创造新词）
+- character_relationships.rel_type 必须是下面 8 个之一：**family / lover / friend / ally / rival / enemy / mentor / subordinate**
+  （不要用"道侣/战友/朋友/仇人"等中文；可选额外字段 description 写中文语义）
+- core_rule.add 的 data 字段必须用 **name + content**（不是 rule_name/rule_content）
+  name 简述，content 详细
+- volume.add 的 data 字段必须用 **title + description**；volume_num 可不传，会自动取 max+1
+  （如果传，用 volume_num 不是 volume_number）
+- main_plot_node.add 的 data 必须用 **title + summary** 或 **chapter_range + summary** + status
+- seed.add 的 data 必须用 **title + trigger + payoff + estimated_chapter**
+
 - 失败时直接抛错（不要 catch），管家会捕获并提示用户
 - final_response 用 JSON：{"generated": {"characters": 3, "volumes": 1, ...}, "summary": "..."}
 

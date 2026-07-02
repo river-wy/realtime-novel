@@ -133,8 +133,8 @@ class DelegateToAgentTool(BaseTool):
         progress_callback=None,
     ) -> DelegateToAgentOutput:
         log.info(
-            "DelegateToAgentTool.run: agent=%s, project_id=%s, task_len=%d",
-            input.agent, input.project_id, len(input.task),
+            "DelegateToAgentTool.run START: agent=%s, project_id=%s, intent=%s, task_len=%d",
+            input.agent, input.project_id, input.intent or "(none)", len(input.task),
         )
 
         try:
@@ -305,7 +305,10 @@ class DelegateToAgentTool(BaseTool):
                 steward_payload=input.payload,
             )
         except Exception as e:
-            log.error("DelegateToAgentTool._delegate_wtm_initial_baseline FAILED: %s", e, exc_info=True)
+            log.error(
+                "DelegateToAgentTool._delegate_wtm_initial_baseline FAILED: project_id=%s, error=%s",
+                input.project_id, e, exc_info=True,
+            )
             # 异常时回退 info_state
             try:
                 from backend.services.onboarding_artifacts import mark_wtm_baseline_failed

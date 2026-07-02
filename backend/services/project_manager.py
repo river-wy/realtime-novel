@@ -126,17 +126,19 @@ class ProjectManager:
     async def list_projects(self, limit: int = 20, offset: int = 0) -> list[dict]:
         """列项目"""
         projects = self._proj_repo.list_all(limit=limit + offset)
-        onboarding_map: dict[str, int] = {}
-        try:
-            onboarding_map = OnboardingRepository().list_current_steps()
-        except Exception as e:
-            self.log.warning("PM list_projects 读 onboarding 失败: error=%s", e, exc_info=True)
-            pass
-
+        onboarding_repo = OnboardingRepository()
         result = []
         for p in projects[offset:]:
             chapter_count = self._chap_repo.count_chapters(p.id)
-            onboarding_step = onboarding_map.get(p.id)
+            # 读 onboarding info_state（v003：info_state 替代 current_step）
+            try:
+                info_state = onboarding_repo.get_info_state(p.id)
+                # mapping: collecting=0, wtm_pending=1, ready=2 (用于前端 status 推导)
+                onboarding_step_map = {"collecting": 0, "wtm_pending": 1, "ready": 2, None: 0}
+                onboarding_step = onboarding_step_map.get(info_state, 0)
+            except Exception as e:
+                self.log.warning("PM list_projects 读 onboarding info_state 失败: project_id=%s, error=%s", p.id, e, exc_info=True)
+                onboarding_step = 0
             result.append({
                 "id": p.id,
                 "name": p.name,

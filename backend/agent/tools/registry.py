@@ -222,10 +222,25 @@ def make_tool_message(
     tool_name: str,
     result: dict | str,
 ) -> dict:
-    """把 tool 执行结果包装成 LLM message（role=tool）"""
+    """把 tool 执行结果包装成 LLM message（role=tool）
+
+    容错：result 含 datetime / UUID / Decimal 等不可 JSON 序列化对象时用 default=str
+    避免整个 executor loop 被 1 个 tool result 崩溃
+    """
     if isinstance(result, dict):
         import json
-        content = json.dumps(result, ensure_ascii=False)
+        try:
+            content = json.dumps(result, ensure_ascii=False, default=str)
+        except TypeError as e:
+            # 双层容错：连 default=str 都不行（极罕见）时返可读 error dict
+            content = json.dumps(
+                {
+                    "_serialization_error": str(e),
+                    "_result_type": type(result).__name__,
+                    "_result_preview": str(result)[:500],
+                },
+                ensure_ascii=False,
+            )
     else:
         content = str(result)
 

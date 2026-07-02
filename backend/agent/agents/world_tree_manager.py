@@ -649,6 +649,12 @@ class WorldTreeManager:
                 "error": "基座需要修正",
             }
 
+        # ✅ 全部成功
+        self.log.info(
+            "WTM.run_initial_baseline_react SUCCESS: project_id=%s, iterations=%d, tool_calls=%d, summary=%s",
+            project_id, executor_output.iterations,
+            len(executor_output.tool_calls_history), summary,
+        )
         return {
             "success": True,
             "iterations": executor_output.iterations,
