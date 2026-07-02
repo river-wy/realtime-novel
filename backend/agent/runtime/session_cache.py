@@ -36,7 +36,7 @@ COMPRESS_THRESHOLD = 0.70
 DEFAULT_CONTEXT_WINDOW = 128000
 
 # summary 压缩后保留的最新轮数
-KEEP_RECENT_ROUNDS = 10     # v0.9.3 欧尼酱拍板：20 → 10（更激进压缩，节省 token）
+KEEP_RECENT_ROUNDS = 10     # 较激进压缩，节省 token
 
 # tool 返回内容最大字节数；超过时截断
 TOOL_RESULT_MAX_BYTES = 10 * 1024   # 10 KB
@@ -355,7 +355,7 @@ async def _generate_summary(llm_adapter, messages: List[dict]) -> str:
         if role == "user":
             lines.append(f"用户：{content[:300]}")
         elif role == "assistant":
-            # v0.9.4 修复：不再硬编码「管家」—— assistant 可能是 管家/WTM/文笔家/Validator
+            # assistant 可能是 管家/WTM/文笔家/Validator
             lines.append(f"AI：{content[:300]}")
         elif role == "tool":
             name = m.get("name", "tool")

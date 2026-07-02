@@ -1,10 +1,4 @@
-"""plot_tools.py — weave_plot 工具
-
-v0.6 重构：从 v0_4_new_tools.py 拆出
-v0.4 原版是 stub（手写 3 段式 plot 模板）
-v0.6 改用 LLM 真实生成 next_chapter_plan
-v0.6.2 架构师 WorldTreeManager 在 ReAct loop 里调这个工具（属于架构师工具集）
-"""
+"""plot_tools.py — weave_plot 工具"""
 from __future__ import annotations
 
 import json
@@ -40,10 +34,7 @@ WEAVE_PLOT_PROMPT = """你是「剧情编排师」（weave_plot）。
 
 
 class WeavePlotTool(BaseTool):
-    """编排下一段剧情（基于 plot_seed 生成 next_chapter_plan）
-
-    v0.6 实现：调 LLM 生成 3 段式剧情（response_format=json_object）
-    """
+    """编排下一段剧情（基于 plot_seed 生成 next_chapter_plan）"""
     name = "weave_plot"
     description = "编排下一段剧情（基于 plot_seed 生成 next_chapter_plan）"
     input_schema = WeavePlotInput

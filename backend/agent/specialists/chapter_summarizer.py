@@ -1,8 +1,4 @@
-"""chapter_summarizer — v0.5 章节 summary 同步抽 + 异步压缩
-
-讨论 3.5 拍板：
-- 1 句话 summary（~20-30 tokens）：在文笔家 LLM 输出里同步生成（sentinel 解析）
-- 100-200 字 detailed_summary：每 20 章异步生成（v0.5 阶段 B 完整版）
+"""chapter_summarizer — 章节 summary 同步抽 + 异步压缩
 
 设计：
 - 文笔家 LLM 输出格式：

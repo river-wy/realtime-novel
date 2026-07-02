@@ -1,643 +1,683 @@
-# 后端技术架构文档
+# 后端架构文档
 
-> **最后更新**：2026-06-29
-> **版本**：v0.9.x
+> **最后更新**：2026-07-02
+> **版本**：v0.9.6
+> **适用 commit**：e717e5b
 
 ---
 
 ## 目录
 
-1. [整体架构概览](#1-整体架构概览)
-2. [分层设计与依赖规则](#2-分层设计与依赖规则)
-3. [API 层（api/）](#3-api-层)
-4. [Agent 层（agent/）](#4-agent-层)
-5. [Service 层（services/）](#5-service-层)
-6. [Adapter 层（adapters/）](#6-adapter-层)
-7. [领域核心层（core/）](#7-领域核心层)
-8. [配置系统（config/）](#8-配置系统)
-9. [日志系统](#9-日志系统)
+1. [整体架构](#1-整体架构)
+2. [分层设计](#2-分层设计)
+3. [API 层](#3-api-层)
+4. [Agent 层](#4-agent-层)
+5. [Service 层](#5-service-层)
+6. [Persistence 层](#6-persistence-层)
+7. [Adapter 层](#7-adapter-层)
+8. [Core 层](#8-core-层)
+9. [配置系统](#9-配置系统)
+10. [启动流程](#10-启动流程)
 
 ---
 
-## 1. 整体架构概览
+## 1. 整体架构
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                      浏览器（Vue 3）                            │
-│            HTTP REST + WebSocket（/api/chat）                   │
-└─────────────────────────┬───────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────────────┐
+│                     浏览器（Vue 3 + Vite）                          │
+│           HTTP REST + WebSocket（/api/chat）                       │
+└─────────────────────────┬──────────────────────────────────────────┘
+                          │ baseURL=/api (走 vite 代理 → :7778)
+┌─────────────────────────▼──────────────────────────────────────────┐
+│                       API 层 (backend/api/)                        │
+│  ┌─────────────┐  ┌──────────────┐  ┌──────────┐  ┌────────────┐  │
+│  │ ws_manager  │  │ project_     │  │ chapter_ │  │ action_    │  │
+│  │ (WS 主对话) │  │ routes       │  │ routes   │  │ routes     │  │
+│  ├─────────────┤  ├──────────────┤  └──────────┘  └────────────┘  │
+│  │ system_     │  │ CORS + /static/projects 静态服务              │
+│  │ routes      │  │                                              │
+│  └─────────────┘  │ 入口: backend/api/app.py:create_app()         │
+└─────────────────────────┬──────────────────────────────────────────┘
                           │
-┌─────────────────────────▼───────────────────────────────────────┐
-│                   API 层（FastAPI）                              │
-│  ┌──────────────┐  ┌──────────────┐  ┌─────────────────────┐   │
-│  │ ws_manager   │  │ project/     │  │ chapter/action/      │   │
-│  │ /api/chat WS │  │ system_routes│  │ system_routes HTTP   │   │
-│  └──────┬───────┘  └──────┬───────┘  └──────────┬──────────┘   │
-└─────────┼─────────────────┼──────────────────────┼─────────────┘
-          │                 │                      │
-┌─────────▼─────────────────▼──────────────────────▼─────────────┐
-│                   Agent 层（LLM 推演）                          │
-│  ┌─────────────────────────────────────────────────────────┐    │
-│  │  NovelSteward（管家，唯一用户入口）                      │    │
-│  │  AgentExecutor ReAct loop → tool → LLM → tool → ...    │    │
-│  │       ├── delegate_to_agent ──► NovelWriter             │    │
-│  │       └── delegate_to_agent ──► WorldTreeManager        │    │
-│  └─────────────────────────────────────────────────────────┘    │
-└─────────────────────────┬───────────────────────────────────────┘
+┌─────────────────────────▼──────────────────────────────────────────┐
+│                      Agent 层 (backend/agent/)                     │
+│  ┌──────────────────────────────────────────────────────────────┐  │
+│  │  NovelSteward（唯一用户入口，backend/agent/agents/novel_     │  │
+│  │  steward.py:151） 走 ReAct loop：                            │  │
+│  │     ├── ReAct loop ─► 直接调 tool（查项目/Onboarding/图片）  │  │
+│  │     ├── delegate_to_agent ──► NovelWriter（章节生成）        │  │
+│  │     ├── delegate_to_agent ──► WorldTreeManager（基座干预）   │  │
+│  │     └── 落库 ─► Validator（基座/章节一致性校验）             │  │
+│  └──────────────────────────────────────────────────────────────┘  │
+│  runtime: executor.py (AgentExecutor) + session_cache.py           │
+│  tools/   : 18+ 工具（project/chapter/character/plot/style/...）  │
+└─────────────────────────┬──────────────────────────────────────────┘
                           │
-┌─────────────────────────▼───────────────────────────────────────┐
-│                   Service 层（业务编排）                        │
-│  OnboardingFlow │ ProjectManager │ ConsistencyChecker │ ...     │
-└─────────────────────────┬───────────────────────────────────────┘
+┌─────────────────────────▼──────────────────────────────────────────┐
+│                    Service 层 (backend/services/)                  │
+│  ProjectManager │ OnboardingFlow │ InterventionParser             │
+│  ConsistencyChecker │ CoverImageGenerator │ OnboardingArtifacts   │
+└─────────────────────────┬──────────────────────────────────────────┘
                           │
-┌─────────────────────────▼───────────────────────────────────────┐
-│                   Persistence 层（SQLite）                      │
-│  SQLiteStore │ ProjectRepository │ ChapterRepository │ ...      │
-└─────────────────────────┬───────────────────────────────────────┘
+┌─────────────────────────▼──────────────────────────────────────────┐
+│                  Persistence 层 (backend/persistence/)             │
+│  SQLiteStore (连接管理+WAL+自动迁移)                               │
+│  ProjectRepository / ChapterRepository / ConversationRepository    │
+│  OnboardingRepository / ChapterStatusRepository / ToolCallLog* /  │
+│  UserPreferenceRepository                                          │
+└─────────────────────────┬──────────────────────────────────────────┘
                           │
-┌─────────────────────────▼───────────────────────────────────────┐
-│                   Adapter 层（外部服务）                        │
-│  LLMAdapter → LLMRouter → DeepSeekProvider / GeminiProvider    │
-└─────────────────────────────────────────────────────────────────┘
+┌─────────────────────────▼──────────────────────────────────────────┐
+│                    Adapter 层 (backend/adapters/)                  │
+│  LLMAdapter → LLMRouter → DeepSeekProvider / GeminiProvider       │
+│  读 agents.json 路由表 + .llm_api_key 取凭证                       │
+└────────────────────────────────────────────────────────────────────┘
 
-     ↑↑ 所有层都可 import ↑↑
-┌─────────────────────────────────────────────────────────────────┐
-│                   Core 层（领域模型，零依赖）                   │
-│  WorldTree / Schemas / Exceptions / EventBus                   │
-└─────────────────────────────────────────────────────────────────┘
+                ↑↑ Core 层被所有层 import ↑↑
+┌────────────────────────────────────────────────────────────────────┐
+│                  Core 层 (backend/core/) — 零业务依赖              │
+│  WorldTree (内存聚合根) │ core/schemas (7+1 件 Pydantic Schema)     │
+│  EventBus (轻量异步事件总线) │ exceptions (RealtimeNovelError 层级) │
+└────────────────────────────────────────────────────────────────────┘
+```
+
+**请求链示例（用户说"写下一章"）**：
+
+```
+浏览器 chat  →  ws_manager.handle_user_message  (api/ws_manager.py:188)
+            →  NovelSteward.receive             (agent/agents/novel_steward.py:209)
+            →  AgentExecutor.execute (ReAct loop)
+            →  delegate_to_agent("novel_writer")
+            →  NovelWriter.generate_chapter     (agent/agents/novel_writer.py:75)
+            →  executor.execute → tools.generate_chapter 落盘
+            →  ConsistencyChecker               (services/consistency_checker.py)
+            →  Validator.validate_chapter       (agent/agents/validator.py)
+            →  ws_manager 推流式 agent_message → 浏览器
 ```
 
 ---
 
-## 2. 分层设计与依赖规则
+## 2. 分层设计
 
 ### 严格单向依赖
 
 | 层 | 职责 | 允许 import | 禁止 import |
 |---|---|---|---|
-| `core/` | 领域 Schema + 异常 + 事件总线 | 标准库、pydantic | 其他任何层 |
-| `adapters/` | 外部服务适配（LLM） | core | services/agent/api |
+| `core/` | 领域模型 + 异常 + 事件总线 | 标准库、pydantic | 其他任何层 |
+| `adapters/` | 外部服务适配（LLM、图像生成） | core、config | services/agent/api |
 | `persistence/` | 数据库 CRUD | core、adapters | services/agent/api |
 | `agent/` | LLM 推演引擎 | core、persistence、adapters | services/api |
 | `services/` | 业务编排 | core、persistence、agent | api |
 | `api/` | HTTP/WS 路由 | 全部 | — |
 
-违反此规则会导致循环依赖，PR Review 会 -1。
+> 实际生产中部分跨层调用（`api` 调用 `agent` 的 `delegate_chapter_generation`）通过薄路由 + 委托实现，参见 `backend/api/chapter_routes.py:140-149`。
 
 ### 设计原则
 
-- **`api/` 是薄路由**：只做 HTTP 序列化/反序列化，业务逻辑委托给 `services/`
-- **`services/` 编排，不实现**：调 `agent/` 和 `persistence/`，自身不含 LLM 调用或 SQL
-- **`agent/` 纯推演**：不含路由，不含 HTTP 处理，专注 LLM 推演逻辑
-- **`core/` 零依赖**：任何层都可安全 import，是跨层共享的基础设施
+- **`api/` 是薄路由**：HTTP 序列化/反序列化为主，业务逻辑委托给 `services/` 或 `agent/`。例：`chapter_routes.py:140` 的 `generate_chapter` 直接调 `delegate_chapter_generation()`（`agent/agents/novel_writer.py:227`）。
+- **`services/` 编排，不实现**：调 `agent/` 和 `persistence/`，自身不含 LLM 调用或裸 SQL。例：`ProjectManager` 组合 `ProjectRepository` + `ChapterRepository` + `OnboardingRepository`（`backend/services/project_manager.py:18-28`）。
+- **`agent/` 纯推演**：不含路由，不含 HTTP 处理，专注 LLM 推演逻辑。Tool 调用通过 `backend/agent/tools/registry.py` 注册表获取。
+- **`core/` 零依赖**：被所有层 import 的基础设施。`EventBus` 是单例全局总线（`backend/core/event_bus.py:88`），`exceptions.py:9` 定义 `RealtimeNovelError` 基类层级。
+
+### 异常层级
+
+实现位于 `backend/core/exceptions.py:9-65`：
+
+```
+RealtimeNovelError              基类（用户捕获可一把抓）
+├── ConfigError                 配置缺失/错误
+├── ProjectError                项目相关
+│   ├── ProjectNotFoundError
+│   ├── ProjectAlreadyExistsError
+│   └── ProjectCorruptError
+├── LLMError                    LLM 调用相关
+│   └── LLMEmptyResponseError
+└── GenerationError             章节生成失败
+    └── GenerationQualityError
+```
 
 ---
 
 ## 3. API 层
 
-### FastAPI 应用入口（`api/app.py`）
+### 入口
+
+实现位于 `backend/api/app.py:42-78`：
+
+- `create_app()` 工厂函数返回 FastAPI 实例（`title="realtime-novel API"`，`version="0.4.0"`）
+- `lifespan` 在启动时显式调 `get_store()` 触发 `_init_schema()`，避免"重启后第一次业务请求才建表"
+- CORS 全开（`allow_origins=["*"]`，`allow_methods=["*"]`）
+- 注册 5 个 router：`system_router`、`project_router`、`chapter_router`、`action_router`、`ws_router`
+- 静态文件服务：`/static/projects` → `data/projects/`（封面图等，v0.9 起）
+
+### HTTP 路由表
+
+#### system_routes（`backend/api/system_routes.py`，`/api` 前缀）
+
+| 方法 | 路径 | 行号 | 说明 |
+|---|---|---|---|
+| GET | `/api/health` | 30 | 健康检查 |
+| GET | `/api/info` | 40 | 版本 + LLM provider 列表 |
+
+#### project_routes（`backend/api/project_routes.py`，`/api/projects` 前缀）
+
+| 方法 | 路径 | 行号 | 说明 |
+|---|---|---|---|
+| GET | `/api/projects` | 89 | 列项目（默认过滤已删除） |
+| POST | `/api/projects` | 103 | 创建项目（v0.8 起支持 `exploration_level`） |
+| GET | `/api/projects/{id}` | 132 | 加载项目详情（含 7 件基座 + chapters） |
+| PATCH | `/api/projects/{id}/exploration-level` | 152 | 切换探索度（conservative/standard/wild） |
+| DELETE | `/api/projects/{id}?confirm=true` | 177 | 软删除（v003 实现：仅标 `deleted_at`） |
+
+#### chapter_routes（`backend/api/chapter_routes.py`，`/api/projects` 前缀）
+
+| 方法 | 路径 | 行号 | 说明 |
+|---|---|---|---|
+| GET | `/api/projects/{id}/chapters` | 57 | 列章节（v0.5 走 DB） |
+| GET | `/api/projects/{id}/chapters/{n}` | 75 | 读章节正文（DB 存 file_path，正文从 .md 读） |
+| POST | `/api/projects/{id}/chapters` | 123 | 生成下一章（薄路由，委托 `delegate_chapter_generation`） |
+
+#### action_routes（`backend/api/action_routes.py`，`/api/projects` 前缀）
+
+| 方法 | 路径 | 行号 | 说明 |
+|---|---|---|---|
+| POST | `/api/projects/{id}/interventions` | 37 | 提交剧情干预（实际走 WTM ReAct） |
+| POST | `/api/projects/{id}/rollback?to_chapter&confirm` | 80 | 回档（薄路由，调 `update_base` 改基座） |
+| POST | `/api/projects/{id}/image` | 129 | 生成主立绘（薄路由，调 `generate_image` tool） |
+| PATCH | `/api/projects/{id}/base` | 179 | 改 7 件基座（薄路由，调 `update_base` tool） |
+
+### WebSocket：`/api/chat`（`backend/api/ws_manager.py:82`）
+
+**唯一对话端点（v0.6 改造后）** — 所有用户消息统一进 `/api/chat`，由 `NovelSteward` 处理（不再分流到不同入口）。
+
+#### 接收消息类型
+
+| type | 说明 | 处理位置 |
+|---|---|---|
+| `user_message` | 用户消息 | 启动 `handle_user_message` Task 调管家 |
+| `interrupt` | 中断当前生成 | `ws_manager.interrupt(user_id)` |
+| `confirm` | 二次确认 | 先 echo（v0.6 s3 阶段占位） |
+| `ping` | 心跳 | 回 `pong` |
+
+#### 推送事件类型（spec.md §4.4）
+
+| type | 含义 | 触发时机 |
+|---|---|---|
+| `agent_thinking` | LLM 思考中 | 管家/下游 Agent 每次 LLM 调用前 |
+| `tool_calling` | Agent 准备调 tool | 调工具前 |
+| `tool_result` | tool 执行结果 | 调工具后 |
+| `agent_message` | 管家最终回复 | 整轮推演完成（含 `structured_data` 供前端渲染） |
+| `confirm_required` | 危险操作需二次确认 | WTM 判定 `requires_double_confirm=true` |
+| `interrupted` | 用户主动中断 | 用户发 `interrupt` 或 Task 被取消 |
+| `error` | 失败 | 异常 / 任务忙 (`TASK_BUSY`) / 非法消息类型 (`INVALID_MESSAGE_TYPE`) |
+
+#### 消息流（`handle_user_message` 完整流程，ws_manager.py:188-280）
 
 ```
-app = FastAPI(title="realtime-novel API", version="0.4.0")
-app.add_middleware(CORSMiddleware, allow_origins=["*"], ...)
-
-# 注册路由
-app.include_router(system_router)    # GET /api/health, /api/info
-app.include_router(project_router)   # 项目 CRUD
-app.include_router(chapter_router)   # 章节读取/生成
-app.include_router(action_router)    # 干预/回档/图片/基座
-app.include_router(ws_router)        # WS /api/chat
-
-# 静态文件服务（封面图）
-app.mount("/static/projects", StaticFiles(directory="data/projects"))
+WS 收到 user_message
+  → 检查 ws_manager.has_active_task → 忙则返 error: TASK_BUSY
+  → conv_repo.get_or_refresh_active_conversation (24h 滑窗)
+  → conv_repo.add_message (落 user 消息)
+  → 推 agent_thinking
+  → NovelSteward.receive() — 走 ReAct loop
+  → _push_agent_trace(result) — 推 tool_calling + tool_result + agent_thinking
+  → 若 result.structured_data.require_confirm → 推 confirm_required
+  → 推 agent_message（最终回复）
+  → conv_repo.add_message (落 assistant 消息，tool_calls 字段存 intent/downstream)
 ```
 
-### WebSocket 主对话端点（`api/ws_manager.py`）
+#### WS 连接管理
 
-WebSocket 是前后端实时通信的核心通道，所有用户消息统一由此进入。
+- 单例 `WebSocketManager`（`ws_manager.py:30`）— 进程内全局
+- 字典 `connections: dict[user_id, WebSocket]` — 单机单用户（`user_id = "anonymous"`）
+- 字典 `active_tasks: dict[user_id, asyncio.Task]` — 同一 user 串行执行
+- 异常断开 → `WebSocketDisconnect` 触发 `disconnect` 清理 task 引用
 
-**连接管理**：
+### CORS 与静态文件
 
-```
-class WebSocketManager:
-    connections: dict[str, WebSocket]  # user_id → WS 连接
-    active_tasks: dict[str, asyncio.Task]  # user_id → 正在跑的任务
-```
-
-**消息处理流程**：
-
-```
-客户端 → send_json({type: "user_message", content, project_id})
-         ↓
-WS 端点接收 → 检查是否有 active_task
-         ↓
-asyncio.create_task(handle_user_message(...))
-         ↓
-handle_user_message():
-  1. 管理 conversation（24h 滑窗）
-  2. 落 user message 到 DB
-  3. push {type: "agent_thinking"}
-  4. await NovelSteward.receive(...)
-  5. push tool_calling + tool_result（ReAct trace）
-  6. push {type: "agent_message", content, structured_data}
-  7. 落 assistant message 到 DB
-```
-
-**支持的事件类型**：
-
-| 方向 | 类型 | 说明 |
-|------|------|------|
-| 客→服 | `user_message` | 用户消息 |
-| 客→服 | `interrupt` | 取消当前生成 |
-| 客→服 | `ping` | 心跳 |
-| 服→客 | `agent_thinking` | LLM 思考中 |
-| 服→客 | `tool_calling` | 工具调用中 |
-| 服→客 | `tool_result` | 工具执行结果 |
-| 服→客 | `agent_message` | 最终回复（含 `structured_data`） |
-| 服→客 | `confirm_required` | 危险操作需二次确认 |
-| 服→客 | `error` | 错误 |
-| 服→客 | `interrupted` | 已中断 |
-| 服→客 | `pong` | 心跳响应 |
-
-### HTTP 路由
-
-| 文件 | 路由前缀 | 主要端点 |
-|------|---------|---------|
-| `project_routes.py` | `/api/projects` | 项目 CRUD + 探索度切换 |
-| `chapter_routes.py` | `/api/projects/{id}/chapters` | 章节列表 / 读取 / 生成 |
-| `action_routes.py` | `/api/projects/{id}/...` | 干预 / 回档 / 图片 / 基座修改 |
-| `system_routes.py` | `/api` | health + info |
+- CORS：完全开放（`app.py:62-69`），方便本地 dev 跨端口调试
+- 静态服务：`/static/projects` → `data/projects/`（`app.py:75-77`），用于封面图 URL 公开访问
 
 ---
 
 ## 4. Agent 层
 
-Agent 层是系统的核心，实现了基于 ReAct（Reasoning + Acting）模式的 LLM 推演引擎。
+### 顶层 Agent 矩阵
 
-### 4.1 三顶层 Agent
+| Agent | 文件 | 行号 | 职责 |
+|---|---|---|---|
+| **NovelSteward** | `backend/agent/agents/novel_steward.py:151` | 唯一用户入口；ReAct loop 自主决策；超范围委托专家 |
+| **NovelWriter** | `backend/agent/agents/novel_writer.py:45` | 章节正文生成 + 落盘 + 1 句话 summary |
+| **WorldTreeManager** | `backend/agent/agents/world_tree_manager.py:149` | 基座干预分析 / Onboarding 完整基座规划 / 卷总结 / 卷完结 |
+| **Validator** | `backend/agent/agents/validator.py:86` | 校验 Agent（基座一致性 + 章节内容合理性） |
 
-#### NovelSteward（小说管家）
+> Validator 不在 spec 顶层三 Agent 之内，但被 WTM 和 Writer 落库后联动调用，是 v0.9 重构引入的"审判"层（`validator.py:5-23`）。
 
-**文件**：`agent/agents/novel_steward.py`
+### 管家工作流（NovelSteward）
 
-用户唯一入口。所有消息（首页聊天 / 项目内聊天 / 创建项目 / 闲聊）都先由管家接收。
-
-```
-职责范围内（直接用工具）：
-  - 项目管理：create/load/delete_project
-  - Onboarding：onboarding_propose_step / onboarding_user_confirm / onboarding_generate_chapter
-  - 基座轻量编辑：edit_artifact
-  - 图片生成：generate_image
-  - 探索度：update_exploration_level
-
-职责范围外（委托专家）：
-  - 生成章节正文 → delegate_to_agent(agent="novel_writer")
-  - 复杂基座联动干预 → delegate_to_agent(agent="world_tree_manager")
-  - 后台任务（封面生成等）→ dispatch_background_task(task_type="generate_cover")
-```
-
-**委托原则**：「用户在等这个结果吗？」
-- 是 → `delegate_to_agent`（同步，等待专家完成后再回复用户）
-- 否 → `dispatch_background_task`（异步，立即回复用户，后台执行）
-
-#### NovelWriter（文笔家）
-
-**文件**：`agent/agents/novel_writer.py`
-
-负责章节正文生成 + summary 抽取 + 文风控制 + 历史承接。
-
-- 不决定剧情走向（走向由世界树基座约束）
-- 不修改任何基座（只读）
-- 通过 MemoryKeeper 检索历史章节上下文
-
-#### WorldTreeManager（世界树管理）
-
-**文件**：`agent/agents/world_tree_manager.py`
-
-负责基座一致性 + 干预影响分析 + 种子预留 + 走向调整 + diff 输出。
-
-- 不生成章节正文（写不是它的职责）
-- 不直接和用户对话（通过管家中转）
-- 调用 MemoryKeeper 检索历史干预
-
-### 4.2 ReAct 执行引擎（`agent/runtime/executor.py`）
-
-`AgentExecutor` 是所有 Agent 共享的 ReAct loop 执行引擎。
+实现位于 `backend/agent/agents/novel_steward.py:209-294`：
 
 ```
-class AgentExecutor:
-    async def execute(
-        agent: AgentConfig,      # agent_name + system_prompt + extra_tools
-        user_message: str,
-        project_id: Optional[str],
-        history: Optional[List[dict]],
-        session_key: Optional[str],  # 启用 session cache
-        max_iterations: int = 7,
-    ) -> AgentOutput
+用户消息
+  ↓
+构造 session_key = f"{user_id}:{conv_id}:novel_steward"  (3 维唯一)
+  ↓
+SessionCacheManager.has_valid_cache → 命中/未命中
+  ├─ 未命中 → load_chat_history (DB 拉 15 轮) → rebuild cache
+  └─ 命中 → 跳过 DB 查询
+  ↓
+AgentExecutor.execute(
+  agent_name="novel_steward",
+  system_prompt=STEWARD_SYSTEM_PROMPT,  (291 行身份+职责+Onboarding 流程)
+  user_message=...,
+  history=...,
+  session_key=session_key,
+  max_iterations=15,
+)
+  ↓
+executor_output = {final_response, structured_data, tool_calls_history, iterations, duration_ms, error}
+  ↓
+包装返回 {intent="chat", response=..., structured_data=..., downstream_called=..., ...}
 ```
 
-**ReAct Loop 工作流**：
+管家在 ReAct loop 内可调：
+
+- **职责范围内**（直接调 tool）：`create_project` / `load_project` / `delete_project` / `generate_image` / `update_exploration_level` / `verify_world_tree_baseline` / `adjust_style` / `list_style_packs`
+- **职责范围外**（委托专家）：
+  - `delegate_to_agent("novel_writer")` — 同步等待章节生成
+  - `delegate_to_agent("world_tree_manager", intent="intervention")` — 同步等待基座干预
+  - `dispatch_background_task(task_type="generate_cover")` — 异步，后台生成封面
+- **禁止**（v0.8 改造）：`edit_artifact` / `update_base` 已从管家白名单移除，改基座必须委托 WTM
+
+### 文笔家工作流（NovelWriter）
+
+实现位于 `backend/agent/agents/novel_writer.py:75-189`：
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│  初始化 messages（system + history + context + user）   │
-└─────────────────────────┬───────────────────────────────┘
-                          │
-┌─────────────────────────▼───────────────────────────────┐
-│  iteration 1..max_iterations:                           │
-│    await llm.complete(messages, tools)                  │
-│         ↓                                               │
-│    有 tool_calls?                                       │
-│         ├── YES → 执行 tool → append 结果到 messages → │
-│         │         继续下一个 iteration                  │
-│         └── NO  → final_response → break               │
-└─────────────────────────┬───────────────────────────────┘
-                          │
-┌─────────────────────────▼───────────────────────────────┐
-│  写回 session cache（delta 追加）                        │
-│  触发 Middleware 后置节点                               │
-│  返回 AgentOutput                                       │
-└─────────────────────────────────────────────────────────┘
+delegate_chapter_generation(project_id, intervention=None, source=...)  # agent/agents/novel_writer.py:227
+  ↓
+_validate_world_tree_completeness(project_id)  # 5 项完整性校验 (writer.py:200-225)
+  ├─ 失败 → ChapterOutput(error=...) 直接熔断
+  └─ 通过 →
+       NovelWriter.generate_chapter 走 executor.execute (writer.py:75)
+       调 generate_chapter / summarize_chapter tool 落盘
+  ↓
+ConsistencyChecker.check_hard_rules + check_world_entries  (services/consistency_checker.py)
+  ↓
+Validator.validate_chapter (validator.py)
+  ├─ PASS/WARN → 直接落
+  ├─ BLOCKED → retry 一次 (用 issues 注入 user_message)
+  │   ├─ retry PASS/WARN → 落
+  │   └─ retry BLOCKED → 在正文加 [unverified] 标记后落
+  └─ FATAL → 视情况
 ```
 
-**AgentOutput 标准结构**：
+> 章节生成耗时端到端 60-100s（`chapter_routes.py:122` 注释），前端 axios timeout 120s（`frontend/src/api/client.ts:11`）。
 
-```
-class AgentOutput(BaseModel):
-    final_response: str           # LLM 最终自然语言回复
-    structured_data: dict         # 工具产生的结构化数据
-    tool_calls_history: List[dict]  # 完整调用链路
-    iterations: int               # 实际执行轮次
-    input_tokens: int
-    output_tokens: int
-    duration_ms: int
-    error: Optional[str]
-    needs_review: bool            # 后置节点标记需人工审核
-    skip_response: bool           # 后置节点拦截回复
-```
+### 世界树管理工作流（WorldTreeManager）
 
-**Middleware 后置节点插槽**：
+实现位于 `backend/agent/agents/world_tree_manager.py`：
 
-```
-executor = get_agent_executor()
+- **干预分析** `analyze_intervention(project_id, text)` (line 538) — 调 ReAct loop 自主决定改哪些基座 + 埋伏笔，落库后调 Validator
+- **基座调整** `analyze_base_adjustment(project_id, text)` (line 647) — 与干预类似但 `intent="adjust_base"`
+- **Onboarding 完整基座** `run_initial_baseline_react(project_id, steward_payload)` (line 735) — 管家收集 6 维信息后委托 WTM 自主落 9 张表
+- **卷总结** `generate_volume_summary(project_id, volume_id)` (line 332) — ~1000 字总结，存到 `volumes.summary`
+- **卷完结** `complete_volume(project_id, volume_id, auto_generate_summary=True)` (line 422) — 自动生成 summary 后改 `volumes.status="completed"`
+- **联动回滚**（v0.9 新增）：Validator 返 FATAL → `_rollback_all_writes`；BLOCKED → `_rollback_issue_rows` 精准回滚
 
-@executor.middleware()                          # 全局（所有 Agent）
-async def safety_check(output: AgentOutput, ctx: dict) -> AgentOutput:
-    ...
-    return output
+### Session Cache（`backend/agent/runtime/session_cache.py`）
 
-@executor.middleware(agent_name="novel_writer") # 仅对文笔家生效
-async def quality_check(output: AgentOutput, ctx: dict) -> AgentOutput:
-    ...
-    return output
-```
+- **目的**：避免每次 ReAct 重新从 DB 拉历史 messages
+- **维度**：`user_id + conversation_id + agent_name` 三维 key
+- **生命周期**：进程内 LRU；重启后从 DB rebuild
+- **轮次**：管家 `session_rounds=15`（`novel_steward.py:262`）
 
-### 4.3 Session Cache（`agent/runtime/session_cache.py`）
+### Tool Registry（`backend/agent/tools/registry.py`）
 
-进程内 session cache，避免每次请求都重建对话历史。
-
-- **cache key**：`{user_id}:{conv_id}:{agent_name}`
-- **cache hit**：直接复用 messages，只追加新 user_message
-- **cache miss**：从 DB 加载历史（15 会话轮），rebuild
-- **超长压缩**：cache 超过阈值时异步触发 LLM summary 压缩，不阻塞返回
-
-### 4.4 工具系统（`agent/tools/`）
-
-#### ToolRegistry（工具注册表）
-
-`registry.py` 维护 Agent → Tool 白名单，执行前做权限校验：
-
-```
-AGENT_TOOLS: Dict[str, List[str]] = {
-    "novel_steward": [
-        "load_project", "create_project", "delete_project",
-        "edit_artifact", "generate_image", "update_exploration_level",
-        "onboarding_propose_step", "onboarding_user_confirm",
-        "onboarding_generate_chapter", "delegate_to_agent",
-        "dispatch_background_task",
-    ],
-    "novel_writer": [
-        "load_project", "read_chapter",
-        "generate_chapter", "summarize_chapter",
-    ],
-    "world_tree_manager": [
-        "load_project", "edit_artifact", "update_base",
-        "weave_plot", "introspect_character", "adjust_style", "switch_pov",
-    ],
-}
-```
-
-#### 工具清单（15 个）
-
-| 类别 | 工具名 | 文件 | 说明 |
-|------|--------|------|------|
-| 项目 | `load_project` | `project_tools.py` | 加载项目详情（含7件基座） |
-| 项目 | `create_project` | `project_tools.py` | 创建新项目 |
-| 项目 | `delete_project` | `project_tools.py` | 软删除项目（危险） |
-| 章节 | `generate_chapter` | `chapter_tools.py` | 生成下一章，写文件+入DB |
-| 章节 | `read_chapter` | `chapter_tools.py` | 读取指定章节正文 |
-| 章节 | `summarize_chapter` | `summarize_chapter_tool.py` | 抽取一句话 summary |
-| 基座 | `edit_artifact` | `edit_artifact_tool.py` | 7件基座轻量字段修改 |
-| 基座 | `update_base` | `base_edit_tools.py` | 批量更新基座字段 |
-| 基座 | `rollback_base` | `base_edit_tools.py` | 回滚基座到指定版本 |
-| 情节 | `weave_plot` | `plot_tools.py` | 织入/调整主线支线走向 |
-| 角色 | `introspect_character` | `character_tools.py` | 角色内心独白/分析 |
-| 风格 | `adjust_style` | `style_tools.py` | 调整文风宪法 |
-| 视角 | `switch_pov` | `pov_tools.py` | 切换叙事视角 |
-| 图片 | `generate_image` | `image_tools.py` | 生成封面图（Gemini） |
-| Onboarding | `onboarding_propose_step` | `onboarding_tools.py` | 提议 Onboarding 步骤 |
-| Onboarding | `onboarding_user_confirm` | `onboarding_tools.py` | 用户确认，写入基座 |
-| Onboarding | `onboarding_generate_chapter` | `onboarding_tools.py` | 生成第 1 章 |
-| 委托 | `delegate_to_agent` | `delegation_tools.py` | 同步委托专家 Agent |
-| 委托 | `dispatch_background_task` | `delegation_tools.py` | 异步派发后台任务 |
-
-#### BaseTool 接口
-
-```
-class BaseTool(ABC):
-    name: str            # tool name（OpenAI function name）
-    description: str     # 给 LLM 看的描述
-    input_schema: type[BaseModel]  # Pydantic 输入 schema
-
-    @abstractmethod
-    async def run(self, input: BaseModel) -> BaseModel | ToolError:
-        ...
-
-    def is_dangerous(self) -> bool:
-        return False  # 危险工具返回 True
-```
-
-### 4.5 Onboarding 5 步流程（`agent/onboarding/`）
-
-新建项目的引导式对话，管家通过 ReAct loop 推进：
-
-```
-★ 第一阶段：信息收集（不调任何工具）
-  收集 6 个维度：项目名称 / 世界树基础 / 故事核心 / 主要角色 / 主线大纲 / 笔风标签
-  收集完后展示确认清单，等用户明确确认
-
-★ 第二阶段：一次性推完（用户确认后流水执行）
-  1. create_project → project_id
-  2. onboarding_propose_step(step=1) → 题材/风格/基调
-  3. onboarding_propose_step(step=2) → palette
-  4. onboarding_propose_step(step=3) + onboarding_user_confirm(step=3) → 故事核心
-  5. onboarding_propose_step(step=4) + onboarding_user_confirm(step=4) → 完整大纲
-  6. onboarding_generate_chapter → 生成第 1 章（同步，约 60-100s）
-  7. dispatch_background_task(generate_cover) → 后台封面（不阻塞）
-```
-
-**状态持久化**：`onboarding_state` 表（每步 upsert，进程重启可续）
-
-### 4.6 上下文组装（`agent/context/`）
-
-根据不同 Agent 的视角裁剪 LLM messages：
-
-| 函数 | 说明 |
-|------|------|
-| `build_messages_for_steward` | 管家上下文（用户历史 + 当前项目摘要） |
-| `build_messages_for_chapter_generator` | 文笔家上下文（7件基座 + 最近N章summary） |
-| `build_messages_for_worldtree_keeper` | 世界树上下文（7件基座 + 历史干预） |
-| `build_messages_for_onboarding_step3` | Onboarding Step 3 上下文 |
-| `build_messages_for_onboarding_step4` | Onboarding Step 4 上下文 |
-| `load_chat_history` | 从 DB 加载对话历史（7+15 轮分层） |
-
-### 4.7 Prompt 系统（`agent/prompts/`）
-
-| 文件 | 内容 |
-|------|------|
-| `writing_laws.py` | 写作铁律（不可突破的底线，防止AI偷懒/跳戏/OOC） |
-| `style_packs.py` | 风格包（爽文/严肃/轻松等对应的 Prompt 指导） |
-| `specialists.py` | 专家 Prompt（WorldTree/Chapter/Memory Specialist） |
-| `onboarding.py` | Onboarding Step 3/4 Prompt |
-| `agent_prompt_factory.py` | Prompt 工厂（组装最终发送给 LLM 的完整 Prompt） |
+- 18+ 工具分类注册：`project_tools.py` / `chapter_tools.py` / `character_tools.py` / `plot_tools.py` / `style_tools.py` / `volume_tools.py` / `delegation_tools.py` / `onboarding_tools.py` / `image_tools.py` / `edit_artifact_tool.py` / `summarize_chapter_tool.py` / `exploration_tools.py` / `base_edit_tools.py` / `pov_tools.py`
+- Tool 入口 `get_tool(name)` 返回 Tool 实例，LLM 在 ReAct loop 中按 OpenAI function calling 协议调
 
 ---
 
 ## 5. Service 层
 
-业务编排层，协调 `agent/` 和 `persistence/` 完成复合业务操作。
+服务层负责业务编排，不含 LLM 调用或裸 SQL。
 
-| 文件 | 职责 |
-|------|------|
-| `project_manager.py` | 项目 CRUD + 软删除（移到 `.trash/`）+ 回档（删后续章节 + 更新索引） |
-| `onboarding_flow.py` | Onboarding 5 步状态机（状态读写走 DB） |
-| `onboarding_artifacts.py` | 7 件基座 Pydantic 拼装（step payload → WorldTreeRow 等） |
-| `consistency_checker.py` | 基座一致性检查（干预后检查逻辑是否冲突） |
-| `cover_image_generator.py` | 封面图生成（调 LLMAdapter → GeminiProvider，保存到 `data/projects/{id}/cover.png`） |
-| `intervention_parser.py` | 干预指令解析（自然语言 → 结构化干预 payload） |
+| Service | 文件 | 行数 | 职责 |
+|---|---|---|---|
+| `ProjectManager` | `backend/services/project_manager.py:21` | 291 | 项目 CRUD / 软删除 / 回档 / trash 恢复 |
+| `OnboardingFlow` | `backend/services/onboarding_flow.py:30` | 111 | Onboarding 状态机（**DEPRECATED** v003，保留 HTTP 路由兜底） |
+| `OnboardingArtifacts` | `backend/services/onboarding_artifacts.py` | — | Onboarding 状态查询 + payload 合并（管家 ReAct 流程配套） |
+| `InterventionParser` | `backend/services/intervention_parser.py:13` | — | 剧情干预解析（HTTP 路由调用，实质仍走 WTM） |
+| `ConsistencyChecker` | `backend/services/consistency_checker.py:10` | — | 硬约束扫描 + 知识库矛盾检测（Writer 落盘后调） |
+| `CoverImageGenerator` | `backend/services/cover_image_generator.py` | — | 封面 prompt 构造 + Gemini 生图 + 落盘 |
 
 ---
 
-## 6. Adapter 层
+## 6. Persistence 层
 
-外部服务适配，隔离 LLM 协议差异。
+### SQLiteStore
 
-### LLM Adapter 统一入口（`adapters/llm_adapter.py`）
+实现位于 `backend/persistence/sqlite_store.py:13-95`：
 
-业务代码只调 `LLMAdapter`，不直连 LLM：
+- **WAL 模式**：`PRAGMA journal_mode=WAL`（`sqlite_store.py:55`），读写并发不互锁
+- **外键**：`PRAGMA foreign_keys=ON`（`sqlite_store.py:56`）
+- **自动迁移**：启动时按文件名顺序跑 `migrations/v*.sql`，已执行的写入 `migrations` 表跳过（`sqlite_store.py:23-43`）
+- **事务**：`transaction()` contextmanager 显式 `BEGIN/COMMIT/ROLLBACK`（`sqlite_store.py:71-79`）
+- **单例**：`get_store()` 进程内全局，工厂模式首次调时建库
 
-```
-adapter = get_llm_adapter()
-
-# 同步对话（带重试）
-response = await adapter.complete(LLMRequest(...))
-
-# 多轮对话便捷调用
-response = await adapter.complete_with_messages(
-    messages=[{"role": "user", "content": "..."}],
-    system_prompt="...",
-    temperature=0.85,
-    max_tokens=8192,
-    enable_thinking=True,    # DeepSeek thinking 模式
-    frequency_penalty=0.3,   # 探索度旋钮
-)
-
-# 流式调用（章节生成）
-async for chunk in adapter.stream(LLMRequest(...)):
-    ...
-
-# 图片生成（Gemini）
-result = await adapter.generate_image(prompt, aspect_ratio="16:9")
-```
-
-### LLM Router（`adapters/llm_router.py`）
-
-根据 `ModelRole` 将请求路由到对应 Provider：
-
-| ModelRole | Provider | 协议 |
-|-----------|----------|------|
-| `TEXT` | DeepSeekProvider | OpenAI 兼容（HTTP POST） |
-| `IMAGE` | GeminiProvider | Google Native（提交 + 轮询） |
-
-### 重试机制（`adapters/retry.py`）
-
-指数退避重试，默认 3 次，基础延迟 1.0s：
+#### 迁移文件
 
 ```
-await with_retry(provider.complete, request, max_retries=3, base_delay=1.0)
+backend/persistence/migrations/
+├── v003_init.sql         # 整体重写：20 张表（spec: .spec/db-refactor/spec.md）
+└── v004_volumes_enhance.sql  # volumes 加 status + summary 字段
 ```
+
+### Repository 列表
+
+`backend/persistence/__init__.py` 导出：
+
+| Repository | 文件 | 职责 |
+|---|---|---|
+| `ProjectRepository` | `project_repository.py` | 项目 + 7 件基座（19 张表） + characters / volumes / seeds / world_entries / timeline_events / geography_locations CRUD |
+| `ChapterRepository` | `chapter_repository.py` | 章节元数据（file_path / summary / word_count），正文存文件 |
+| `ChapterStatusRepository` | `chapter_status_repository.py` | 章节状态流（in_progress / done） |
+| `OnboardingRepository` | `onboarding_repository.py` | `onboarding_state` 表（current_step + payload） |
+| `ConversationRepository` | `conversation_repository.py` | 24h 滑窗 active conversation + messages 流 |
+| `ToolCallLogRepository` | `tool_call_log_repository.py` | 工具调用审计日志（完整链路追踪） |
+| `UserPreferenceRepository` | `user_preference_repository.py` | 用户偏好（默认探索度等） |
+
+### 章节正文存储
+
+- 路径：`data/projects/{project_id}/chapters/chapter_NNN.md`
+- DB `chapters.file_path` 存相对路径（`PROJECT_ROOT` 锚定）
+- `chapter_routes.py:75-99` 读章节时优先用 DB title，若 DB title 是"第N章"占位符则从正文首行 `# ` 提取
+
+---
+
+## 7. Adapter 层
+
+### LLM 调用流
+
+```
+LLMRequest (adapters/types.py:30)
+  → LLMAdapter.complete() (adapters/llm_adapter.py)
+  → LLMRouter.get_provider_by_name(model_name) (adapters/llm_router.py:40)
+  → DeepSeekProvider / GeminiProvider
+  → LLMResponse
+```
+
+### ModelRole（`backend/adapters/types.py:18-21`）
+
+| Role | model_name | Provider |
+|---|---|---|
+| `TEXT` | `friday/deepseek-v4-pro-tencent` | `DEEPSEEK` |
+| `IMAGE` | `friday/gemini-3.1-flash-image-preview` | `GEMINI` |
+
+### LLMRouter
+
+实现位于 `backend/adapters/llm_router.py:18-69`：
+
+- 路由表来源：`agents.json` 的 `models` 字典（`llm_router.py:18-22`）
+- 静态映射 `_MODEL_TO_PROVIDER` 作 fallback（`llm_router.py:21-24`）
+- `get_router()` 单例，首次调时按 `agents.json` 构造 provider 字典
+- `get_provider(role)` 保留旧接口（向后兼容）
 
 ### Provider 实现
 
-**DeepSeekProvider**（`adapters/providers/deepseek.py`）：
-- OpenAI 兼容协议，通过 Friday AI 网关代理
-- 支持 `enable_thinking` 参数（DeepSeek 推理链）
-- 支持 `tool_calls`（function calling）
+- **DeepSeekProvider**：`backend/adapters/providers/deepseek.py`
+  - 协议：`openai_compat`（OpenAI Chat Completions 兼容）
+  - 端点：`https://aigc.sankuai.com/v1/openai/native`（`agents.json:13`）
+  - 模型：`deepseek-v4-pro-tencent`（`context_window=128000`，`supports_thinking=true`）
+- **GeminiProvider**：`backend/adapters/providers/gemini.py`
+  - 协议：`google_native`（submit + 轮询）
+  - submit：`https://aigc.sankuai.com/v1/google/models/gemini-3.1-flash-image-preview:imageGenerate`
+  - query：`{operation_id}:imageGenerateQuery` 模板
+  - `poll_interval=3s`，`poll_timeout=120s`
 
-**GeminiProvider**（`adapters/providers/gemini.py`）：
-- Google Native 协议（图片生成）
-- 异步提交 → 轮询查询（最长 120s）
-- 返回 base64 图片数据，业务层负责保存
+### LLMRequest / LLMResponse
+
+实现位于 `backend/adapters/types.py:30-78`：
+
+- LLMRequest 支持 `messages[]`（多轮）+ `tools[]`（OpenAI function calling）+ `enable_thinking`
+- LLMResponse 含 `tool_calls: List[ToolCall]` — 走 ReAct 协议
+- LLMStreamChunk 支持 `tool_calls_delta` 流式累积
 
 ---
 
-## 7. 领域核心层
+## 8. Core 层
 
-`core/` 是零外部依赖的领域模型，任何层都可安全 import。
+### WorldTree 聚合根
 
-### WorldTree 聚合根（`core/world_tree.py`）
+实现位于 `backend/core/world_tree.py:25-43`：
 
-```
+```python
+@dataclass
 class WorldTree:
     world_tree: WorldTreeSchema
-    style_charter: StyleCharter
-    genre_resonance: GenreResonance
-    main_plot: MainPlot
-    sub_plots: List[SubPlot]
-    character_card: CharacterCard
-    seed_table: SeedTable
+    genre_resonance: GenreResonanceSchema
+    main_plot: MainPlotSchema
+    character_card: CharacterCardSchema
+    sub_plot: SubPlotSchema
+    seed_table: SeedTableSchema
+    style_pack_id: Optional[str] = None
 ```
 
-7 件基座的内存聚合，提供：
-- `to_prompt_context()` → 生成 LLM 上下文文本
-- `diff(other)` → 计算两个版本的 diff
-- `validate_consistency()` → 一致性校验
+- **角色**：内存中聚合 7 件 Schema（v0.4.1 入库后此聚合根主要用于序列化/统计）
+- **序列化**：`to_dict() / from_dict()`（`world_tree.py:45-72`）
+- **统计**：`summary()` 返回每件的关键计数（`world_tree.py:79-86`）
+- **注**：v0.8.2 删 `from_project_dir / to_project_dir`；v0.9 删 `add_node / rollback_to`（branches_json 列已删）
 
-### 7 件基座 Schema（`core/schemas/`）
+### 7 件基座 + 1 件章节摘要 Schema
 
-| Schema | 字段摘要 |
-|--------|---------|
-| `WorldTreeSchema` | timeline_era, anchor_event, geography, core_rules |
-| `StyleCharter` | voice, pacing, literary_reference, writing_rules |
-| `GenreResonance` | accept[], reject[], anchors[] |
-| `MainPlot` | arc_phrase, beats[], current_beat |
-| `SubPlot` | title, description, status, priority, linked_seeds |
-| `CharacterCard` | characters[], relationships[] |
-| `SeedTable` | seeds[]（含 importance/size/orientation/status） |
+实现位于 `backend/core/schemas/`：
 
-### EventBus（`core/event_bus.py`）
+| Schema | 文件 | 内容 |
+|---|---|---|
+| `WorldTreeSchema` | `world_tree.py` | 时间线 + 地理 + 核心规则 + 主线/支线节点树 |
+| `GenreResonanceSchema` | `genre_resonance.py` | 题材 + 情绪基调 |
+| `MainPlotSchema` | `main_plot.py` | 主线弧线 + beats |
+| `SubPlotSchema` | `sub_plot.py` | 支线 thread 列表 |
+| `CharacterCardSchema` | `character_card.py` | 角色 + 关系 |
+| `SeedTableSchema` | `seed_table.py` | 伏笔/种子 |
+| `StyleCharterSchema` | `style_charter.py` | 笔风 schema（v0.8 引入） |
+| `ChapterSummarySchema` | `chapter.py` | 章节级摘要（planted/resonating/harvested 种子变化） |
 
-领域事件总线，用于解耦组件间通信：
+### EventBus
 
-```
-bus = get_event_bus()
+实现位于 `backend/core/event_bus.py:23-89`：
 
-# 订阅
-@bus.on("onboarding.step4.completed")
-async def on_step4_done(event: dict):
-    await generate_cover_image(event["project_id"])
+- **零第三方依赖**，纯 asyncio
+- **装饰器注册**：`@event_bus.on("onboarding.step4_confirmed")`（`event_bus.py:41`）
+- **fire-and-forget**：`emit` 立即返回，handler 后台并发跑（`event_bus.py:65-85`）
+- **task 引用保存**：防 GC 提前回收（`event_bus.py:78-81`）
+- **异常隔离**：handler 异常不影响调用方（`event_bus.py:75-84`）
+- **单例**：`event_bus = EventBus()`（`event_bus.py:89`）
 
-# 发布
-await bus.emit("onboarding.step4.completed", {"project_id": project_id})
-```
+#### 已知事件
 
-Onboarding Step 4 完成后，`hooks.py` 通过 EventBus 订阅，自动触发封面图生成。
+| 事件 | 触发位置 | 监听者 |
+|---|---|---|
+| `onboarding.step4_confirmed` | WTM 完成初始基座后 | `backend/agent/onboarding/hooks.py`（项目名同步 + 封面生成） |
 
-### 异常层级（`core/exceptions.py`）
+### exceptions
 
-```
-RealtimeNovelError (基类)
-├── ProjectNotFoundError
-├── ChapterNotFoundError
-├── OnboardingError
-│   └── OnboardingStepError
-├── LLMError
-│   ├── LLMTimeoutError
-│   └── LLMRateLimitError
-└── ConsistencyError
-```
+实现位于 `backend/core/exceptions.py:9-65`，详见 [§2 异常层级](#2-分层设计)。
 
 ---
 
-## 8. 配置系统
+## 9. 配置系统
 
-### `backend/config/agents.json`
+### agents.json（`backend/config/agents.json`）
 
-唯一配置文件，控制：
+实现位于 `backend/config/agents.json`，73 行，三段式：
 
-1. **模型池**：每个模型的协议/URL/默认参数
-2. **Agent → 模型映射**：哪个 Agent 用哪个模型
-3. **探索度档位**：conservative/standard/wild 的 temperature/max_tokens/frequency_penalty
+#### 1. `exploration_levels`（line 3-32）
+
+项目级 LLM 参数档位，按 `projects.exploration_level` 查表注入：
+
+| Level | temperature | max_tokens | frequency_penalty | chapter_word_count | 语义 |
+|---|---|---|---|---|---|
+| `conservative` | 0.6 | 8192 | 0.1 | 5000 | 严守用户输入，AI 补充少 |
+| `standard` | 0.85 | 8192 | 0.3 | 5000 | 平衡，日常创作 |
+| `wild` | 1.05 | 8192 | 0.5 | 5000 | 大胆发散 |
+
+> chapter_word_count 是精确值，注入 prompt 时转 `[N×0.95 ~ N×1.05]` 浮动范围。
+
+#### 2. `models`（line 33-54）
+
+可用模型池，每个 model 含：
+
+- `protocol`（`openai_compat` / `google_native`）
+- `base_url` 或 `submit_url` / `query_url_template`
+- `default_params`
+- `context_window` / `supports_thinking`
+
+#### 3. `agents`（line 55-73）
+
+`agent_name → model_name` 路由表：
 
 ```json
 {
-  "exploration_levels": {
-    "conservative": {
-      "temperature": 0.6,
-      "max_tokens": 8192,
-      "frequency_penalty": 0.1,
-      "supplement_aggressiveness": "low",
-      "chapter_word_count": 5000
-    }
-  },
-  "models": {
-    "friday/deepseek-v4-pro-tencent": {
-      "protocol": "openai_compat",
-      "base_url": "https://aigc.sankuai.com/v1/openai/native",
-      "model_id": "deepseek-v4-pro-tencent",
-      "supports_thinking": true
-    }
-  },
-  "agents": {
-    "NovelSteward": {"model": "friday/deepseek-v4-pro-tencent"}
-  }
+  "novel_steward":      "friday/deepseek-v4-pro-tencent",
+  "novel_writer":       "friday/deepseek-v4-pro-tencent",
+  "world_tree_manager": "friday/deepseek-v4-pro-tencent",
+  "memory_keeper":      "friday/deepseek-v4-pro-tencent",
+  "image_generator":    "friday/gemini-3.1-flash-image-preview"
 }
 ```
 
-### `.llm_api_key`（gitignored）
+> Agent `model` 字段必须与代码侧 `AgentConfig.agent_name` 保持一致，供 `_get_context_window` 等函数直接索引。
 
-```json
-{"FRIDAY_API_KEY": "your_api_key_here"}
+### .llm_api_key（gitignored）
+
+实现位于 `backend/config/config_loader.py:22-25`（路径定义）+ 加载逻辑 `load_llm_api_key()`：
+
+- **路径**：`PROJECT_ROOT / ".llm_api_key"`
+- **格式**：标准 JSON
+  ```json
+  { "FRIDAY_API_KEY": "21899390080843030554" }
+  ```
+- **加载失败**抛 `ConfigError`（`config_loader.py:33`）
+- **缓存**：进程内 `_llm_api_key_cache`（`config_loader.py:30`）
+
+### LLM 路由流程
+
 ```
-
-`config_loader.py` 在启动时读取，注入到 Provider 的 HTTP Header。
+LLMRequest (含 role=TEXT / IMAGE)
+  → LLMRouter.get_provider(role)  [llm_router.py:54]
+  → ModelRole → ModelProvider 映射
+  → DEEPSEEK → DeepSeekProvider
+  → GEMINI   → GeminiProvider
+  → POST base_url + api_key (从 .llm_api_key 读)
+  → LLMResponse
+```
 
 ---
 
-## 9. 日志系统
+## 10. 启动流程
 
-`backend/utils/logger.py` 提供两种使用方式：
+### 一键启动脚本
 
-**`@logger` 类装饰器**：为类注入 `self.log`，方法名自动追踪：
+实现位于 `scripts/start.sh`（149 行）。
+
+#### 端口约定（start.sh:7-10）
+
+| 服务 | 端口 | 配置位置 |
+|---|---|---|
+| 前端 dev server | `http://localhost:7777` | `frontend/vite.config.ts` |
+| 后端 API | `http://127.0.0.1:7778` | `pyproject.toml` + `start.sh:11` |
+| API 代理 | `/api` → 后端 7778 | `frontend/vite.config.ts` |
+
+> 调整端口改 start.sh 3 个常量 + 同步改 vite.config.ts + pyproject.toml，不要散落改。
+
+#### 启动步骤
+
+1. **前置检查**（`start.sh:79-127`）
+   - `check_llm_api_key`：校验 `.llm_api_key` 存在 + 非空 + JSON 格式
+   - `check_dependencies`：校验 `.venv` + `frontend/node_modules` 存在
+2. **端口清理**（`start.sh:60-103`）
+   - `lsof` 查占用 → cmdline 匹配 `realtime.novel | uvicorn.*backend.api | vite --port` → `kill` 清理本项目进程
+   - 非本项目进程占用 → 报错退出
+3. **启动后端**（`start.sh:106-129`）
+   - `nohup uvicorn backend.api.app:app --host 127.0.0.1 --port 7778 --log-level info` → `tmp/logs/backend.log`
+   - 轮询 `/api/health` 最长 15s 就绪
+4. **启动前端**（`start.sh:132-150`）
+   - `nohup npm run dev -- --port 7777` → `tmp/logs/frontend.log`
+   - 轮询 `http://localhost:7777/` 最长 15s 就绪
+5. **后端就绪后**：
+   - `app.py:34-39` 的 `lifespan` 调 `get_store()` 触发 `_init_schema()` 自动建表
+   - `app.py:42-50` 的 `create_app()` 注册 CORS / 5 个 router / 静态文件服务
+
+#### 启动后端时实际发生的初始化
 
 ```
-from backend.utils.logger import logger
-
-@logger
-class NovelSteward:
-    async def receive(self, ...):
-        self.log.info("NovelSteward.receive START: user_id=%s", user_id)
-        # ...
-        self.log.error("发生错误: %s", e, exc_info=True)
+uvicorn 加载 backend.api.app
+  → configure_logging()         [app.py:18-21]
+  → import backend.api.* 触发各 router 模块加载
+  → import backend.agent.onboarding.hooks  [app.py:33]
+     → 触发 EventBus.on("onboarding.step4_confirmed") 注册
+  → app.include_router(*)
+  → app.mount("/static/projects", StaticFiles(...))
+  → lifespan startup:
+       get_store()
+         → SQLiteStore.__init__()
+           → _init_schema() 跑 migrations/v003 + v004
+  → uvicorn accept connections on :7778
 ```
 
-**直接 import**：
+#### 停止
+
+- `scripts/stop.sh` — 按 `tmp/pids/*.pid` 杀进程
+
+#### 日志
+
+- `tmp/logs/backend.log` — uvicorn + 应用日志
+- `tmp/logs/frontend.log` — Vite dev server 日志
+
+---
+
+## 附录：文件位置速查
 
 ```
-import logging
-log = logging.getLogger(__name__)
-log.info("...")
+backend/
+├── __init__.py            # 包入口，导出 7+1 Schema + WorldTree + __version__
+├── __main__.py            # CLI 入口（python -m backend）
+├── api/                   # 5 个 router + app.py 工厂
+├── agent/
+│   ├── agents/            # 4 个顶层 Agent（Steward / Writer / WTM / Validator）
+│   ├── runtime/           # AgentExecutor + SessionCache
+│   ├── tools/             # 18+ 工具
+│   ├── prompts/           # 提示词组装
+│   └── onboarding/        # Onboarding hooks
+├── services/              # 6 个 service（编排层）
+├── persistence/           # SQLiteStore + 7 个 Repository
+│   ├── migrations/        # v003_init.sql + v004_volumes_enhance.sql
+│   └── models.py          # ORM 数据类
+├── adapters/              # LLM Adapter + Router + Providers
+│   └── providers/         # deepseek.py + gemini.py
+├── core/                  # 零业务依赖
+│   ├── world_tree.py      # 内存聚合根
+│   ├── event_bus.py       # 异步事件总线
+│   ├── exceptions.py      # 异常层级
+│   └── schemas/           # 7+1 Pydantic Schema
+├── config/
+│   ├── agents.json        # 模型池 + 探索度 + agent 路由
+│   └── config_loader.py   # .llm_api_key + agents.json 加载
+└── utils/                 # logger / version
+
+scripts/
+├── start.sh               # 一键启动
+└── stop.sh                # 一键停止
+
+data/                      # 运行时数据（gitignored）
+├── novel.db               # SQLite
+└── projects/              # 章节 .md + 封面图
+    └── {project_id}/
+        ├── chapters/chapter_NNN.md
+        └── cover.png
+
+.llm_api_key               # gitignored，FRIDAY_API_KEY
 ```
-
-**日志输出**：
-- 开发模式（`--reload`）：直接输出到 stdout
-- 生产模式（`start.sh`）：输出到 `tmp/logs/backend.log`
-
-**LLM Prompt 调试日志**：
-
-```bash
-LLM_PROMPT_LOG=1 uvicorn backend.api.app:app --port 7778
-```
-
-开启后，每次 LLM 调用前打印完整 messages（含 system / user / assistant / tool 全部轮次）。
-

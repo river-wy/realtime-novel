@@ -1,6 +1,6 @@
 """LLM Router: 按 model_name 选 provider + fallback
 
-v0.7 改造：不再写死 primary_map，从 agents.json 的 models 池查 provider
+不再写死 primary_map，从 agents.json 的 models 池查 provider
 """
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ from backend.config.config_loader import load_agents_config
 class LLMRouter:
     """根据 model_name 选 provider，支持 fallback
 
-    v0.7 路由表构造逻辑：
+    路由表构造逻辑：
     - 读 agents.json 的 models 字典
     - 对每个 model 字段（如 friday/deepseek-v4-pro-tencent）构造对应 Provider
     - 记录 model_name → ModelProvider 映射
@@ -22,7 +22,7 @@ class LLMRouter:
     """
 
     # model_name → ModelProvider enum 映射
-    # v0.7 从 agents.json 自动构建，但保留静态映射作为 fallback（保证启动期也能工作）
+    # 从 agents.json 自动构建，但保留静态映射作为 fallback（保证启动期也能工作）
     _MODEL_TO_PROVIDER = {
         "friday/deepseek-v4-pro-tencent": ModelProvider.DEEPSEEK,
         "friday/gemini-3.1-flash-image-preview": ModelProvider.GEMINI,
@@ -75,7 +75,7 @@ def get_router() -> LLMRouter:
         from backend.adapters.providers.deepseek import DeepSeekProvider
         from backend.adapters.providers.gemini import GeminiProvider
 
-        # v0.7: 从 agents.json 读 model 池，按需实例化 provider
+        # 从 agents.json 读 model 池，按需实例化 provider
         cfg = load_agents_config()
         models = cfg["models"]
 

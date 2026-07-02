@@ -1,6 +1,6 @@
 """context._helpers — 私有 helper（DB 转换 + 字段格式化 + json_dumps）
 
-v0.6.1 P4: 从 context_builder.py 拆出
+P4 拆出：从 context_builder.py 拆出
 
 公开:
 - load_history_messages: 取历史 N 条转 OpenAI 格式
@@ -22,7 +22,7 @@ from backend.persistence import (
 )
 
 
-# ============ v0.4.1 基础 ============
+# ============ 基础 ============
 
 def _row_to_message(row: dict) -> Optional[Dict[str, Any]]:
     """DB message row → OpenAI 格式 message
@@ -401,7 +401,7 @@ def json_dumps(obj: Any) -> str:
 def _load_project_history(project_id: str, max_history: int = 5) -> list[dict[str, Any] | None]:
     """按 project_id 取历史（per-project 维度），经 ConversationRepository 查询
 
-    v0.6.1: 从 onboarding_builders.py 移到 _helpers.py (通用能力)
+    从 onboarding_builders.py 移到 _helpers.py (通用能力)
     - 之前在 onboarding_builders 内部用, 但 build_messages_for_chapter_generator
       (在 builders.py) 也调它, 引发 NameError
     - 修法: 移到通用 helper, onboarding_builders 改为 import
@@ -503,7 +503,7 @@ async def load_chat_history(
     return result
 
 
-# v0.9.4 新增：detailed_summary 字段已删 → 改用「历史卷维度 description」+「当前卷下所有章节 summary」
+# detailed_summary 字段已删 → 改用「历史卷维度 description」+「当前卷下所有章节 summary」
 # v004 增强（欧尼酱 20:16）：用 volumes.status 区分完结/进行中，完结卷优先用 volume.summary
 def _format_chapter_summaries_by_volume(chapters: list, volumes: list) -> str:
     """按卷维度组织章节摘要
@@ -581,7 +581,7 @@ def _format_chapter_summaries_by_volume(chapters: list, volumes: list) -> str:
                     else:
                         lines.append(f"  - 第{ch.chapter_num}章: {ch.summary}".rstrip())
         elif is_completed:
-            # 完结卷：只保留 vol.summary，不列章节（v0.9.6 拍板：欧尼酱 21:24）
+            # 完结卷：只保留 vol.summary，不列章节
             # 设计：vol.summary (1000字) 已足够描述整卷全部内容
             #       章节 detail 在 vol.summary 里都已涵盖，不需要再列
             if vol:

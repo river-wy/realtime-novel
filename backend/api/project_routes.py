@@ -26,7 +26,7 @@ class ProjectInfo(BaseModel):
     # onboard 续接用
     onboarding_step: Optional[int] = None  # null=从未进过, 0=未开始, 1-4=进行中
     status: Optional[str] = "not_started"  # not_started / in_progress / completed
-    # v0.9: 世界封面图
+    # 世界封面图
     cover_image_url: Optional[str] = None
 
 
@@ -57,7 +57,7 @@ class ProjectDetailResponse(BaseModel):
     id: str
     name: str
     palette: str
-    # v0.8: 探索度
+    # 探索度
     exploration_level: str = "standard"
     seven_artifacts: Optional[dict[str, Any]] = None
     world_tree: Optional[dict[str, Any]] = None
@@ -65,7 +65,7 @@ class ProjectDetailResponse(BaseModel):
     # onboard 续接用
     onboarding_step: Optional[int] = None      # 已完成到哪步 (0=未开始, 1-4=进行中)
     onboarding_payload: Optional[dict[str, Any]] = None  # 已填入的 payload (续接回填用)
-    # v0.9: 世界封面图
+    # 世界封面图
     cover_image_url: Optional[str] = None
 
 
@@ -102,13 +102,12 @@ async def list_projects(
 
 @router.post("", response_model=CreateProjectResponse, status_code=201)
 async def create_project(req: CreateProjectRequest):
-    """创建项目（v0.4.1 落库到 messages 表，v0.8 支持 exploration_level）"""
+    """创建项目"""
     try:
-        # v0.8: 传 exploration_level 给 _pm
         result = await _pm.create(req.name, req.palette, req.initial_prompt, exploration_level=req.exploration_level)
     except FileExistsError as e:
         raise HTTPException(409, f"Project already exists: {req.name}")
-    # v0.4.1 落库 (via ConversationRepository)
+    # 落库 (via ConversationRepository)
     conv_repo = ConversationRepository()
     conv = await conv_repo.get_or_create_active_conversation("default")
     await conv_repo.add_message(
@@ -119,7 +118,7 @@ async def create_project(req: CreateProjectRequest):
                                "exploration_level": req.exploration_level},
                       "result": result},
         project_id=result.get("id"),
-        agent_name="novel_steward",   # v0.9.2 补：create_project 管家直接调
+        agent_name="novel_steward",
     )
     return CreateProjectResponse(
         id=result.get("id", ""),
@@ -131,7 +130,7 @@ async def create_project(req: CreateProjectRequest):
 
 @router.get("/{project_id}", response_model=ProjectDetailResponse)
 async def get_project(project_id: str):
-    """加载项目详情（v0.8: 含 exploration_level）"""
+    """加载项目详情"""
     project = await _pm.load(project_id)
     if project is None:
         raise HTTPException(404, f"Project not found: {project_id}")
@@ -145,7 +144,7 @@ async def get_project(project_id: str):
         chapters=project.get("chapters"),
         onboarding_step=project.get("onboarding_step"),
         onboarding_payload=project.get("onboarding_payload") or None,
-        cover_image_url=project.get("cover_image_url"),  # v0.9
+        cover_image_url=project.get("cover_image_url"),
     )
 
 
@@ -154,7 +153,7 @@ async def update_exploration_level(
     project_id: str,
     req: UpdateExplorationLevelRequest,
 ):
-    """v0.8: 切换项目探索度 (conservative/standard/wild)
+    """切换项目探索度 (conservative/standard/wild)
 
     探索度影响后续章节生成 + 世界树管理的 LLM 参数 (Temperature/max_tokens)
     - conservative: 严守用户输入
@@ -179,14 +178,14 @@ async def delete_project(
     project_id: str,
     confirm: bool = Query(..., description="Must be true"),
 ):
-    """⚠️ 危险操作：删除项目（v1.3 软删方案 b）— 薄路由，调 manager.soft_delete"""
+    """⚠️ 危险操作：删除项目 — 薄路由，调 manager.soft_delete"""
     if not confirm:
         raise HTTPException(400, "confirm query param must be true")
     try:
         result = await _pm.soft_delete(project_id, confirm=True)
     except FileNotFoundError as e:
         raise HTTPException(404, str(e))
-    # v0.4.1 落库 (via ConversationRepository)
+    # 落库 (via ConversationRepository)
     conv_repo = ConversationRepository()
     conv = await conv_repo.get_or_create_active_conversation("default")
     await conv_repo.add_message(
@@ -196,7 +195,7 @@ async def delete_project(
                       "args": {"project_id": project_id, "confirm": confirm},
                       "result": result},
         project_id=project_id,
-        agent_name="novel_steward",   # v0.9.2 补：delete_project 管家直接调
+        agent_name="novel_steward",
     )
     # 统计 chapter 数
     from pathlib import Path

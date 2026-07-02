@@ -1,13 +1,13 @@
-"""onboarding_artifacts：WTM 基座状态机 + 完整性校验（v0.8 改造）
+"""onboarding_artifacts：WTM 基座状态机 + 完整性校验
 
-v0.8 改造（2026-07-01 欧尼酱拍板）：
+改造内容：
 - 删 delegate_to_wtm 函数（之前含基座生成机械代码 + 状态机）
 - 新增 3 个独立函数：mark_wtm_pending / mark_wtm_baseline_ready / mark_wtm_baseline_failed
   —— 单纯做状态机切换 + emit 事件
-- 基座生成完全交给 WTM.run_initial_baseline_react（走 ReAct loop，v0.8 新增）
+- 基座生成完全交给 WTM.run_initial_baseline_react（走 ReAct loop）
 - 保留 verify_world_tree_baseline（spec §5.6 6 项校验，管家委托前后调）
 
-链路（v0.8）：
+链路：
   管家 ReAct → 收集足够 hint → delegate_to_agent(agent=WTM, intent=initial_baseline, payload=...)
     → delegation_tools 调 mark_wtm_pending(info_state=wtm_pending)
     → WTM.run_initial_baseline_react 走 ReAct 自主落库 9 张表
@@ -24,7 +24,7 @@ from backend.persistence import OnboardingRepository, ProjectRepository
 # ============ WTM 基座状态机 ============
 
 def mark_wtm_pending(project_id: str) -> None:
-    """WTM 委托开始：info_state = 'wtm_pending'（v0.8 引入）
+    """WTM 委托开始：info_state = 'wtm_pending'
 
     由 delegation_tools._delegate_wtm_initial_baseline 在调 WTM 前调
     """
@@ -34,7 +34,7 @@ def mark_wtm_pending(project_id: str) -> None:
 def mark_wtm_baseline_ready(project_id: str) -> None:
     """WTM 委托成功：info_state = 'ready' + emit onboarding.step4_confirmed 事件
 
-    v0.8 改造：基座生成在 WTM 内部完成（ReAct），service 层只切状态 + emit
+    基座生成在 WTM 内部完成（ReAct），service 层只切状态 + emit
     事件钩子：onboarding_hooks.handle_step4_confirmed → 生成项目名 + 封面图
     """
     OnboardingRepository().set_info_state(project_id, "ready")
@@ -61,7 +61,7 @@ def mark_wtm_baseline_ready(project_id: str) -> None:
 def mark_wtm_baseline_failed(project_id: str, error: str) -> None:
     """WTM 委托失败：info_state = 'collecting'（回退，管家继续对话收集）
 
-    v0.8 改造：失败时回退到 collecting，让管家继续与用户对话
+    失败时回退到 collecting，让管家继续与用户对话
     """
     OnboardingRepository().set_info_state(project_id, "collecting")
     import logging

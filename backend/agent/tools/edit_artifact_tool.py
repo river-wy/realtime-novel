@@ -15,20 +15,20 @@ from backend.persistence import ProjectRepository
 class EditArtifactTool(BaseTool):
     """结构化增量编辑 9 件基座
 
-    12 个 target × 3 个 operation = 36 种组合（v0.9.1 Literal 跟 handler_map 对齐）
+    12 个 target × 3 个 operation = 36 种组合（Literal 跟 handler_map 对齐）
     """
     name = "edit_artifact"
 
     # 统一 handler map（run() + run_batch() 共用）
-    # key = EditArtifactInput.target Literal 合法值（v0.9.1 已对齐实现名）
+    # key = EditArtifactInput.target Literal 合法值（已对齐实现名）
     def __init__(self):
-        self._pm = ProjectManager()  # v0.9.1 保留原 _pm 初始化
+        self._pm = ProjectManager()  # 保留原 _pm 初始化
 
     @property
     def _HANDLER_MAP(self) -> dict:
         """handler map（每次访问时构造，性能可忽略）
 
-        v0.9.1 修复：_edit_beat 加入，不再死代码
+        _edit_beat 加入，不再死代码
         """
         return {
             "project_name": self._edit_project_name,
@@ -43,7 +43,7 @@ class EditArtifactTool(BaseTool):
             "subplot": self._edit_subplot,
             "main_plot_node": self._edit_main_plot_node,
             "volume": self._edit_volume,
-            "beat": self._edit_beat,        # v0.9.1 修复：_edit_beat 不再死代码
+            "beat": self._edit_beat,        # _edit_beat 不再死代码
         }
     description = "结构化编辑 6 件基座（add/update/delete）"
 
@@ -85,7 +85,7 @@ class EditArtifactTool(BaseTool):
                 error=str(e),
             )
 
-    # ── v0.9.1 新增：批量编辑（事务 + 性能优化）────────────────────
+    # ── 批量编辑（事务 + 性能优化）────────────────────
 
     async def run_batch(
         self, input: EditArtifactBatchInput, progress_callback=None
@@ -754,7 +754,7 @@ register_tool(EditArtifactTool())
 
 
 class EditArtifactBatchTool(BaseTool):
-    """批量结构化编辑 6 件基座（v0.9.1 新增，P0 性能优化）
+    """批量结构化编辑 6 件基座（性能优化）
 
     输入：items 数组（1-50 个 add/update/delete）
     事务：atomic=true 时任一失败全回滚；atomic=false 逐项提交

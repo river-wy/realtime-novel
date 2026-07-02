@@ -1,14 +1,13 @@
-"""onboarding_tools — Onboarding 基座完整性校验工具（v0.7.1 合并后）
+"""onboarding_tools — Onboarding 基座完整性校验工具
 
-v0.7.1 变更（2026-07-01）：
-- 合并 delegate_to_wtm + delegate_to_agent：Onboarding 阶段委托 WTM 完整基座生成
+合并后保留：
+- delegate_to_wtm + delegate_to_agent：Onboarding 阶段委托 WTM 完整基座生成
   走 delegate_to_agent(agent="world_tree_manager", mode="full_baseline", payload=...)
 - 本文件仅保留 verify_world_tree_baseline（边界清晰：这是校验工具，不是委托，
   不跟 delegate_to_agent 重复）
 
-v003 委托模式（spec §5.8）：
-- 删 v0.7 旧 5 步工具（onboarding_propose_step / onboarding_user_confirm / onboarding_generate_chapter）
-  —— 2026-07-01 完整删除
+委托模式（spec §5.8）：
+- 删旧 5 步工具（onboarding_propose_step / onboarding_user_confirm / onboarding_generate_chapter）
 - 管家在 ReAct loop 多轮对话中自由收集用户信息（不限步数）
 - 信息足够（spec §5.6 6 项通过）后调 verify_world_tree_baseline 校验
 - 通过后调 delegate_to_agent(agent="world_tree_manager", mode="full_baseline", payload=...)

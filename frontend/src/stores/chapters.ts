@@ -1,5 +1,5 @@
 /**
- * Chapters Pinia store（含 v0.5 summary 自动展示）
+ * Chapters Pinia store（含 summary 自动展示）
  */
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
@@ -8,7 +8,7 @@ import * as api from '@/api/chapters'
 export const useChaptersStore = defineStore('chapters', () => {
   const list = ref<api.ChapterListItem[]>([])
   const current = ref<api.ChapterContent | null>(null)
-  /** v0.5 新增：当前章节 1 句 summary */
+  /** 当前章节 1 句 summary */
   const currentSummary = ref<string | null>(null)
   const loading = ref(false)
   const generating = ref(false)
@@ -44,7 +44,7 @@ export const useChaptersStore = defineStore('chapters', () => {
 
   async function generate(
     projectId: string,
-    options?: { intervention?: string; actor_feedback?: string; actor_character?: string }
+    options?: { intervention?: string }
   ) {
     generating.value = true
     error.value = null

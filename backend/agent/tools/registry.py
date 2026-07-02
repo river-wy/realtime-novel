@@ -30,39 +30,39 @@ log = logging.getLogger(__name__)
 AGENT_TOOLS: Dict[str, List[str]] = {
     # ── 管家（唯一用户入口，ReAct loop）──────────────────
     # 职责内：项目 CRUD、Onboarding 推进、图片生成、探索度、笔风调整
-    # 职责外（v0.8 改造）：禁止直接修改世界树基座，必须委托 WTM
+    # 职责外：禁止直接修改世界树基座，必须委托 WTM
     #   调基座 = delegate_to_agent(agent="world_tree_manager", intent="intervention" | "initial_baseline", task/payload=...)
     "novel_steward": [
         "load_project",
-        "list_projects",               # v0.9.1 新增：列项目（管家"我有什么项目"用）
+        "list_projects",
         "create_project",
-        "delete_project",              # v0.6.2 补：删除项目（软删 → .trash/）
+        "delete_project",
         "generate_image",
-        "update_exploration_level",    # v0.6.2 补：调整项目/全局探索度
-        "list_style_packs",            # 查询可用笔风列表（Onboarding/调整笔风时先读）
-        "adjust_style",                # 写入/更新 style_pack_id
-        # v0.8 委托入口（intent 字段区分）：
+        "update_exploration_level",
+        "list_style_packs",
+        "adjust_style",
+        # 委托入口（intent 字段区分）：
         #   intent="initial_baseline" + payload：Onboarding 首次生成（WTM 走 ReAct 自主落库）
         #   intent="intervention"（默认）+ task：剧情干预（WTM 走 ReAct 分析 diff）
-        "verify_world_tree_baseline",  # v003：校验世界树基座完整性（spec §5.6 6 项）
+        "verify_world_tree_baseline",  # 校验世界树基座完整性（spec §5.6 6 项）
         "delegate_to_agent",           # 同步委托专家（intent 区分 initial_baseline / intervention）
         "dispatch_background_task",    # 异步派发后台任务（管家自主识别）
     ],
     # ── 文笔家（ReAct loop：调 LLM 写正文 + 调 generate_chapter/summarize_chapter 工具落盘）────────────
-    # v0.6.2 重构：文笔家不再直接被外层调用解析 final_response，所有章节生成都走 ReAct loop
+    # 文笔家不再直接被外层调用解析 final_response，所有章节生成都走 ReAct loop
     # 由 LLM 自主决定调 generate_chapter / summarize_chapter 工具落盘
     "novel_writer": [
         "load_project",
         "read_chapter",
-        "generate_chapter",       # v0.6.2 新增：纯落盘（写文件 + 入 DB）
-        "summarize_chapter",      # v0.6.2 新增：抽 1 句话 summary
-        "generate_volume_summary",  # v0.9.5 新增：生成卷 1000 字总结
+        "generate_chapter",
+        "summarize_chapter",
+        "generate_volume_summary",
     ],
     # ── 世界树管理（可调多 tool 自主推演）──────────────
     "world_tree_manager": [
         "load_project",
         "edit_artifact",
-        "edit_artifact_batch",   # v0.9.1 新增：批量编辑（1 tool_call 落 N 行）
+        "edit_artifact_batch",
         "update_base",
         "weave_plot",
         "introspect_character",

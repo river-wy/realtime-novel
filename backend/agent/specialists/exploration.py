@@ -9,7 +9,7 @@ from __future__ import annotations
 
 
 def get_llm_params_for_project(project_id: str, role: str = "chapter") -> dict:
-    """v0.8: 按项目的 exploration_level 返回 LLM 调用参数
+    """按项目的 exploration_level 返回 LLM 调用参数
 
     Args:
         project_id: 项目 ID
@@ -29,13 +29,12 @@ def get_llm_params_for_project(project_id: str, role: str = "chapter") -> dict:
     return {
         "temperature": cfg["temperature"],
         "max_tokens": cfg["max_tokens"],
-        # v0.8.1: 透传 frequency_penalty (探索度 wild 档减少重复用词)
         "frequency_penalty": cfg.get("frequency_penalty", 0.0),
     }
 
 
 def get_style_directive(level: str) -> str:
-    """v0.8: 按 exploration_level 返回 prompt 创作风格指导段
+    """按 exploration_level 返回 prompt 创作风格指导段
 
     - conservative: 严守用户输入, 不自由发挥
     - standard:     合理补充
@@ -63,7 +62,7 @@ def get_style_directive(level: str) -> str:
 
 
 def get_chapter_word_count_range(level: str) -> str:
-    """v0.9: 从 agents.json 读 chapter_word_count，生成 ±5% 浮动范围字符串
+    """从 agents.json 读 chapter_word_count，生成 ±5% 浮动范围字符串
 
     例: chapter_word_count=5000 → "4750-5250"
     fallback: 未配置时默认 5000 字
@@ -80,11 +79,7 @@ def get_chapter_word_count_range(level: str) -> str:
 
 
 def fill_chapter_prompt_placeholders(template: str, project_id: str) -> str:
-    """v0.8: 填充 CHAPTER_GENERATOR_PROMPT 的探索度占位符 (按项目动态注入)
-
-    v0.8.1: 用 string.Template ($-placeholder) 避免和 {world_tree}/{chapter_summaries}
-    等其他 {}-placeholder 冲突。
-    v0.9: word_count_range 从 agents.json.exploration_levels[level].chapter_word_count 读取（±5% 浮动）
+    """填充 CHAPTER_GENERATOR_PROMPT 的探索度占位符 (按项目动态注入)
 
     占位符 (用 $ 前缀避免冲突):
     - $word_count_range: 字数范围，由 chapter_word_count ± 5% 生成（如 "4750-5250"）
@@ -115,13 +110,13 @@ def fill_chapter_prompt_placeholders(template: str, project_id: str) -> str:
 
 
 
-# ============ v0.6.1: 三级覆盖 exploration_level ============
+# ============ 三级覆盖 exploration_level ============
 
 def _resolve_exploration_level(
     project_id: Optional[str] = None,
     user_id: Optional[str] = None,
 ) -> str:
-    """三级覆盖 (v0.6.1):
+    """三级覆盖:
     1. projects.exploration_level (项目级, 最高优先级)
     2. user_preferences.default_exploration_level (用户级, 中间)
     3. agents.json exploration_levels.standard (硬默认, 最低)
@@ -164,7 +159,7 @@ def get_llm_params_for_chat(
     project_id: Optional[str] = None,
     role: str = "chat",
 ) -> dict:
-    """v0.6.1: 管家 CHAT/ReAct 路径获取 LLM 参数
+    """管家 CHAT/ReAct 路径获取 LLM 参数
 
     按三级覆盖解析 exploration_level, 调 LLM 时统一参数。
 

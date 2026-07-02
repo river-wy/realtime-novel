@@ -1,7 +1,6 @@
 """DeepSeek Provider（经 friday 代理 OpenAI 兼容 + Thinking 模式）
 
 对应 infra.md §B.2.5
-v0.7 改造：provider_name 加 friday/ 前缀表示提供方，api_key 走 config_loader (.llm_api_key)
 """
 from __future__ import annotations
 
@@ -23,7 +22,7 @@ class DeepSeekProvider(LLMProvider):
     supported_roles = ["text"]
 
     def __init__(self, api_key: str | None = None, base_url: str | None = None):
-        # v0.7: api_key 走 .llm_api_key 文件，base_url 从 agents.json 读
+        # api_key 走 .llm_api_key 文件，base_url 从 agents.json 读
         self.api_key = api_key or load_llm_api_key()
         model_cfg = get_model_config("friday/deepseek-v4-pro-tencent")
         self.base_url = base_url or model_cfg["base_url"]
@@ -45,7 +44,7 @@ class DeepSeekProvider(LLMProvider):
         self.log.info("LLM complete START: model=%s, temp=%.2f, max_tokens=%d, thinking=%s, msg_count=%d, est_input_tokens~=%d",
                  self.model, request.temperature, request.max_tokens,
                  request.enable_thinking, msg_count, est_tokens)
-        # v0.8.2: enable_thinking=False 时关闭 thinking（防止 reasoning token 占用 max_tokens）
+        # enable_thinking=False 时关闭 thinking（防止 reasoning token 占用 max_tokens）
         thinking_body = {"thinking": {"type": "enabled"}} if request.enable_thinking else {"thinking": {"type": "disabled"}}
         stream_kwargs = {
             "model": self.model,
@@ -55,22 +54,22 @@ class DeepSeekProvider(LLMProvider):
             "stream": True,
             "extra_body": thinking_body,
         }
-        # v0.6 新增：response_format 透传（强制 JSON 输出）
+        # response_format 透传（强制 JSON 输出）
         if request.response_format:
             stream_kwargs["response_format"] = request.response_format
-        # v0.8.1: 透传探索度参数 (frequency/presence penalty)
+        # 透传探索度参数 (frequency/presence penalty)
         if request.frequency_penalty:
             stream_kwargs["frequency_penalty"] = request.frequency_penalty
         if request.presence_penalty:
             stream_kwargs["presence_penalty"] = request.presence_penalty
-        # v0.6: 透传 tools / tool_choice（OpenAI function calling）
+        # 透传 tools / tool_choice（OpenAI function calling）
         if request.tools:
             stream_kwargs["tools"] = request.tools
         if request.tool_choice is not None:
             stream_kwargs["tool_choice"] = request.tool_choice
 
         content_parts = []
-        # v0.6: tool_calls 流式累积（OpenAI 协议按 fragment 返回）
+        # tool_calls 流式累积（OpenAI 协议按 fragment 返回）
         tool_calls_accumulator: dict[int, dict] = {}
         input_tokens = 0
         output_tokens = 0
@@ -86,7 +85,7 @@ class DeepSeekProvider(LLMProvider):
             delta = chunk.choices[0].delta
             if delta.content:
                 content_parts.append(delta.content)
-            # v0.6: 累积 tool_calls fragments
+            # 累积 tool_calls fragments
             if hasattr(delta, "tool_calls") and delta.tool_calls:
                 for tc_delta in delta.tool_calls:
                     idx = tc_delta.index
@@ -115,7 +114,7 @@ class DeepSeekProvider(LLMProvider):
 
         duration_ms = int((time.time() - start) * 1000)
         content = "".join(content_parts)
-        # v0.6: 转 ToolCall 列表
+        # 转 ToolCall 列表
         tool_calls = None
         if tool_calls_accumulator:
             tool_calls = [
@@ -146,7 +145,7 @@ class DeepSeekProvider(LLMProvider):
         msg_count = len(request.messages or [])
         self.log.info("LLM stream START: model=%s, temp=%.2f, max_tokens=%d, thinking=%s, msg_count=%d",
                  self.model, request.temperature, request.max_tokens, request.enable_thinking, msg_count)
-        # v0.8.2: enable_thinking=False 时关闭 thinking
+        # enable_thinking=False 时关闭 thinking
         thinking_body = {"thinking": {"type": "enabled"}} if request.enable_thinking else {"thinking": {"type": "disabled"}}
         stream_kwargs = {
             "model": self.model,
@@ -156,12 +155,12 @@ class DeepSeekProvider(LLMProvider):
             "stream": True,
             "extra_body": thinking_body,
         }
-        # v0.8.1: 流式也支持 frequency/presence penalty
+        # 流式也支持 frequency/presence penalty
         if request.frequency_penalty:
             stream_kwargs["frequency_penalty"] = request.frequency_penalty
         if request.presence_penalty:
             stream_kwargs["presence_penalty"] = request.presence_penalty
-        # v0.6: 流式也支持 tools / tool_choice
+        # 流式也支持 tools / tool_choice
         if request.tools:
             stream_kwargs["tools"] = request.tools
         if request.tool_choice is not None:
@@ -177,7 +176,7 @@ class DeepSeekProvider(LLMProvider):
             reasoning = getattr(delta, "reasoning_content", None) or ""
             _total_chars += len(content)
             is_final = chunk.choices[0].finish_reason is not None
-            # v0.6: 提取 tool_calls 增量（原始 OpenAI 格式）
+            # 提取 tool_calls 增量（原始 OpenAI 格式）
             tool_calls_delta = None
             if hasattr(delta, "tool_calls") and delta.tool_calls:
                 tool_calls_delta = []
@@ -207,7 +206,7 @@ class DeepSeekProvider(LLMProvider):
     def _build_messages(self, request: LLMRequest) -> list[dict]:
         """构建 messages 数组
 
-        v0.4.1 优先用 messages 字段（多轮对话）：
+        优先用 messages 字段（多轮对话）：
         - 如果 request.messages 非空：直接用 + 补 system_prompt（如果不存在）
         - 如果 request.messages 空：兼容旧代码（system_prompt + prompt 拼成单条 user）
         """
@@ -228,11 +227,11 @@ class DeepSeekProvider(LLMProvider):
         return msgs
 
     def count_tokens(self, text: str) -> int:
-        """字符数估算（v0.4 简化版）"""
+        """字符数估算（简化版）"""
         return len(text) // 2
 
     def is_available(self) -> bool:
-        return True  # v0.4 简化
+        return True  # 简化
 
     async def generate_image(
         self,

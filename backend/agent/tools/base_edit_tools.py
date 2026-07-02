@@ -32,7 +32,7 @@ class UpdateBaseTool(BaseTool):
         try:
             if progress_callback:
                 await progress_callback({"step": "loading", "percentage": 0})
-            # 走 manager（v0.4 重构 P0-1）
+            # 走 manager
             result = await self._manager.update_base(
                 project_id=input.project_id,
                 key=input.key,
@@ -72,7 +72,7 @@ class RollbackBaseTool(BaseTool):
             try:
                 if progress_callback:
                     await progress_callback({"step": "rolling_back", "percentage": 0})
-                # 走 manager（v0.4 重构 P0-1）
+                # 走 manager
                 result = await self._pm.rollback(
                     project_id=input.project_id,
                     to_chapter=input.to_chapter,

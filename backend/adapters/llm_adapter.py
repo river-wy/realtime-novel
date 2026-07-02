@@ -1,9 +1,8 @@
-"""v0.4 LLM Adapter 统一接口（v0.3 LLM 客户端已存在，不修改）
+"""LLM Adapter 统一接口
 
 设计：
-- v0.3 `backend/adapters/llm.py` 的 LLMClient 保持不变（spec §7 不重写）
-- v0.4 新增本模块 LLMAdapter，对外暴露 Router + Retry + Streaming
-- 所有 v0.4 业务代码（agent/tools/api）只调 LLMAdapter，不直连 LLM
+- 业务代码只调 LLMAdapter，不直连 LLM
+- 内部组合 Router + Retry + Streaming
 
 对应 spec.md §5.1 + infra.md §B.2
 """
@@ -61,7 +60,7 @@ def _log_request(request: LLMRequest) -> None:
 
 @logger
 class LLMAdapter:
-    """v0.4 统一 LLM 调用入口（业务代码只用这个）"""
+    """统一 LLM 调用入口（业务代码只用这个）"""
 
     def __init__(self, router: Optional[LLMRouter] = None):
         self.router = router or get_router()
@@ -83,17 +82,17 @@ class LLMAdapter:
         presence_penalty: float = 0.0,
         enable_thinking: bool = True,
     ) -> LLMResponse:
-        """v0.4.1 新增：多轮对话便捷调用 (v0.8.1 加 frequency/presence penalty)
+        """多轮对话便捷调用
 
         Args:
             messages: OpenAI 格式 messages 数组（不含 system）
                 [{"role": "user", "content": "..."}, ...]
             system_prompt: system prompt（可选）
             temperature/max_tokens/role: 其他参数
-            frequency_penalty/presence_penalty: v0.8.1 探索度旋钮用
+            frequency_penalty/presence_penalty: 探索度旋钮
                 - frequency_penalty: 正值减少重复用词 (OpenAI 标准参数)
                 - presence_penalty:  正值鼓励新话题 (OpenAI 标准参数)
-            enable_thinking: v0.8.2 是否启用 thinking 模式（DeepSeek）；summary/分类等轻量任务可设 False
+            enable_thinking: 是否启用 thinking 模式（DeepSeek）；summary/分类等轻量任务可设 False
         """
         request = LLMRequest(
             prompt="",  # messages 模式下不需要

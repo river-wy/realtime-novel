@@ -24,7 +24,7 @@ export interface GenerateChapterResult {
   word_count: number
   generated_at: string
   new_seeds_triggered: number
-  /** v0.5 新增：1 句话 summary */
+  /** 1 句话 summary */
   summary: string
 }
 
@@ -40,7 +40,7 @@ export async function readChapter(projectId: string, n: number): Promise<Chapter
 
 export async function generateChapter(
   projectId: string,
-  options?: { intervention?: string; actor_feedback?: string; actor_character?: string }
+  options?: { intervention?: string }
 ): Promise<GenerateChapterResult> {
   const { data } = await api.post(`/projects/${projectId}/chapters`, options || {})
   return data

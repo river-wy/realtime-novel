@@ -1,4 +1,4 @@
-"""summarize_chapter 工具（v0.6.2 新增）
+"""summarize_chapter 工具
 
 文笔家 ReAct loop 调这个工具抽取章节的 1 句话 summary。
 
@@ -9,8 +9,6 @@
   1. sentinel 块（###SUMMARY### ... ###END_SUMMARY###）— 文笔家在 prompt 里被要求输出
   2. fallback_truncate（取前 100 字截断）— sentinel 不存在时
   3. llm_fallback（调 LLM 单独生成）— 前两个都失败时（很少触发）
-
-对应 v0.5 chapter_summarizer.extract_summary_safe()。
 """
 from __future__ import annotations
 

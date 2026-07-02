@@ -1,9 +1,9 @@
-"""volume_tools 工具（v0.9.5 新增）
+"""volume_tools 工具
 
 文笔家 ReAct loop 调 generate_volume_summary 工具生成卷的 1000 字总结。
 
-设计（v0.9.5 欧尼酱 20:30 拍板）：
-- 背后走 WTM.generate_volume_summary（v004 新增）
+设计：
+- 背后走 WTM.generate_volume_summary
 - auto_complete_volume=False（默认）：只生成 summary，保留 status=in_progress
 - auto_complete_volume=True：生成 summary 后调 WTM.complete_volume
 - 调用记录写入 WTM 默认 session（不污染文笔家 session）
@@ -22,8 +22,7 @@ log = logging.getLogger(__name__)
 class GenerateVolumeSummaryTool(BaseTool):
     """生成卷的 1000 字总结
 
-    v0.9.5 新增：配给文笔家（novel_writer）
-    背后走 WTM.generate_volume_summary（v004）— 包含 prompt + LLM 调用 + 落库
+    背后走 WTM.generate_volume_summary — 包含 prompt + LLM 调用 + 落库
     """
     name = "generate_volume_summary"
     description = (

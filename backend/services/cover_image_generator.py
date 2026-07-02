@@ -1,6 +1,6 @@
 """cover_image_generator — 世界封面图生成服务
 
-v0.9: onboarding Step 4 完成后，并发调 Gemini 生图
+onboarding Step 4 完成后，并发调 Gemini 生图：
 - 根据 story_core/characters/genres/tone 生成图片 prompt
 - 调 GeminiProvider.generate_image（1:1 比例）
 - base64 → 保存为 PNG 文件到 data/projects/{id}/cover.png

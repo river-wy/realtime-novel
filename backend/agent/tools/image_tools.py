@@ -12,7 +12,7 @@ from backend.agent.tools.schemas import GenerateImageInput, ImageResult
 from backend.adapters import get_llm_adapter
 
 
-# 简单内存 cache（v0.4 阶段，生产可换 Redis）
+# 简单内存 cache（生产可换 Redis）
 _image_cache: dict[str, ImageResult] = {}
 
 

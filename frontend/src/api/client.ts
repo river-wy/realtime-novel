@@ -1,7 +1,7 @@
 /**
  * Axios 客户端
  * baseURL: /api（Vite proxy 转发到后端）
- * 后端实际端口：见 vite.config.ts 的 BACKEND_PORT（当前 7777）
+ * 后端实际端口：见 vite.config.ts 的 BACKEND_PORT
  * 不要在这里硬编码后端端口 — 走 /api 代理路径
  */
 import axios, { type AxiosInstance, type AxiosError } from 'axios'
@@ -26,8 +26,3 @@ api.interceptors.response.use(
   }
 )
 
-/** 健康检查 */
-export async function healthCheck() {
-  const { data } = await api.get('/health')
-  return data
-}

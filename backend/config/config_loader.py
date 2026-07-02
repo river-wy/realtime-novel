@@ -5,12 +5,12 @@
 2. 加载 backend/config/agents.json（模型池 + agent→model 路由表）
 3. 提供便捷查询接口
 
-key 文件格式（v0.7 拍板：只接受标准 JSON）：
+key 文件格式（只接受标准 JSON）：
 {
   "FRIDAY_API_KEY": "21899390080843030554"
 }
 
-v0.7 拍板：friday 前缀表示「提供方」(model namespace)，未来会接 deepseek/,minimax/ 原生
+friday 前缀表示「提供方」(model namespace)，未来会接 deepseek/,minimax/ 原生
 """
 from __future__ import annotations
 
@@ -37,7 +37,7 @@ class ConfigError(RuntimeError):
 def load_llm_api_key(path: Path = LLM_API_KEY_PATH) -> str:
     """从 .llm_api_key 文件读 api_key 真值
 
-    v0.7 拍板：只接受标准 JSON 格式
+    只接受标准 JSON 格式：
     {
       "FRIDAY_API_KEY": "21899390080843030554"
     }
@@ -58,7 +58,7 @@ def load_llm_api_key(path: Path = LLM_API_KEY_PATH) -> str:
     if not raw:
         raise ConfigError(f".llm_api_key 文件内容为空: {path}")
 
-    # v0.7 收紧：只接受标准 JSON 格式（外层必须是 {）
+    # 收紧：只接受标准 JSON 格式（外层必须是 {）
     if not raw.startswith("{"):
         raise ConfigError(
             f".llm_api_key 必须是标准 JSON 格式（以 {{ 开头）\n"
@@ -176,7 +176,7 @@ def get_agent_model(agent_name: str) -> str:
 
 
 def get_exploration_level_config(level: str) -> dict[str, Any]:
-    """v0.8: 查探索度档位配置 (conservative/standard/wild)
+    """查探索度档位配置 (conservative/standard/wild)
 
     Returns:
         {
@@ -191,7 +191,7 @@ def get_exploration_level_config(level: str) -> dict[str, Any]:
     levels = cfg.get("exploration_levels")
     if not levels:
         raise ConfigError(
-            "agents.json 缺少 exploration_levels 字段 (v0.8 必需)\n"
+            "agents.json 缺少 exploration_levels 字段\n"
             f"  当前顶层 keys: {list(cfg.keys())}"
         )
     if level not in levels:

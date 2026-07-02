@@ -2,9 +2,6 @@
 
 - list_style_packs:  列出所有可用笔风（id/name/tagline），供 agent 选笔风时读取
 - adjust_style:      切换项目笔风（写入 projects.style_pack_id）
-
-v0.6.2 重构：从 style_charter 切换为 style_pack（操作 projects.style_pack_id）
-v0.6 重构：从 v0_4_new_tools.py 拆出
 """
 from __future__ import annotations
 

@@ -16,7 +16,7 @@ from backend.adapters.types import LLMRequest, ModelRole
 from backend.utils.logger import logger as logger_decorator
 
 
-# ============ 项目名自动生成 (v0.6.1: 从原 onboarding_agent 移入 hooks) ============
+# ============ 项目名自动生成 ============
 
 GENERATE_NAME_PROMPT = """你是「小说命名师」。根据下面的故事核心, 生成 1 个项目名。
 
@@ -42,10 +42,7 @@ GENERATE_NAME_PROMPT = """你是「小说命名师」。根据下面的故事核
 
 @logger_decorator
 async def _generate_project_name(story_core: str, characters: str, tone: list[str] | str) -> str:
-    """Step 4 完成后 LLM 自动生成项目名
-
-    v0.6.1: 从原 OnboardingAgent 模块移入 hooks（与 cover_image 并发触发）
-    """
+    """Step 4 完成后 LLM 自动生成项目名"""
     from backend.adapters import get_llm_adapter
 
     if isinstance(tone, str):

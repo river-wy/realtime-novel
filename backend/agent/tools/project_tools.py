@@ -16,7 +16,7 @@ from backend.services.project_manager import ProjectManager
 
 
 
-# ============ v0.9.1 新增：列项目工具（P1） ============
+# ============ 列项目工具 ============
 
 class ListProjectsInput(BaseModel):
     """列出用户项目（管家"我有什么项目"用）"""
@@ -142,7 +142,7 @@ register_tool(DeleteProjectTool())
 
 
 class ListProjectsTool(BaseTool):
-    """列出项目（v0.9.1 新增，P1）
+    """列出项目
 
     管家"我有什么项目"用。返回精简版（不含 7 件基座，避免 LLM 上下文爆炸）。
     软删项目默认隐藏（include_deleted=true 显式打开）。

@@ -1,5 +1,5 @@
 /**
- * useStewardChat — 通用管家对话 composable（v0.6 s5）
+ * useStewardChat — 通用管家对话 composable
  *
  * 与 useOnboardingChat 的区别：
  * - 不绑 step（通用对话）

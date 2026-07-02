@@ -14,7 +14,7 @@ from backend.persistence.sqlite_store import get_store
 
 
 class ChapterStatusRepository:
-    """章节状态 Repository（v0.4 从文件迁入 SQLite）"""
+    """章节状态 Repository"""
 
     async def set_status(
         self,

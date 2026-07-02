@@ -1,10 +1,10 @@
-"""prompts.specialists — 3 个 Specialist 真实 prompt（v0.6.1 P4 拆出）
+"""prompts.specialists — 3 个 Specialist 真实 prompt
 
 - WORLDTREE_KEEPER_PROMPT: 世界观架构师
 - CHAPTER_GENERATOR_PROMPT: 小说文笔家
 - MEMORY_KEEPER_PROMPT: 记忆维护者
 
-调用方: backend.agent.agents.world_tree_manager / novel_writer (v0.6.2 拆除了 specialists.py)
+调用方: backend.agent.agents.world_tree_manager / novel_writer
 """
 from __future__ import annotations
 
@@ -81,7 +81,7 @@ CHAPTER_GENERATOR_PROMPT = """你是「小说文笔家」（chapter_generator）
 4. 正文结束后必须输出 ###SUMMARY### 块，概括整章核心情节（不是开头句子），两句话，不得省略
 5. ###SUMMARY### 块直接跟在正文后面，不要用代码块包裹，不要添加其他 meta 信息
 
-【创作风格 v0.8 — 按探索度调整】{style_directive}
+【创作风格 — 按探索度调整】{style_directive}
 """
 
 

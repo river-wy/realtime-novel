@@ -1,7 +1,5 @@
 """exceptions.py — 异常层级（M-α 阶段最小集合）
 
-按 docs/roadmap/v0.3-product-skeleton.md 错误处理规范（M-γ 时再扩）
-
 异常层级:
     RealtimeNovelError              # 所有产品异常的基类
     ├── ConfigError                 # 配置缺失/错误（config.private.json 找不到）

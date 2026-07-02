@@ -1,6 +1,5 @@
 """Chapter 工具（generate_chapter / read_chapter）
 
-v0.6.2 重构：
 - generate_chapter: 只负责落盘（写文件 + 入 DB + 提取标题），不再调 LLM
   - LLM 在文笔家 ReAct loop 里写正文
   - 工具接收 content 字段 → 落盘
@@ -28,7 +27,7 @@ from backend.persistence import ChapterStatusRepository, ChapterState
 
 
 class GenerateChapterTool(BaseTool):
-    """v0.6.2 重构：纯落盘工具
+    """纯落盘工具
     
     输入: LLM 在 ReAct loop 里写的章节正文 (content)
     输出: 落盘结果 (ChapterContent 含 num/title/content/word_count/generated_at/summary)

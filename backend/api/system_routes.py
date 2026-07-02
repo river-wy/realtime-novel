@@ -1,4 +1,4 @@
-"""v0.4 系统接口（health + info）
+"""系统接口（health + info）
 
 对应 infra.md §B.4
 """
@@ -29,7 +29,7 @@ class InfoResponse(BaseModel):
 
 @router.get("/health", response_model=HealthResponse)
 async def health() -> HealthResponse:
-    """健康检查（v0.3 移出到独立文件）"""
+    """健康检查"""
     return HealthResponse(
         status="ok",
         timestamp=datetime.now().isoformat(),

@@ -41,7 +41,7 @@ class NodeStatus(str, Enum):
 
 
 class Timeline(BaseModel):
-    model_config = ConfigDict(extra="ignore")  # v007: 删了 year_range，旧数据 extra="ignore" 兼容
+    model_config = ConfigDict(extra="ignore")  # 兼容历史字段
     era: Era
     anchor_event: Optional[str] = None
 
@@ -76,7 +76,6 @@ class TreeNode(BaseModel):
 class WorldTreeSchema(BaseModel):
     """03 §1.1 — 7 件之 #1
     文件名约定: 01-world-tree.yaml
-    v007: 删除 branches 字段（branches_json DB 列已删，ReAct 架构下无持久化）
     """
     model_config = ConfigDict(extra="ignore")  # 兼容旧字段
 

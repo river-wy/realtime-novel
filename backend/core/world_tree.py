@@ -1,9 +1,8 @@
 """S2 · WorldTree 内存模型
 
-职责（来自 docs/roadmap/v0.3-product-skeleton.md §3 S2）:
+职责:
 - 内存中聚合 7 件 Schema
 - to_dict / from_dict 序列化
-v007: 删除 branches 树形操作（add_node/rollback_to），branches_json DB 列已删
 """
 from __future__ import annotations
 
@@ -63,9 +62,7 @@ class WorldTree:
         )
 
     # === 统计/自检 ===
-    # v0.8.2 删除了 from_project_dir / to_project_dir (v0.3 落盘式序列化, v0.4.1 入库后已不适用)
-    # v0.9 (v007) 删除了 add_node/list_nodes/find_node/rollback_to (branches_json 列已删，ReAct 架构下无持久化)
-    # 7 件现在走 project_repository.load_all_artifacts / save_7_artifacts
+    # 7 件走 project_repository.load_all_artifacts / save_7_artifacts
 
     def summary(self) -> Dict[str, int]:
         """返回各 Schema 的关键统计"""

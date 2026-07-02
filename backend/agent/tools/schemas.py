@@ -92,12 +92,11 @@ class SummarizeChapterOutput(BaseModel):
     method: str = Field(default="sentinel", description="sentinel / fallback_truncate / llm_fallback")
 
 
-# ============ 卷总结工具（v0.9.5）============
+# ============ 卷总结工具 ============
 
 class GenerateVolumeSummaryInput(BaseModel):
     """卷总结工具输入
 
-    v0.9.5 欧尼酱 20:30 拍板：给文笔家
     - 章节写完时，文笔家 LLM 调本工具生成卷的 1000 字总结
     - volume_id 必填（文笔家应从上下文拿）
     - auto_complete_volume=False：只生成 summary，保留 status=in_progress
@@ -149,7 +148,7 @@ class EditArtifactInput(BaseModel):
         "character", "relationship", "core_rule",
         "timeline_event", "geography_location", "world_entry",
         "seed", "subplot", "main_plot_node", "volume",
-        "beat",                # v0.9.1 修复：_edit_beat 之前是死代码，现在加进 Literal
+        "beat",                # _edit_beat 之前是死代码，现在加进 Literal
     ]
     operation: Literal["add", "update", "delete"]
     identifier: Optional[str] = None  # update/delete 用（ID）
@@ -167,13 +166,13 @@ class EditArtifactResult(BaseModel):
 
 
 class EditArtifactItem(BaseModel):
-    """批量编辑单项（v0.9.1 新增）"""
+    """批量编辑单项"""
     target: Literal[
         "project_name", "current_pov",
         "character", "relationship", "core_rule",
         "timeline_event", "geography_location", "world_entry",
         "seed", "subplot", "main_plot_node", "volume",
-        "beat",                # v0.9.1 修复：_edit_beat 之前是死代码，现在加进 Literal
+        "beat",                # _edit_beat 之前是死代码，现在加进 Literal
     ]
     operation: Literal["add", "update", "delete"]
     identifier: Optional[str] = None  # update/delete 用（ID）
@@ -181,7 +180,7 @@ class EditArtifactItem(BaseModel):
 
 
 class EditArtifactBatchInput(BaseModel):
-    """批量结构化编辑 9 件基座（v0.9.1 新增）
+    """批量结构化编辑 9 件基座
 
     优势：
     - 1 次 tool_call 落库 N 行（vs N 次 edit_artifact）
@@ -197,7 +196,7 @@ class EditArtifactBatchInput(BaseModel):
 
 
 class EditArtifactBatchResult(BaseModel):
-    """批量编辑结果（v0.9.1 新增）"""
+    """批量编辑结果"""
     project_id: str
     total: int
     success_count: int

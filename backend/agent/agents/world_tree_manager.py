@@ -1,4 +1,4 @@
-"""world_tree_manager — 世界树管理（v0.6 s3.4 AgentExecutor 接入）
+"""world_tree_manager — 世界树管理（AgentExecutor 接入）
 
 职责（spec.md §3.3）：
 1. 基座一致性检查
@@ -74,7 +74,7 @@ class WorldTreeDiff(BaseModel):
     risk_level: str = Field(default="low", description="low/medium/high")
     requires_double_confirm: bool = Field(default=False)
 
-    # v0.6 s3.4 新增：trace 字段（记录推演过程）
+    # trace 字段（记录推演过程）
     iterations: int = 0
     tool_calls_count: int = 0
     tool_calls_trace: List[dict] = Field(default_factory=list)
@@ -147,7 +147,7 @@ WORLD_TREE_MANAGER_SYSTEM_PROMPT = """你是「世界树管理」。
 
 @logger_decorator
 class WorldTreeManager:
-    """世界树管理（v0.6 s3.4：AgentExecutor 接入）"""
+    """世界树管理（AgentExecutor 接入）"""
 
     def __init__(self, executor: Optional[AgentExecutor] = None):
         self.executor = executor or get_agent_executor()
@@ -383,7 +383,7 @@ class WorldTreeManager:
             project_id, len(intervention_text),
         )
 
-        # v0.6.2: 调组装模块拼 system_prompt（身份+笔风+法则+基座摘要）
+        # 调组装模块拼 system_prompt（身份+笔风+法则+基座摘要）
         from backend.agent.prompts.agent_prompt_factory import (
             build_worldtree_system_prompt,
             build_project_context_message,
@@ -424,7 +424,7 @@ class WorldTreeManager:
         diff.tool_calls_count = len(executor_output.tool_calls_history)
         diff.tool_calls_trace = executor_output.tool_calls_history
 
-        # v0.9 改造：调 Validator 校验落库后的基座一致性
+        # 调 Validator 校验落库后的基座一致性
         from backend.agent.agents.validator import get_validator
         validator = get_validator()
         diff.validation = await validator.validate_world_tree(
@@ -463,7 +463,7 @@ class WorldTreeManager:
             project_id, len(adjustment_text),
         )
 
-        # v0.6.2: 调组装模块拼 system_prompt（身份+笔风+法则+基座摘要）
+        # 调组装模块拼 system_prompt（身份+笔风+法则+基座摘要）
         from backend.agent.prompts.agent_prompt_factory import (
             build_worldtree_system_prompt,
             build_project_context_message,
@@ -502,7 +502,7 @@ class WorldTreeManager:
         diff.tool_calls_count = len(executor_output.tool_calls_history)
         diff.tool_calls_trace = executor_output.tool_calls_history
 
-        # v0.6 s4：调用一致性检查器
+        # 调用一致性检查器
         diff.consistency = await self._run_consistency_check(
             project_id=project_id,
             proposed_updates=diff.base_updates,
@@ -527,7 +527,7 @@ class WorldTreeManager:
         steward_payload: Dict[str, Any],
         max_iterations: int = 20,
     ) -> Dict[str, Any]:
-        """v0.8 WTM 入口：Onboarding 阶段完整规划小说世界基座（走 ReAct loop）
+        """WTM 入口：Onboarding 阶段完整规划小说世界基座（走 ReAct loop）
 
         跟 generate_full_world_tree_baseline 机械代码的区别：
         - 走 executor.execute() ReAct loop，WTM LLM 自主调工具落库 9 张表
@@ -620,7 +620,7 @@ class WorldTreeManager:
             project_id, summary,
         )
 
-        # v0.9 改造：调 Validator 校验落库后的基座一致性
+        # 调 Validator 校验落库后的基座一致性
         from backend.agent.agents.validator import get_validator, ValidationStatus
         validator = get_validator()
         user_intent = json.dumps(steward_payload, ensure_ascii=False)
@@ -660,7 +660,7 @@ class WorldTreeManager:
             "error": None,
         }
 
-    # ── v0.9 新增：Validator 联动回滚 ─────────────────────
+    # ── Validator 联动回滚 ─────────────────────
 
     async def _rollback_all_writes(self, project_id: str, tool_calls_trace: list) -> None:
         """全清 WTM 本次 ReAct 落库的所有新行（FATAL 时调用）
@@ -769,8 +769,6 @@ class WorldTreeManager:
         proposed_seeds,
     ) -> ConsistencyCheckResult:
         """调用一致性检查器
-
-        v0.6 s4：
         1. 加载项目当前 7 件基座快照
         2. 应用 proposed_updates 得到"应用后"快照
         3. 调用 checker.check() 验证
@@ -792,7 +790,7 @@ class WorldTreeManager:
             # 加载快照
             before = ConsistencyChecker.load_snapshot(repo, project_id)
 
-            # v0.6 简化：模拟 apply（直接复制 before，不真正应用）
+            # 模拟 apply（直接复制 before，不真正应用）
             # 后续 s4+ 可实装真正的 apply 逻辑
             after = before
 

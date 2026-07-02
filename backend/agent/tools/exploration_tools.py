@@ -1,4 +1,4 @@
-"""exploration_tools — 探索度调整工具（v0.6.2 新增）
+"""exploration_tools — 探索度调整工具
 
 管家调这个工具调整：
 - 项目级探索度 (projects.exploration_level)

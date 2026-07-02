@@ -1,4 +1,4 @@
-"""v0.4 测试 fixtures + Mock LLM Provider
+"""测试 fixtures + Mock LLM Provider
 
 对应 novel-tests.json
 """
@@ -20,8 +20,6 @@ from backend.adapters import reset_llm_adapter, reset_router
 from backend.adapters.types import LLMRequest, LLMResponse, LLMStreamChunk, ModelProvider
 from backend.adapters.providers.base import LLMProvider
 from backend.agent.tools import reset_tools
-# v0.6.1: state_graph 已删除 (ReAct loop 替代 6 节点 StateGraph)
-# from backend.agent.state_graph import reset_graph
 
 
 # ============ pytest 配置 ============
@@ -53,8 +51,6 @@ async def test_app(temp_db):
         yield app, client
     # 清理
     reset_tools()
-    # v0.6.1: state_graph 已删除
-    # reset_graph()
     reset_llm_adapter()
     reset_router()
 

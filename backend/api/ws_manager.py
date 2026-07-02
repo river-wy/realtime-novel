@@ -1,14 +1,8 @@
-"""WebSocketManager + WS /api/chat 端点（v0.6 s3.6 重写）
+"""WebSocketManager + WS /api/chat 端点
 
 对应 spec.md §4 + core.md §B.4
 
-v0.6 改造：
-- 所有用户消息统一进 /api/chat（v0.5 时 Onboarding / 章节 / 干预走不同入口）
-- 改用 NovelSteward 处理（不再是 SimpleStateGraph）
-- Intent 路由（项目级 / 用户级）由管家决定
-- 流式推送 ReAct loop 过程：agent_thinking → tool_calling → tool_result → agent_message
-
-事件类型（spec.md §4.4 拍板）：
+事件类型：
 - agent_thinking: LLM 思考中
 - tool_calling: Agent 准备调 tool
 - tool_result: tool 执行结果
@@ -81,7 +75,7 @@ router = APIRouter()
 
 @router.websocket("/api/chat")
 async def chat_endpoint(websocket: WebSocket):
-    """WS /api/chat 主对话端点（v0.6：所有用户消息统一进）
+    """WS /api/chat 主对话端点
 
     流程：
     1. 连接 → ws_manager.connect
@@ -90,7 +84,7 @@ async def chat_endpoint(websocket: WebSocket):
     4. interrupt → 取消当前任务
     5. 异常断开 → 清理
     """
-    user_id = "anonymous"  # v0.4 单机单用户（后续扩展多用户）
+    user_id = "anonymous"  # 单机单用户（后续可扩展多用户）
     await ws_manager.connect(user_id, websocket)
 
     try:
@@ -131,7 +125,7 @@ async def chat_endpoint(websocket: WebSocket):
                     pass
 
             elif msg_type == "confirm":
-                # 二次确认（v0.6 s3 阶段先 echo）
+                # 二次确认（先 echo）
                 await websocket.send_json({
                     "type": "agent_message",
                     "content": f"收到 confirm 消息：{data.get('action', '?')}",
@@ -169,7 +163,6 @@ async def chat_endpoint(websocket: WebSocket):
 async def handle_user_message(ws: WebSocket, user_id: str, data: dict):
     """处理单条 user_message：调 NovelSteward + 流式推送
 
-    v0.6 s3.6：
     1. 落 messages 表（user 消息）
     2. 推 agent_thinking
     3. 调 NovelSteward.receive()
@@ -186,7 +179,7 @@ async def handle_user_message(ws: WebSocket, user_id: str, data: dict):
     steward = get_novel_steward()
 
     try:
-        # 1. 24h 滑窗的 conversation 管理 (v0.6.1: 替换 create_conversation)
+        # 1. 24h 滑窗的 conversation 管理
         project_id = data.get("project_id")
 
         conversation = await conv_repo.get_or_refresh_active_conversation(user_id=user_id)
@@ -233,7 +226,7 @@ async def handle_user_message(ws: WebSocket, user_id: str, data: dict):
         })
 
         # 7. 落 assistant message
-        # v0.6 简化：intent / downstream 信息放到 tool_calls 字段里（schema 允许 dict）
+        # intent / downstream 信息放到 tool_calls 字段里（schema 允许 dict）
         await conv_repo.add_message(
             conversation_id=conversation.id,
             role=MessageRole.ASSISTANT,

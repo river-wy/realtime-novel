@@ -7,9 +7,7 @@
 - exceptions.py  异常层级（M-α 阶段用最少集合）
 - event_bus.py   全局 asyncio 事件总线（零第三方依赖）
 
-v0.8.2: 删除了 project.py (v0.3 同步版 ProjectManager, 0 真调用)
-        删除了 SCHEMA_REGISTRY (v0.3 文件存储时代用, v0.4.1 入库后已不适用)
-        项目管理走 services.ProjectManager
+项目管理走 services.ProjectManager。
 """
 from . import exceptions
 from .event_bus import event_bus

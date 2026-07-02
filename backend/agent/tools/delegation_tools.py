@@ -177,7 +177,7 @@ class DelegateToAgentTool(BaseTool):
     async def _delegate_novel_writer(
         self, input: DelegateToAgentInput
     ) -> DelegateToAgentOutput:
-        """委托文笔家生成章节（v0.6.2：走委托入口）"""
+        """委托文笔家生成章节（走委托入口）"""
         from backend.agent.agents.novel_writer import delegate_chapter_generation
 
         output = await delegate_chapter_generation(
@@ -269,7 +269,7 @@ class DelegateToAgentTool(BaseTool):
     async def _delegate_wtm_initial_baseline(
         self, input: DelegateToAgentInput
     ) -> DelegateToAgentOutput:
-        """委托 WTM 输出完整世界树基座（v0.8 走 WTM ReAct loop）
+        """委托 WTM 输出完整世界树基座（走 WTM ReAct loop）
 
         路由：input.intent == "initial_baseline"
         入参：input.payload（管家从用户对话中提炼的 hint）

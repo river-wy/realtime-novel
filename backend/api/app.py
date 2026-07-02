@@ -1,11 +1,8 @@
-"""v0.4 FastAPI 入口（Phase 1-4 全注册）
+"""FastAPI 入口（Phase 1-4 全注册）
 
 Phase 1: system_routes（health + info）
 Phase 2-3: ws_channel（WS /api/chat）
 Phase 4: http_routes（12 个 RESTful 端点）
-
-v003: 启动时显式触发 SQLiteStore._init_schema() 建表，
-      避免「重启后第一次业务请求才建表」的体验问题。
 """
 from __future__ import annotations
 
@@ -15,7 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 
-# v0.8.3: 初始化日志 (在 import 其他模块前调, 让后续 logger 接管)
+# 初始化日志 (在 import 其他模块前调, 让后续 logger 接管)
 from backend.utils.logger import configure_logging
 
 configure_logging()
@@ -26,8 +23,6 @@ from backend.api.project_routes import router as project_router
 from backend.api.chapter_routes import router as chapter_router
 from backend.api.action_routes import router as action_router
 
-# v0.6.2: onboarding_routes 已删除（HTTP 路由 + WS handler 都不再用）
-# v0.7.1: delegate_to_wtm 已合并到 delegate_to_agent(mode="full_baseline")
 # 项目 onboard 创建走管家 Agent 对接 (verify_world_tree_baseline / delegate_to_agent)
 
 # 触发领域事件 handler 注册（import 即注册，无需显式调用）
@@ -37,12 +32,12 @@ import backend.agent.onboarding.hooks  # noqa: F401
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """v003: 启动时显式触发 DB 建表
+    """启动时显式触发 DB 建表
     - 避免「重启后第一次业务请求才建表」的体验问题
     - data/novel.db 删了之后重启能自动恢复
     """
     from backend.persistence.sqlite_store import get_store
-    get_store()  # 触发 _init_schema()，按 v003_init.sql 建表
+    get_store()  # 触发 _init_schema()
     yield
 
 
@@ -69,7 +64,7 @@ app.include_router(chapter_router)
 app.include_router(action_router)
 app.include_router(ws_router)
 
-# v0.9: 静态文件服务（封面图等）
+# 静态文件服务（封面图等）
 # /static/projects/{project_id}/cover.png → data/projects/{project_id}/cover.png
 _PROJECTS_DATA_DIR = Path(__file__).parent.parent.parent / "data" / "projects"
 _PROJECTS_DATA_DIR.mkdir(parents=True, exist_ok=True)

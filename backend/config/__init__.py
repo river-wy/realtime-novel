@@ -1,4 +1,4 @@
-"""v0.7 配置层
+"""配置层
 
 - config_loader.py: 读 .llm_api_key + 解析 agents.json
 - agents.json:      模型池 + agent→model 路由表

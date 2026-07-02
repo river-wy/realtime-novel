@@ -67,7 +67,7 @@ class ProjectManager:
     async def load(self, project_id: str) -> Optional[dict]:
         """加载项目详情（DB 优先）
 
-        v0.7.1 修 7.2 gap：过滤已软删项目（deleted_at 非空）
+        过滤已软删项目（deleted_at 非空）
         """
         project = self._proj_repo.get(project_id)
         if not project:

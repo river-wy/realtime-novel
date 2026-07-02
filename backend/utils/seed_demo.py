@@ -1,4 +1,4 @@
-"""utils/seed_demo.py — 从 docs/eval-notes/code/v0.2/cases/case-1-urban-romance/
+"""utils/seed_demo.py — 从 docs/eval-notes/code/cases/case-1-urban-romance/
 装载 7 件 JSON 到 projects/demo-urban-romance/（YAML 形式）
 
 用法:
@@ -15,10 +15,10 @@ import yaml
 
 # utils/seed_demo.py → 工程根（往上 3 级）
 ROOT = Path(__file__).resolve().parents[2]
-SOURCE_CASE = ROOT / "docs" / "eval-notes" / "code" / "v0.2" / "cases" / "case-1-urban-romance"
+SOURCE_CASE = ROOT / "docs" / "eval-notes" / "code" / "cases" / "case-1-urban-romance"
 TARGET_PROJECT = ROOT / "projects" / "demo-urban-romance"
 
-# v0.2 case JSON 文件名 → projects YAML 文件名（保持相同语义）
+# case JSON 文件名 → projects YAML 文件名（保持相同语义）
 FILE_MAPPING = [
     ("01-world-tree.json", "01-world-tree.yaml"),
     ("02-style-charter.json", "02-style-charter.yaml"),

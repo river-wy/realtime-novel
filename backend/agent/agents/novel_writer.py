@@ -35,7 +35,7 @@ class ChapterOutput(BaseModel):
     # v003: consistency_checker 两阶段校验结果（arch-plan §5.4）
     consistency_hard_rules: Optional[dict] = None
     consistency_world_entries: Optional[dict] = None
-    # v0.9: Validator 章节校验结果
+    # Validator 章节校验结果
     chapter_validation: Optional[dict] = None
 
 
@@ -272,7 +272,7 @@ async def delegate_chapter_generation(
             checker = ConsistencyChecker(project_id)
 
             # 阶段 1: 硬约束违例
-            # v0.7.1 修 2.3 gap：从章节文本抽取角色动作 （简单启发式：中文名+动词）
+            # 从章节文本抽取角色动作（简单启发式：中文名+动词）
             char_actions = _extract_character_actions(result.chapter_content) if result.chapter_content else None
             hr_result = checker.check_hard_rules(
                 chapter_text=result.chapter_content,
@@ -306,7 +306,7 @@ async def delegate_chapter_generation(
             )
             # 一致性检查失败不影响章节落盘
 
-        # v0.9 改造：调 Validator 校验章节内容合理性
+        # 调 Validator 校验章节内容合理性
         from backend.agent.agents.validator import get_validator, ChapterValidationStatus
         validator = get_validator()
         validation = await validator.validate_chapter(
@@ -323,14 +323,14 @@ async def delegate_chapter_generation(
                 project_id, result.chapter_num, validation.summary,
             )
             # retry：把 issues 注入 user_message，让文笔家重写
-            # v0.9.6: session_key 加 chapter_num 隔离（避免多章 retry 累积在同一 cache）
+            # session_key 加 chapter_num 隔离（避免多章 retry 累积在同一 cache）
             retry_result = await _retry_chapter_generation(
                 project_id=project_id,
                 source=source,
                 intervention=intervention,
                 extra_context=extra_context,
                 validation_issues=validation.issues,
-                chapter_num=result.chapter_num,  # v0.9.6 新增
+                chapter_num=result.chapter_num,
             )
             if retry_result.chapter_content:
                 result = retry_result
@@ -366,15 +366,15 @@ async def _retry_chapter_generation(
     intervention: Optional[str],
     extra_context: Optional[str],
     validation_issues: list,
-    chapter_num: Optional[int] = None,  # v0.9.6 新增：用于 session_key 隔离
+    chapter_num: Optional[int] = None,  # 用于 session_key 隔离
 ) -> ChapterOutput:
     """Validator BLOCKED 时 retry 一次
 
     把 issues 注入 user_message，让文笔家重写
 
-    v0.9.6: session_key 加 chapter_num（多章 retry 互不污染）
+    session_key 加 chapter_num（多章 retry 互不污染）
     """
-    # v0.9.6: 用 chapter_num 隔离 retry cache（避免不同章 retry 累积在同一 cache）
+    # 用 chapter_num 隔离 retry cache（避免不同章 retry 累积在同一 cache）
     chapter_suffix = f":retry:ch{chapter_num}" if chapter_num else ":retry"
     issues_text = "\n".join(
         f"- [{i.severity.value}] {i.table}.{i.field}: {i.description}（建议: {i.suggested_fix or '无'}）"
@@ -396,7 +396,7 @@ async def _retry_chapter_generation(
     )
     from backend.agent.runtime.executor import AgentConfig
 
-    # v0.9.6: retry 路径也调完整性校验（防上 retry 期间基座被并发删）
+    # retry 路径也调完整性校验（防上 retry 期间基座被并发删）
     validation_error = _validate_world_tree_completeness(project_id)
     if validation_error:
         _retry_chapter_generation.log.error(
@@ -454,7 +454,7 @@ async def _retry_chapter_generation(
 # ============ 辅助函数 ============
 
 def _extract_character_actions(chapter_text: str, max_actions: int = 20) -> list:
-    """从章节文本抽取角色动作（v0.7.1 修 2.3 gap — consistency_checker 需要 character_actions）
+    """从章节文本抽取角色动作（consistency_checker 需要 character_actions）
 
     启发式抽取：句子中出现「中文名+动词」模式，提取为 [{"name": ..., "action": ...}]
     不足以覆盖所有动作，但能给 check_hard_rules 提供基础信号

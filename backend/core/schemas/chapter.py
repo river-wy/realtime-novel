@@ -1,6 +1,6 @@
 """ChapterSummary Schema — docs/design/02-consistency.md §4.3
 
-章节级摘要 schema（从 eval/v0.2/pipeline/real_llm.call_llm_extract_summary 抽出）
+章节级摘要 schema
 
 字段:
 - chapter_id: 章节号

@@ -40,7 +40,6 @@ class ChapterContentResponse(BaseModel):
 
 
 class GenerateChapterRequest(BaseModel):
-    # v003：删 actor_feedback / actor_character 字段
     intervention: Optional[str] = None
 
 
@@ -51,12 +50,12 @@ class GenerateChapterResponse(BaseModel):
     word_count: int
     generated_at: str
     new_seeds_triggered: int = 0
-    summary: Optional[str] = None  # v0.5 新增：1 句话 summary
+    summary: Optional[str] = None  # 1 句话 summary
 
 
 @router.get("/{project_id}/chapters", response_model=ChapterListResponse)
 async def list_chapters(project_id: str):
-    """列章节（v0.5 走 DB，v0.4 走文件）"""
+    """列章节"""
     from backend.persistence import ChapterRepository
     chap_repo = ChapterRepository()
     rows = chap_repo.list_by_project(project_id, limit=200)
@@ -65,7 +64,7 @@ async def list_chapters(project_id: str):
         chapters.append(ChapterInfo(
             num=r.chapter_num,
             title=r.title or f"第 {r.chapter_num} 章",
-            summary=r.summary,  # v0.5 新增
+            summary=r.summary,
             status="done",
             time=r.generated_at.isoformat() if r.generated_at else None,
         ))
@@ -77,7 +76,7 @@ async def read_chapter(
     project_id: str,
     n: int = Path(ge=1),
 ):
-    """读章节正文（v0.5 走 DB，正文从 file_path 读）"""
+    """读章节正文（走 DB，正文从 file_path 读）"""
     from backend.persistence import ChapterRepository
     from backend.config.config_loader import PROJECT_ROOT
     chap_repo = ChapterRepository()
@@ -125,7 +124,7 @@ async def generate_chapter(
     project_id: str,
     req: GenerateChapterRequest,
 ):
-    """生成下一章（60-100s 端到端）— 薄路由，委托给文笔家 Agent (v0.6.2)
+    """生成下一章（60-100s 端到端）— 薄路由，委托给文笔家 Agent
 
     内部调 delegate_chapter_generation()，走文笔家 ReAct loop，
     最终调 generate_chapter / summarize_chapter 工具落盘。
@@ -139,7 +138,7 @@ async def generate_chapter(
     )
 
     if chapter_output.error:
-        # 文笔家 ReAct loop 返回错误（保留旧的 409 并发语义）
+        # 文笔家 ReAct loop 返回错误（保留 409 并发语义）
         if "CONCURRENT_GENERATION" in chapter_output.error:
             raise HTTPException(409, chapter_output.error)
         raise HTTPException(500, f"Chapter generation failed: {chapter_output.error}")
@@ -165,7 +164,7 @@ async def generate_chapter(
             },
         },
         project_id=project_id,
-        agent_name="novel_writer",   # v0.9.2 补：章节生成委托给文笔家
+        agent_name="novel_writer",
     )
 
     return GenerateChapterResponse(

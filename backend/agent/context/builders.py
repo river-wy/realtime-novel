@@ -1,11 +1,9 @@
 """context.builders — 3 角色 messages 拼装 + node 通用 builder
 
-v0.6.1 P4: 从 context_builder.py 拆出
-
 - build_messages_for_steward: 管家 (user 维度, 不绑 project)
 - build_messages_for_worldtree_keeper: 架构师 (per-project)
 - build_messages_for_chapter_generator: 文笔家 (per-project, chapter_summaries 分级)
-- build_messages_for_node: 通用 (v0.4 6 节点 StateGraph 时期遗留, intake/respond 用)
+- build_messages_for_node: 通用 (intake/respond 用)
 """
 from __future__ import annotations
 
@@ -152,7 +150,7 @@ def build_messages_for_chapter_generator(
     结构：
     1. system: 章节生成 prompt
     2. world_tree: 基座 (叙事核心)
-    3. style_pack: 写作笔风 (已移至 system_prompt 组装)  [v0.6.2 废弃]
+    3. style_pack: 写作笔风 (已移至 system_prompt 组装)
     4. main_plot: 主线 (核心矛盾/节奏)             [s1.4 新增]
     5. sub_plot: 支线                              [s1.4 新增]
     6. character_card: 人物                        [s1.4 新增]
@@ -225,7 +223,7 @@ def build_messages_for_node(
     max_history: int = 10,
     system_prompt: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
-    """v0.4.1 兼容 API（不推荐用于新代码）
+    """兼容 API（不推荐用于新代码）
 
     仍支持老调用：conversation_id + current_user_message
     """

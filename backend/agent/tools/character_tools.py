@@ -1,9 +1,4 @@
-"""character_tools.py — introspect_character 工具
-
-v0.6 重构：从 v0_4_new_tools.py 拆出
-v0.4 原版 broken：读 world_tree.characters（v0.4.1 后 characters 移到 06-character-card.yaml）
-v0.6 修复：走 ProjectRepository.load_all_artifacts 读 character_card
-"""
+"""character_tools.py — introspect_character 工具"""
 from __future__ import annotations
 
 from backend.agent.tools.base import BaseTool, ToolError, register_tool
@@ -14,10 +9,7 @@ from backend.persistence import ProjectRepository
 
 
 class IntrospectCharacterTool(BaseTool):
-    """角色内省（从 character_card 读角色卡 + 内心独白）
-
-    v0.6 实现：走 DB 读 character_card
-    """
+    """角色内省（从 character_card 读角色卡 + 内心独白）"""
     name = "introspect_character"
     description = "角色内省（从 character_card 读角色卡 + 内心独白）"
     input_schema = IntrospectCharacterInput
@@ -44,7 +36,7 @@ class IntrospectCharacterTool(BaseTool):
                     message=f"Character not found: {input.character_name}",
                 )
 
-            # 内心独白：从 arc + background 推断（v0.6 简化版，v0.6.1 可调 LLM 生成）
+            # 内心独白：从 arc + background 推断（简化版，可调 LLM 生成）
             inner_monologue = (
                 f"我是 {input.character_name}。"
                 f"我的背景是：{target.get('background', '未知')}。"

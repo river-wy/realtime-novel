@@ -1,7 +1,5 @@
 """backend.adapters 包入口
 
-v0.6: v0.3 adapters/llm.py 已删除，所有 LLM 调用走 LLMAdapter (v0.4+)
-v0.4.1: adapters/io.py 已删除（7 件全入 DB，YAML 读写已废弃）
 - DeepSeek Provider (text, OpenAI 兼容 + Thinking)
 - Gemini Provider (image, Google 原生异步 submit+poll)
 - Router (按 role 路由 + fallback)

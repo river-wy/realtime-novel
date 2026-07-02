@@ -1,7 +1,7 @@
 /**
- * Conversation store（v0.5 一对一 active conv + 新建对话）
+ * Conversation store（一对一 active conv + 新建对话）
  *
- * v0.5: 一个 user 只有一个 active conv
+ * 一个 user 只有一个 active conv
  * "新建对话" = 让旧 active 失效 + 调 LLM 准备新 conv
  */
 import { defineStore } from 'pinia'
@@ -72,11 +72,11 @@ export const useConversationStore = defineStore('conversation', () => {
       type: 'user_message',
       content,
       project_id: projectId,
-      conversation_id: activeConvId.value  // v0.5 后端会忽略/覆盖
+      conversation_id: activeConvId.value  // 后端会忽略/覆盖
     }))
   }
 
-  /** v0.5 新建对话：关闭 WS → 重连（后端会创建新 conv） */
+  /** 新建对话：关闭 WS → 重连（后端会创建新 conv） */
   function newConversation() {
     if (ws.value) {
       ws.value.close()

@@ -269,7 +269,7 @@ class AgentExecutor:
             cache_mgr = get_session_cache_manager()
 
             # 解析 session_key → user_id / conv_id
-            # v0.9.6 欧尼酱指出脆弱性：make_key 是 3 段（user_id:conv_id:agent_name），
+            # make_key 是 3 段（user_id:conv_id:agent_name），
             # 本解析只取前 2 段，agent_name 独立从 agent.agent_name 传。
             # 当前 writer 路径能对上（conv_id="novel_writer"），但 key 格式变更会静默错位。
             # 未来重构：execute() 签名加 (user_id, conversation_id, agent_name) 三参。
@@ -279,14 +279,14 @@ class AgentExecutor:
 
             # 先用轻量 TTL 检查判断是否命中，cache HIT 时跳过 system_prompt 组装
             if cache_mgr.has_valid_cache(_user_id, _conv_id, agent.agent_name):
-                # ── cache HIT：复用 + 校验 sys_prompt hash（v0.9.6 欧尼酱指出）──────────
-                # v0.9.6 修：不绕过 hash 校验——改 style_pack 时 sys_prompt 会变
-                #             hash 变化 → patch_sys_prompt 原地替换 messages[0]
+                # ── cache HIT：复用 + 校验 sys_prompt hash ──────────
+                # 不绕过 hash 校验——改 style_pack 时 sys_prompt 会变
+                # hash 变化 → patch_sys_prompt 原地替换 messages[0]
                 session_cache_obj = cache_mgr.get(
                     user_id=_user_id,
                     conversation_id=_conv_id,
                     agent_name=agent.agent_name,
-                    sys_prompt=agent.system_prompt,  # v0.9.6 加上：hash 校验依赖
+                    sys_prompt=agent.system_prompt,  # hash 校验依赖
                 )
                 if session_cache_obj is not None:
                     self.log.info(

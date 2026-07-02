@@ -1,7 +1,9 @@
 # 后端数据存储文档
 
-> **最后更新**：2026-06-29
-> **版本**：v0.9.x
+> **更新日期**：2026-07-02
+> **版本**：v0.9.6
+> **Commit**：e717e5b
+> **代码定位**：`backend/persistence/`
 
 ---
 
@@ -10,7 +12,7 @@
 1. [存储策略概览](#1-存储策略概览)
 2. [SQLiteStore（连接管理）](#2-sqlitestore)
 3. [数据库 Schema（19 张表）](#3-数据库-schema)
-4. [Repository 层](#4-repository-层)
+4. [Repository 层（9 个）](#4-repository-层)
 5. [章节正文文件存储](#5-章节正文文件存储)
 6. [数据迁移机制](#6-数据迁移机制)
 7. [软删除与回档](#7-软删除与回档)
@@ -21,23 +23,26 @@
 
 系统采用 **SQLite + 文件系统** 双存储策略：
 
-| 数据类型 | 存储位置 | 说明 |
+| 数据类型 | 存储位置 | 形态 |
 |---------|---------|------|
-| 项目元数据 | `data/novel.db` | SQLite，结构化查询 |
-| 世界树 7 件基座 | `data/novel.db` | SQLite，19 张关联表 |
-| 对话历史 | `data/novel.db` | SQLite，消息流水 |
-| 工具调用审计 | `data/novel.db` | SQLite，完整链路追踪 |
+| 项目元数据 | `data/novel.db` | SQLite `projects` / `project_state` |
+| 世界树 7 件基座 | `data/novel.db` | SQLite 11 张关联表 |
+| 对话历史 | `data/novel.db` | SQLite `conversations` / `messages` |
+| 工具调用审计 | `data/novel.db` | SQLite `tool_calls_log` |
 | 章节正文 | `data/projects/{id}/chapters/chapter_NNN.md` | Markdown 文件 |
-| 封面图 | `data/projects/{id}/cover.png` | PNG 文件 |
+| 封面图 | `data/projects/{id}/cover.png` | PNG 文件（base64 解码） |
+| 用户偏好 | `data/novel.db` | SQLite `user_preferences` |
+| Onboarding 状态 | `data/novel.db` | SQLite `onboarding_state` |
 
-**选择 SQLite 的原因**：
-- 单机部署，无需额外数据库服务
+**SQLite 选型理由**（`sqlite_store.py:7`）：
+- 单机部署，无需额外部署数据库服务
 - WAL 模式支持并发读（WS 消息处理期间可并行查询）
 - 文件即数据库，备份只需 `cp data/novel.db data/novel.db.bak`
 
-**章节正文存文件的原因**：
-- 单章节最大 1-2 万汉字，存 BLOB 不如存 Markdown 文件可读性好
-- 方便手动编辑/备份/导出
+**章节正文存文件理由**（`chapter_repository.py:45`）：
+- 单章 1-2 万汉字，BLOB 存 SQLite 不如 Markdown 文件可读
+- 可手动编辑/备份/导出
+- 文件路径入 `chapters.file_path`，回档时按路径 `unlink`
 
 ---
 
@@ -45,406 +50,456 @@
 
 `backend/persistence/sqlite_store.py` 是数据库连接的唯一入口。
 
-### 设计特点
+### 2.1 设计特点
 
-- **WAL 模式**：`PRAGMA journal_mode=WAL`，支持读写并发，避免写操作阻塞查询
-- **外键约束**：`PRAGMA foreign_keys=ON`，确保引用完整性
-- **Row Factory**：`conn.row_factory = sqlite3.Row`，查询结果可按列名访问
-- **全局单例**：`get_store()` 返回单例，进程内共享连接工厂
+- **WAL 模式**（`sqlite_store.py:79`）：`PRAGMA journal_mode=WAL`，读写并发
+- **外键约束**（`sqlite_store.py:80`）：`PRAGMA foreign_keys=ON`，引用完整性
+- **Row Factory**（`sqlite_store.py:77`）：`conn.row_factory = sqlite3.Row`，按列名访问
+- **autocommit**（`sqlite_store.py:74`）：`isolation_level=None`，显式控制事务
+- **check_same_thread=False**（`sqlite_store.py:75`）：支持跨线程共享连接
+- **全局单例**（`sqlite_store.py:100`）：`_store` + `get_store()` 工厂
 
-### 连接接口
+### 2.2 连接接口
 
+```python
+# 自动建表 + 跑迁移
+store = SQLiteStore("data/novel.db")
+
+# autocommit 连接
+with store.connection() as conn:
+    row = conn.execute("SELECT ...").fetchone()
+
+# 显式事务
+with store.transaction() as conn:
+    conn.execute("INSERT ...")
+    conn.execute("UPDATE ...")
+    # 异常自动 ROLLBACK
 ```
-SQLiteStore.connection() → contextmanager[sqlite3.Connection]
-  每次 yield 一个新连接，用完自动关闭
-  autocommit 模式（isolation_level=None）
 
-SQLiteStore.transaction() → contextmanager[sqlite3.Connection]
-  显式事务：自动 BEGIN/COMMIT/ROLLBACK
-  适用于多表写入需要原子性的场景
+### 2.3 全局单例
+
+```python
+# sqlite_store.py:97
+_store: Optional[SQLiteStore] = None
+
+def get_store(db_path: Path | str = "data/novel.db") -> SQLiteStore:
+    """全局单例（首次调用时创建）"""
+    global _store
+    if _store is None:
+        _store = SQLiteStore(db_path)
+    return _store
 ```
 
-### 使用模式
+测试隔离：`reset_store()`（`sqlite_store.py:108`）重置 `_store = None`。
 
-每个 Repository 通过 `get_store().connection()` 或 `.transaction()` 获取连接：
+### 2.4 启动自动迁移
 
-```
-class ProjectRepository:
-    def get(self, project_id: str) -> Optional[Project]:
-        with get_store().connection() as conn:
-            row = conn.execute(
-                "SELECT * FROM projects WHERE id=?", (project_id,)
-            ).fetchone()
-            return Project(**dict(row)) if row else None
-```
+构造时（`sqlite_store.py:21`）自动调用 `_init_schema()`：
+1. 创建 `migrations` 表（version PK + applied_at）
+2. 读已 applied 的 version 集合
+3. 按文件名升序遍历 `migrations/v*.sql`
+4. 跳过已 applied 的，对未 applied 的 `executescript()`
+5. 写入 `migrations` 表（`INSERT OR IGNORE`）
 
 ---
 
 ## 3. 数据库 Schema
 
-所有表定义集中在 `backend/persistence/migrations/v001_init.sql`（合并自历史 v001-v007 迁移）。
+v003 重构后共 **19 张数据表**（不含 `migrations` 元表）。
 
-### 表总览（19 张）
+### 3.1 表分组总览
 
-| 序号 | 表名 | 类型 | 说明 |
-|------|------|------|------|
-| 1 | `migrations` | 系统 | 迁移版本记录 |
-| 2 | `conversations` | 对话 | 对话线程 |
-| 3 | `messages` | 对话 | 对话消息（含 tool_calls JSON） |
-| 4 | `tool_calls_log` | 审计 | 工具调用详细记录 |
-| 5 | `user_preferences` | 用户 | 用户偏好（key-value） |
-| 6 | `chapter_status` | 章节 | 章节生成状态 |
-| 7 | `projects_deleted` | 项目 | 软删除记录 |
-| 8 | `projects` | 项目 | 项目元数据 |
-| 9 | `world_tree` | 基座 | 世界树设定 |
-| 10 | `genre_resonance` | 基座 | 题材共鸣 |
-| 11 | `main_plot` | 基座 | 主线 |
-| 12 | `sub_plot` | 基座 | 支线（一对多） |
-| 13 | `characters` | 基座 | 人物（一对多） |
-| 14 | `character_relationships` | 基座 | 人物关系（多对多） |
-| 15 | `seeds` | 基座 | 伏笔种子（一对多） |
-| 16 | `chapters` | 章节 | 章节 metadata（正文存文件） |
-| 17 | `onboarding_state` | 流程 | Onboarding 中间态 |
-| 18 | `chapter_seed_changes` | 关联 | 章节-种子变化 |
-| 19 | `chapter_character_states` | 关联 | 章节-角色状态快照 |
+| 分组 | 表 | 来源 |
+|------|------|------|
+| 基础设施 | `conversations`, `messages`, `tool_calls_log`, `user_preferences` | v003 |
+| 项目级 | `projects`, `project_state` | v003 |
+| 世界树基座 | `world_tree`, `timeline_events`, `geography_locations`, `world_entries` | v003 |
+| 角色 | `characters`, `character_relationships` | v003 |
+| 结构 | `volumes`, `main_plot`, `sub_plot` | v003 |
+| 伏笔 | `seeds` | v003 |
+| 章节 | `chapter_status`, `chapters` | v003 |
+| Onboarding | `onboarding_state` | v003 |
 
-### 核心表详细设计
+### 3.2 完整 SQL
 
-#### `projects`（项目元数据）
+迁移文件位于 `backend/persistence/migrations/`：
+- `v003_init.sql`：整体重写（按 `spec: .spec/db-refactor/spec.md`）
+- `v004_volumes_enhance.sql`：`volumes` 表加 `status` + `summary` 两列
 
-```sql
-CREATE TABLE projects (
-    id TEXT PRIMARY KEY,
-    name TEXT NOT NULL,
-    palette TEXT NOT NULL DEFAULT '',          -- UI 色调标签
-    current_pov TEXT,                          -- 当前 POV 角色 char_id
-    exploration_level TEXT NOT NULL DEFAULT 'standard',
-    cover_image_url TEXT,
-    style_pack_id TEXT,
-    created_at TIMESTAMP NOT NULL,
-    updated_at TIMESTAMP NOT NULL,
-    deleted_at TIMESTAMP                       -- 软删除时间戳
-);
-```
+#### 基础设施（4 表）
 
-`exploration_level` 约束为：`conservative` / `standard` / `wild`
+**conversations**（`v003_init.sql:51`）
 
-#### `conversations` + `messages`（对话历史）
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| id | TEXT PK | uuid |
+| user_id | TEXT NOT NULL | |
+| created_at | TIMESTAMP | |
+| last_active_at | TIMESTAMP | 每次写消息自动更新 |
+| status | TEXT CHECK | `active` / `invalidated` / `archived` |
+| invalidated_at | TIMESTAMP | |
+| summary | TEXT | |
+| message_count | INTEGER DEFAULT 0 | |
 
-```sql
-CREATE TABLE conversations (
-    id TEXT PRIMARY KEY,
-    user_id TEXT NOT NULL,
-    created_at TIMESTAMP NOT NULL,
-    last_active_at TIMESTAMP NOT NULL,
-    status TEXT NOT NULL DEFAULT 'active'
-        CHECK(status IN ('active', 'invalidated', 'archived')),
-    summary TEXT,                              -- LLM 压缩的历史摘要
-    message_count INTEGER DEFAULT 0
-);
+索引：`idx_conv_user`, `idx_conv_last_active (DESC)`, `idx_conv_status (user_id, status)`, `idx_conv_invalidated (DESC)`。
 
-CREATE TABLE messages (
-    id TEXT PRIMARY KEY,
-    conversation_id TEXT NOT NULL,
-    project_id TEXT,                           -- 消息关联的项目（可选）
-    role TEXT NOT NULL CHECK(role IN ('user', 'assistant', 'system', 'tool')),
-    content TEXT,
-    tool_calls TEXT,                           -- JSON：LLM 决定调用的工具
-    tool_results TEXT,                         -- JSON：工具返回结果
-    created_at TIMESTAMP NOT NULL,
-    FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
-);
-```
+**messages**（`v003_init.sql:67`）
 
-**对话管理策略**：
-- 24h 滑窗：最近活跃对话在 24h 内复用，超时后状态变为 `archived`
-- `ConversationRepository.get_or_refresh_active_conversation(user_id)` 自动维护
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| id | TEXT PK | |
+| conversation_id | TEXT FK→conversations(id) ON DELETE CASCADE | |
+| project_id | TEXT | 软关联（不强制） |
+| role | TEXT CHECK | `user` / `assistant` / `system` / `tool` |
+| content | TEXT | |
+| tool_calls | TEXT (JSON) | |
+| tool_results | TEXT (JSON) | |
+| agent_name | TEXT | |
+| created_at | TIMESTAMP | |
 
-#### `world_tree`（世界树 - 单行聚合）
+索引：`idx_msg_conv_time`, `idx_msg_role`, `idx_msg_project (project_id, created_at DESC)`, `idx_msg_conv_project`, `idx_msg_agent`。
 
-```sql
-CREATE TABLE world_tree (
-    project_id TEXT PRIMARY KEY,
-    timeline_era TEXT,
-    anchor_event TEXT,
-    geography_primary TEXT,
-    geography_secondary_json TEXT,      -- list[str]（JSON 编码）
-    geography_spatial_rules_json TEXT,  -- list[str]（JSON 编码）
-    core_rules_json TEXT,               -- list[CoreRule]（JSON 编码）
-    metadata_json TEXT,
-    updated_at TIMESTAMP NOT NULL,
-    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
-);
-```
+**tool_calls_log**（`v003_init.sql:88`）：`id, message_id, tool_name, args, result, duration_ms, created_at`。索引：`idx_tclog_msg`, `idx_tclog_tool`, `idx_tclog_time (DESC)`。
 
-**JSON 列约定**：复杂结构（列表/对象）序列化为 JSON 字符串存储，读取时反序列化。
+**user_preferences**（`v003_init.sql:101`）：复合主键 `(user_id, key)`，外加 `value`, `updated_at`。
 
-#### `seeds`（伏笔种子）
+#### 项目级（2 表）
 
-```sql
-CREATE TABLE seeds (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    project_id TEXT NOT NULL,
-    content TEXT NOT NULL,
-    name TEXT,
-    trigger TEXT,                              -- 触发条件
-    payoff TEXT,                               -- 收割场景
-    estimated_chapter INTEGER,
-    payoff_chapter INTEGER,                    -- 实际收割章节
-    importance_primary TEXT NOT NULL
-        CHECK(importance_primary IN ('主线推进', '支线故事', '小巧思')),
-    size TEXT NOT NULL
-        CHECK(size IN ('长线', '中线', '点状')),
-    planned_interval INTEGER,
-    orientation TEXT NOT NULL
-        CHECK(orientation IN ('剧情翻转', '关键成员关系', '主角成长', '支线揭示', '小巧思', '氛围营造')),
-    planted_at_chapter INTEGER DEFAULT 0,
-    last_seen_chapter INTEGER DEFAULT 0,
-    weight REAL DEFAULT 0.5,                   -- 调度权重（0.0-1.0）
-    status TEXT NOT NULL
-        CHECK(status IN ('planted', 'resonating', 'harvested', 'abandoned')),
-    ...
-);
-```
+**projects**（`v003_init.sql:108`）
 
-种子状态流转：`planted` → `resonating`（提及但未收割）→ `harvested`（正式收割）/ `abandoned`（废弃）
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| id | TEXT PK | `world-{8hex}` |
+| name | TEXT NOT NULL | |
+| exploration_level | TEXT DEFAULT 'standard' | `conservative` / `standard` / `wild` |
+| cover_image_url | TEXT | `/static/projects/{id}/cover.png` |
+| style_pack_id | TEXT | |
+| created_at, updated_at | TIMESTAMP | |
+| deleted_at | TIMESTAMP | 软删标记 |
 
-#### `chapters`（章节 metadata）
+索引：`idx_projects_updated (DESC)`, `idx_projects_deleted`。
 
-```sql
-CREATE TABLE chapters (
-    project_id TEXT NOT NULL,
-    chapter_num INTEGER NOT NULL,
-    title TEXT,
-    summary TEXT,                              -- 一句话概要（LLM 抽取）
-    detailed_summary TEXT,                     -- 详细摘要（未来扩展）
-    word_count INTEGER DEFAULT 0,
-    file_path TEXT NOT NULL,                   -- 正文文件相对路径
-    intervention TEXT,                         -- 生成时的干预指令
-    actor_feedback TEXT,
-    actor_character TEXT,                      -- 视角角色
-    generated_at TIMESTAMP NOT NULL,
-    updated_at TIMESTAMP NOT NULL,
-    PRIMARY KEY (project_id, chapter_num),
-    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
-);
-```
+**project_state**（`v003_init.sql:122`）：1:1 承载运行时高频写字段：`current_pov, current_chapter, current_volume_id, current_timeline_event_id, current_geography_location_ids_json, last_generated_at, updated_at`。PK：`project_id` FK→projects。
 
-正文内容不存 DB，`file_path` 指向 `data/projects/{id}/chapters/chapter_NNN.md`。
+#### 世界树基座（4 表）
 
-#### `tool_calls_log`（工具调用审计）
+**world_tree**（`v003_init.sql:131`）：**5 字段最终态** — `project_id (PK)`, `story_core`, `genre_tags_json`, `core_rules_json`, `updated_at`。`core_rules` 是 list[dict]，含 `id / statement / enforcement / applies_to`，`enforcement="hard"` 走 `consistency_checker.check_hard_rules` 扫描。
 
-```sql
-CREATE TABLE tool_calls_log (
-    id TEXT PRIMARY KEY,
-    message_id TEXT,                           -- 关联的 assistant message
-    tool_name TEXT NOT NULL,
-    args TEXT,                                 -- JSON
-    result TEXT,                               -- JSON
-    duration_ms INTEGER NOT NULL,
-    created_at TIMESTAMP NOT NULL,
-    FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE SET NULL
-);
-```
+**timeline_events**（`v003_init.sql:142`）：`id, project_id, era_name, era_order, event_name, description, event_order, start_year, end_year, related_main_plot_node_id, related_char_ids_json, updated_at`。索引：`(project_id, era_order, event_order)`。`start_year` 是 TEXT（支持「男主 15 岁那年」这种语义化时间）。
 
-完整记录每次工具调用的输入/输出/耗时，便于调试和回溯。
+**geography_locations**（`v003_init.sql:160`）：`id, project_id, name, category, description, significance, parent_location_id, related_char_ids_json, updated_at`。`category` CHECK ∈ `{realm, continent, country, region, city, sect, landmark, other}`。支持嵌套（`parent_location_id` 自引用）。索引：`idx_geography_locations_parent`。
 
-### 索引设计
+**world_entries**（`v003_init.sql:181`）：通用百科条目 `id, project_id, category, title, content, related_char_ids_json, updated_at`。`category` CHECK ∈ `{magic, tech, social, politics, economy, mythology, history, geography, other}`。索引：`(project_id, category)`。
 
-所有常用查询路径都有索引：
+#### 角色（2 表）
 
-```sql
--- 对话：按用户 + 状态查最近对话
-CREATE INDEX idx_conv_user ON conversations(user_id);
-CREATE INDEX idx_conv_status ON conversations(user_id, status);
-CREATE INDEX idx_conv_last_active ON conversations(last_active_at DESC);
+**characters**（`v003_init.sql:201`）：`id, project_id, name, role, traits_json, speech_style, background, updated_at`。`role` CHECK ∈ `{protagonist, deuteragonist, antagonist, supporting, minor}`。索引：`idx_characters_project`, `idx_characters_role`, `idx_characters_name`。
 
--- 消息：按对话时间顺序
-CREATE INDEX idx_msg_conv_time ON messages(conversation_id, created_at);
--- 消息：按项目查
-CREATE INDEX idx_msg_project ON messages(project_id, created_at DESC);
+**character_relationships**（`v003_init.sql:218`）：`id, project_id, char_a_id, char_b_id, rel_type, description, updated_at`。`rel_type` CHECK ∈ `{family, lover, friend, ally, rival, enemy, mentor, subordinate}`。**约束**：`UNIQUE(project_id, char_a_id, char_b_id)` + `CHECK(char_a_id < char_b_id)`（由 `project_repository.add_relationship` 规范化保证）。FK：两边都 ON DELETE CASCADE → characters。
 
--- 章节：按项目倒序
-CREATE INDEX idx_chapters_project ON chapters(project_id, chapter_num DESC);
+#### 结构（3 表）
 
--- 种子：按状态
-CREATE INDEX idx_seeds_status ON seeds(project_id, status);
+**volumes**（`v003_init.sql:243`）：`id, project_id, volume_num, title, description, planned_chapter_count, status, summary, updated_at`。**v004 增强**（`v004_volumes_enhance.sql:9`）：加 `status` (in_progress / completed) + `summary` (整卷 1000 字总结)。UNIQUE 索引：`(project_id, volume_num)`。
 
--- 人物：按角色
-CREATE INDEX idx_characters_role ON characters(project_id, role);
-```
+**main_plot**（`v003_init.sql:255`）：**1:n 节点表**（从旧 PK=project_id 单行结构拆出）。`id, project_id, volume_id, plot_num, title, description, estimated_chapter, status, related_char_ids_json, related_timeline_event_id, related_geography_location_ids_json, updated_at`。`status` CHECK ∈ `{pending, active, completed}`。索引：`(project_id, plot_num)`。
+
+**sub_plot**（`v003_init.sql:274`）：`id, project_id, volume_id, title, description, chapter_start, chapter_end, status, priority, related_char_ids_json, updated_at`。`status` CHECK ∈ `{pending, active, completed, abandoned}`；`priority` CHECK ∈ `{main, side, minor}`。
+
+#### 伏笔（1 表）
+
+**seeds**（`v003_init.sql:295`）：**定义 + 运行时状态合并到单表**。字段：`id (AUTOINCREMENT), project_id, name, content, trigger, payoff, category, scope, estimated_plant_chapter, estimated_payoff_chapter, related_char_ids_json, related_main_plot_node_id, related_sub_plot_id, status, planted_at_chapter, planted_context, last_seen_chapter, weight, updated_at`。`status` CHECK ∈ `{pending, planted, resonating, harvested, abandoned}`。索引：`idx_seeds_project`, `idx_seeds_status (project_id, status)`。
+
+#### 章节（2 表）
+
+**chapter_status**（`v003_init.sql:323`）：复合 PK `(project_id, chapter_num)`。`status` CHECK ∈ `{idle, generating, done, failed}`。`started_at, completed_at, error`。
+
+**chapters**（`v003_init.sql:336`）：复合 PK `(project_id, chapter_num)`。`project_id, chapter_num, volume_id, title, summary, word_count, file_path, intervention, generated_at, updated_at`。**v003 删除**：`actor_feedback / actor_character / detailed_summary` 三个列。索引：`(project_id, chapter_num DESC)`。
+
+#### Onboarding（1 表）
+
+**onboarding_state**（`v003_init.sql:353`）：`project_id (PK), info_state, payload_json, current_step, state_json, last_activity_at, created_at, updated_at`。`info_state` CHECK ∈ `{collecting, wtm_pending, ready}`（v003 新增三态机）。`current_step` + `state_json` 保留兼容旧代码。
+
+### 3.3 v003 删除的旧表
+
+`v003_init.sql:21` 起 DROP 掉 13 张历史表：`projects_deleted`, `style_charter`, `genre_resonance`, `chapter_seed_changes`, `chapter_character_states`, 旧 `main_plot`（PK=project_id），以及 sqlite-vec 历史遗留的 6 张占位表。
 
 ---
 
 ## 4. Repository 层
 
-每张（组）表对应一个 Repository，提供类型安全的 CRUD 接口。
+`backend/persistence/` 下 9 个 Repository，**全部依赖 `get_store()` 单例**，不持有连接状态。
 
-### 各 Repository 职责
+### 4.1 ProjectRepository
 
-| Repository | 文件 | 管理的表 |
-|-----------|------|---------|
-| `ProjectRepository` | `project_repository.py` | projects + world_tree + genre_resonance + main_plot + sub_plot + characters + character_relationships + seeds |
-| `ChapterRepository` | `chapter_repository.py` | chapters（metadata）+ 文件读写 |
-| `ConversationRepository` | `conversation_repository.py` | conversations + messages |
-| `OnboardingRepository` | `onboarding_repository.py` | onboarding_state |
-| `ChapterStatusRepository` | `chapter_status_repository.py` | chapter_status |
-| `ToolCallLogRepository` | `tool_call_log_repository.py` | tool_calls_log |
-| `ProjectDeletedRepository` | `project_deleted_repository.py` | projects_deleted |
-| `UserPreferenceRepository` | `user_preference_repository.py` | user_preferences |
+`backend/persistence/project_repository.py`
 
-### Pydantic Row Model（`persistence/models.py`）
+**职责**：`projects` 表 + 9 张关联表（世界树基座），是最重的 Repository。
 
-所有 DB 行数据都映射为 Pydantic `BaseModel`，提供类型检查和序列化：
+#### 关键方法（按表分组）
 
-```
-Project, WorldTreeRow, GenreResonanceRow, MainPlotRow,
-SubPlotRow, CharacterRow, CharacterRelationshipRow, SeedRow,
-ChapterRow, ConversationStatus, Message, ToolCallLog,
-UserPreference, ChapterStatus, ProjectDeleted, OnboardingStateRow,
-ChapterSeedChangeRow, ChapterCharacterStateRow
-```
+**projects**：`create / get / list_all / update_name / update_exploration_level / update_style_pack_id / get_style_pack_id / update_cover_image_url / soft_delete / hard_delete / restore_delete`
 
-**Enum 类型**：
+**project_state**（1:1）：`get_project_state / upsert_project_state`（增量 UPDATE，None 字段不动）
 
-| Enum | 取值 |
-|------|------|
-| `MessageRole` | user / assistant / system / tool |
-| `ChapterState` | idle / generating / done / failed |
-| `ConversationStatus` | active / invalidated / archived |
-| `CharacterRole` | protagonist / deuteragonist / antagonist / supporting / minor |
-| `SeedStatus` | planted / resonating / harvested / abandoned |
-| `SubplotStatus` | active / pending / completed / abandoned |
-| `SubplotPriority` | main / side / minor |
+**world_tree**（5 字段最终态）：`_upsert_world_tree (data: dict) / get_world_tree / get_core_rules / save_core_rules`
 
-### ProjectRepository（最复杂的 Repository）
+**volumes**（1:n）：`list_volumes / get_volume / add_volume / update_volume / delete_volume` — v004 起 `update_volume` 允许改 `status` / `summary`
 
-`ProjectRepository` 同时管理项目 + 7 件基座，提供：
+**main_plot**（1:n 节点）：`list_main_plot_nodes / get_main_plot_node / add_main_plot_node / update_main_plot_node / delete_main_plot_node`
 
-- `create(project_id, name, palette)` → 创建项目 + 初始化 7 件基座空行
-- `get(project_id)` → 查项目元数据
-- `get_full(project_id)` → 查项目 + 全量 7 件基座
-- `update_world_tree(project_id, data)` → 更新世界树字段
-- `update_characters(project_id, chars)` → 批量替换角色
-- `add_seed(project_id, seed_data)` → 新增种子
-- `update_seed_status(seed_id, status)` → 更新种子状态
-- `soft_delete(project_id)` → 设置 `deleted_at`
+**sub_plot**（1:n）：`list_subplots / get_subplot / add_subplot / update_subplot / delete_subplot`
 
-### ConversationRepository（对话管理）
+**timeline_events**（1:n）：`list_timeline_events (ORDER BY era_order, event_order) / add / update / delete`
 
-核心方法：
+**geography_locations**（1:n，支持嵌套）：`list_geography_locations / add / update / delete`
 
-- `get_or_refresh_active_conversation(user_id)` → 24h 滑窗，自动创建/复用/归档
-- `add_message(conv_id, role, content, ...)` → 追加消息
-- `get_recent_messages(conv_id, limit)` → 查最近 N 条消息（分层加载）
+**world_entries**（1:n）：`list_world_entries (可选按 category 过滤) / add / update / delete`
+
+**characters**（1:n）：`list_characters / get_character / add_character / update_character / delete_character`
+
+**character_relationships**（1:n）：`list_relationships / add_relationship (规范化 char_a_id < char_b_id) / delete_relationship`
+
+**seeds**（1:n，状态合表）：`list_seeds (可选 status 过滤) / get_seed / add_seed (返 lastrowid) / update_seed / delete_seed`
+
+**综合查询**：`load_all_artifacts(project_id) -> Dict[str, Any]`（`project_repository.py:548`）一次性读 11 张表，给 context builder 用。
+
+#### 关键约定
+
+- `_to_json / _from_json` 内部 helper 处理 `*_json` 列
+- `add_*` 方法不传 `id` 时按规则自动生成：`vol-{8hex}`, `mp-{8hex}`, `sub-{8hex}`, `evt-{8hex}`, `loc-{8hex}`, `we-{8hex}`, `char-{8hex}`, `rel-{8hex}`
+- 增量 UPDATE 模式：`data` dict 缺哪个 key 不动哪一列
+
+#### 关联 Pydantic Model
+
+`Project, ProjectState, WorldTreeRow, VolumeRow, MainPlotNodeRow, SubPlotRow, CharacterRow, CharacterRelationshipRow, SeedRow, TimelineEventRow, GeographyLocationRow, WorldEntryRow`（均位于 `models.py`）
+
+### 4.2 ChapterRepository
+
+`backend/persistence/chapter_repository.py`
+
+**职责**：`chapters` 表 CRUD（**metadata 落 DB + 正文写文件**双写）。
+
+**关键方法**：
+- `create()`（`chapter_repository.py:29`）：写 DB 的同时，若 `content_text` 不为 None，落 `file_path` 写 Markdown
+- `get / list_by_project (DESC LIMIT N) / get_latest / update_summary / update_intervention / delete / rollback_to (删 > to_chapter) / count_chapters`
+
+**v003 变更**：删 `actor_feedback / actor_character / detailed_summary` 入参；加 `volume_id` 关联。
+
+**关联 Model**：`ChapterRow`
+
+### 4.3 ConversationRepository
+
+`backend/persistence/conversation_repository.py`
+
+**职责**：`conversations` + `messages` 表 CRUD，含 24h 滑窗管理。
+
+**关键方法**（全部 async）：
+- `get_active_conversation / get_or_create_active_conversation / get_or_refresh_active_conversation (24h 滑窗)`
+- `create_conversation (先 invalidate 旧 active) / invalidate_conversation / get_conversation / list_conversations / update_summary`
+- `add_message (自动更新 last_active_at + message_count + 1) / get_messages (DESC LIMIT N) / get_messages_by_project / query_messages (LIKE 关键词搜索)`
+
+**24h 滑窗逻辑**（`conversation_repository.py:48`）：用 `last_active_at` 而非 `created_at`，距最后一次消息 > 24h 时 invalidate 旧 active 并新建。
+
+**关联 Model / Enum**：`Conversation, Message, MessageRole, ConversationStatus`
+
+### 4.4 OnboardingRepository
+
+`backend/persistence/onboarding_repository.py`
+
+**职责**：`onboarding_state` 表 CRUD。**v003 主入口**：`upsert_info_state`（三态机 + payload）。
+
+**关键方法**：
+- `get / get_payload / get_info_state / get_state_json (兼容旧)`
+- `upsert_info_state (info_state + payload) / set_info_state (仅切状态) / merge_payload (合并到 payload_json)`
+
+**info_state 三态**（`onboarding_repository.py:84`）：`collecting` (管家收信息) → `wtm_pending` (WTM 在跑) → `ready` (基座就绪)。
+
+**关联 Model / Enum**：`OnboardingStateRow, OnboardingInfoState`
+
+### 4.5 ChapterStatusRepository
+
+`backend/persistence/chapter_status_repository.py`
+
+**职责**：`chapter_status` 表 CRUD（章节生成状态机）。
+
+**关键方法**（async + sync 混用）：
+- async：`set_status (自动填 started_at/completed_at) / get_status / delete_by_project`
+- sync：`delete_after_chapter (rollback 用，project_id + keep_up_to: int)`
+
+**ChapterState**：`idle / generating / done / failed`
+
+### 4.6 ToolCallLogRepository
+
+`backend/persistence/tool_call_log_repository.py`
+
+**职责**：`tool_calls_log` 审计 Repository。
+
+**关键方法**：`add (args/result 序列化为 JSON) / list_by_tool (DESC LIMIT N) / list_by_message (按 message_id)`
+
+### 4.7 UserPreferenceRepository
+
+`backend/persistence/user_preference_repository.py`
+
+**职责**：`user_preferences` 表 CRUD（复合主键 `(user_id, key)`）。
+
+**关键方法**：`set (upsert) / get / list_all`
+
+### 4.8 完整 Pydantic Row Model 清单
+
+`backend/persistence/models.py` 定义了所有 Row Model + 15 个 Enum。
+
+#### Row Model（17 个）
+
+| Model | 表 | 关键字段 |
+|-------|----|---------|
+| `Conversation` | conversations | id, user_id, status, message_count |
+| `Message` | messages | id, conversation_id, role, tool_calls |
+| `ToolCallLog` | tool_calls_log | id, tool_name, args, result, duration_ms |
+| `UserPreference` | user_preferences | user_id, key, value |
+| `ChapterStatus` | chapter_status | project_id, chapter_num, status |
+| `Project` | projects | id, name, exploration_level |
+| `ProjectState` | project_state | project_id, current_pov, current_chapter |
+| `WorldTreeRow` | world_tree | 5 字段（story_core + genre_tags_json + core_rules_json） |
+| `TimelineEventRow` | timeline_events | era, event, related_main_plot_node_id |
+| `GeographyLocationRow` | geography_locations | name, category, parent_location_id |
+| `WorldEntryRow` | world_entries | category, title, content |
+| `CharacterRow` | characters | name, role, traits_json |
+| `CharacterRelationshipRow` | character_relationships | char_a_id, char_b_id, rel_type |
+| `VolumeRow` | volumes | volume_num, title, status, summary |
+| `MainPlotNodeRow` | main_plot | plot_num, title, status, related_* |
+| `SubPlotRow` | sub_plot | chapter_start/end, status, priority |
+| `SeedRow` | seeds | name, content, status, weight |
+| `ChapterRow` | chapters | chapter_num, file_path, intervention |
+| `OnboardingStateRow` | onboarding_state | info_state, payload_json |
+
+#### Enum（15 个）
+
+`MessageRole, ChapterState, ConversationStatus, CharacterRole, CharacterRelationshipType, SeedStatus, SeedCategory, SeedScope, MainPlotStatus, SubplotStatus, VolumeStatus, SubplotPriority, GeographyCategory, WorldEntryCategory, OnboardingInfoState`
 
 ---
 
 ## 5. 章节正文文件存储
 
-### 目录结构
+### 5.1 目录结构
 
 ```
-data/projects/
-└── {project_id}/
-    ├── chapters/
-    │   ├── chapter_001.md
-    │   ├── chapter_002.md
-    │   └── chapter_NNN.md
-    └── cover.png
+data/
+├── novel.db                                    # SQLite 主库
+└── projects/
+    ├── world-3f7a8b2c/
+    │   ├── chapters/
+    │   │   ├── chapter_001.md
+    │   │   ├── chapter_002.md
+    │   │   └── chapter_003.md
+    │   └── cover.png                           # 封面图
+    └── .trash/                                  # 软删暂存
+        └── world-3f7a8b2c-20260702103045/      # 软删的完整目录
 ```
 
-### 文件命名规则
+### 5.2 命名规则
 
-- 章节正文：`chapter_{num:03d}.md`（3 位补零）
-- 封面图：`cover.png`（固定名，生成覆盖）
+`chapter_{NNN}.md` — `chapter_num` 3 位零填充（`chapter_repository.py:234` `f.stem.split("_")[1]`）。
 
-### 读写接口
+### 5.3 读写接口
 
-`ChapterRepository` 封装文件操作：
+**写**（`chapter_repository.py:44`）：`create()` 接收 `content_text` 和 `file_path`，先 `Path(file_path).parent.mkdir(parents=True, exist_ok=True)`，再 `write_text(content_text, encoding="utf-8")`，最后落 DB。
 
-```
-write_chapter_file(project_id, chapter_num, content: str) → str (file_path)
-read_chapter_file(project_id, chapter_num) → Optional[str]
-delete_chapter_file(project_id, chapter_num) → bool
-```
+**删**：`delete(project_id, chapter_num)` 只删 DB 行；rollback 时（`chapter_repository.py:234`）同步 `f.unlink()` 删文件。
 
-正文 Markdown 格式约定：
+**回档**（`chapter_repository.py:139`）：`rollback_to(to_chapter)` 删 `chapter_num > to_chapter` 的 DB 行；`ProjectManager.rollback`（`project_manager.py:218`）同步删文件目录里 `chapter_*.md` 中 num > to_chapter 的。
 
-```markdown
-# 第 N 章 章节标题
+### 5.4 静态文件服务
 
-章节正文内容...
+`backend/api/app.py:76`：
+
+```python
+_PROJECTS_DATA_DIR = Path(__file__).parent.parent.parent / "data" / "projects"
+app.mount("/static/projects", StaticFiles(directory=str(_PROJECTS_DATA_DIR)), name="project-static")
 ```
 
-### 静态文件服务
-
-封面图通过 FastAPI 静态文件服务对外暴露：
-
-```
-GET /static/projects/{project_id}/cover.png
-→ data/projects/{project_id}/cover.png
-```
-
-URL 存入 `projects.cover_image_url` 字段，前端直接引用。
+URL 映射：`/static/projects/{project_id}/cover.png` → `data/projects/{project_id}/cover.png`。
 
 ---
 
 ## 6. 数据迁移机制
 
-`SQLiteStore._init_schema()` 在每次应用启动时自动执行未应用的迁移。
+### 6.1 自动执行
 
-### 迁移文件规则
+`SQLiteStore.__init__`（`sqlite_store.py:21`）即触发 `_init_schema()`。无需手动命令。
 
-```
-backend/persistence/migrations/
-└── v001_init.sql    # 当前唯一迁移文件（合并版）
-```
+### 6.2 幂等保证
 
-- 文件命名：`v{NNN}_{description}.sql`
-- 按文件名字母序执行
-- 幂等：已执行的版本跳过（记录在 `migrations` 表）
-- 容错：`duplicate column` / `already exists` 错误静默跳过（保证重复执行安全）
+**应用层**：
+- `migrations` 表记录已 applied 的 version
+- 已 applied 的 SQL 文件跳过（`sqlite_store.py:42`）
+- `INSERT OR IGNORE INTO migrations` 重复执行不报错
 
-### 新增迁移
+**SQL 层**：
+- 全部迁移文件 `CREATE TABLE IF NOT EXISTS`
+- 索引 `CREATE INDEX IF NOT EXISTS`
+- v004 增量 `ALTER TABLE ... ADD COLUMN`（SQLite < 3.35 不支持 IF NOT EXISTS，应用层捕获 `duplicate column` 异常（`sqlite_store.py:48`）静默通过）
 
-1. 新建 `backend/persistence/migrations/v002_description.sql`
-2. 编写 `ALTER TABLE` / `CREATE TABLE IF NOT EXISTS` 语句（确保幂等）
-3. 下次启动自动执行
+### 6.3 新增迁移规范
 
-```sql
--- 示例：v002_add_field.sql
-ALTER TABLE projects ADD COLUMN word_count INTEGER DEFAULT 0;
-```
+1. 在 `backend/persistence/migrations/` 新建 `v{NNN}_xxx.sql`
+2. 文件名必须 `v` 开头 + `.sql` 结尾（按 `glob("v*.sql")` 排序）
+3. 末尾必须包含：
+   ```sql
+   INSERT OR IGNORE INTO migrations (version, applied_at) VALUES ('v{NNN}_xxx', CURRENT_TIMESTAMP);
+   ```
+4. 删表操作放文件最前部（按依赖逆序），加表操作放后面
+5. 增量 `ALTER TABLE ADD COLUMN` 触发的 `duplicate column` 异常已被 `_init_schema` 静默吃掉，无需手动 try/except
+6. v005+ 不在 v003 写过的表上重写 — 增量演进
+7. 启动日志会打 `DB {table} {ACTION}: ...` 看 `Repository._log` 字段
 
 ---
 
 ## 7. 软删除与回档
 
-### 软删除（`ProjectManager.soft_delete`）
+### 7.1 软删除（ProjectManager.soft_delete / delete）
+
+`backend/services/project_manager.py:244`
 
 ```
-1. projects.deleted_at = NOW()
-2. 把项目目录移到 data/projects/.trash/{project_id}-{timestamp}/
-3. 写入 projects_deleted 表（原名称/palette/删除时间/trash路径）
+soft_delete(project_id, confirm=False) → delete(...)
+delete(project_id, confirm=False):
+  1. if project_path.exists():
+       self.trash_root.mkdir(parents=True, exist_ok=True)
+       timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+       trash_path = self.trash_root / f"{project_id}-{timestamp}"
+       shutil.move(project_path → trash_path)        # 文件目录移入 .trash
+  2. self._proj_repo.soft_delete(project_id)         # projects.deleted_at = now
+  3. self._proj_repo.hard_delete(project_id)         # DELETE FROM projects (触发 FK CASCADE 清 17 张表)
 ```
 
-`GET /api/projects` 默认过滤 `deleted_at IS NOT NULL`，被删项目不展示。
+**CASCADE 行为**（v003 全部表 FK 都是 `ON DELETE CASCADE` 到 `projects`）：
+- `project_state / world_tree / timeline_events / geography_locations / world_entries / characters / character_relationships / volumes / main_plot / sub_plot / seeds / chapter_status / chapters / onboarding_state` 全部连根删
+- `conversations / messages` 走 `idx_msg_project` 软关联，不级联
+- **手写清理**：`chapter_status` 走 `delete_by_project`（`chapter_status_repository.py:50`）；`messages.project_id` 不清空（软引用）
 
-`.trash/` 目录下的数据保留，可手动恢复（未来可实现回收站功能）。
+**`restore(project_id, trash_name)`**（`project_manager.py:281`）：从 `.trash/{trash_name}/` 移回 `projects/{project_id}/`，并 `restore_delete` 清 `deleted_at`。**注意**：DB 已被 hard_delete 清空，restore 后**只剩文件**，7 件基座/角色/卷/伏笔/章节全丢。所以软删主要是「**文件 + 软标记**」的组合，目的是给用户 7 天后悔期，但 DB 已级联清空。
 
-### 回档（`ProjectManager.rollback`）
+**安全门**：`confirm=False` 直接 `raise ValueError("delete requires confirm=True")`，必须显式确认。
+
+### 7.2 回档（ProjectManager.rollback）
+
+`backend/services/project_manager.py:211`
 
 ```
-回档到第 N 章：
-1. 查 chapters 表，找到所有 chapter_num > N 的章节
-2. 逐个删除章节文件（chapter_NNN.md）
-3. 从 chapters 表删除对应记录
-4. 清理关联的 chapter_seed_changes + chapter_character_states
-5. 更新 chapter_status 表（移除被删章节的状态记录）
+rollback(project_id, to_chapter, confirm=False):
+  1. if not confirm: raise ValueError(...)
+  2. kept = count_chapters(project_id)
+  3. removed = chapter_repository.rollback_to(to_chapter)  # 删 > to_chapter 的 DB 行
+  4. ChapterStatusRepository.delete_after_chapter(keep_up_to=to_chapter)  # 删 > to_chapter 的状态
+  5. 遍历 chapters_dir/*.md：if num > to_chapter: f.unlink()  # 删文件
+  6. return {kept_chapters, removed_chapters}
 ```
 
-**不可逆操作**：回档后后续章节永久删除，执行前 API 要求 `confirm=true` 参数。
+**回档不删**：`chapters` 保留 ≤ to_chapter；`volumes / main_plot / sub_plot / seeds / world_tree` 等不动；`project_state.current_chapter` 不自动回退（调用方负责同步）。
 
-前端展示确认弹窗（`⚠️ 确认回档到第 N 章？后续章节将永久删除`）后才发请求。
+**安全门**：同 `delete`，`confirm=True` 才执行。
 
+### 7.3 软删项目过滤
+
+`ProjectManager.load`（`project_manager.py:71`）发现 `project.deleted_at is not None` 直接返回 `None`，**前端不会看到软删项目**。
+`ProjectRepository.list_all`（`project_repository.py:111`）SQL 自动 `WHERE deleted_at IS NULL`。

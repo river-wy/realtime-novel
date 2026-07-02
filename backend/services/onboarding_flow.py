@@ -1,13 +1,12 @@
-"""OnboardingFlow — Onboarding 状态机（DEPRECATED v003）
+"""OnboardingFlow — Onboarding 状态机（DEPRECATED）
 
-v003 变更（2026-07-01 完整删除旧 5 步工具）：
-- 旧 5 步流程（onboarding_propose_step / onboarding_user_confirm / onboarding_generate_chapter）已删除
+旧 5 步工具已完整删除：
+- onboarding_propose_step / onboarding_user_confirm / onboarding_generate_chapter
 - step() / load_state() 方法已无调用方，保留但标记废弃
 - update_project_name_in_state() 仍被 onboarding_hooks 调用（项目名同步到 onboarding_state），保留
 - 新流程为管家 ReAct 自由对话 → verify_world_tree_baseline 校验 → delegate_to_wtm 委托 WTM
-  （v003 委托模式完整说明见 onboarding_tools.py 与 arch-plan/onboarding-pipeline.md）
 
-v0.7 职责：5 步启动链路的状态管理（state 走 DB onboarding_state 表）。
+职责：5 步启动链路的状态管理（state 走 DB onboarding_state 表）。
 Step 1-4 的 assemble_7_artifacts / emit 统一由管家 ReAct loop 通过
 onboarding_user_confirm 工具触发，本文件只负责状态持久化。
 Step 5 章节生成走 OnboardingGenerateChapterTool（onboarding_tools.py），

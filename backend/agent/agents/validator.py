@@ -1,4 +1,4 @@
-"""Validator — 校验 Agent（v0.9 重构）
+"""Validator — 校验 Agent
 
 职责：
 - 世界树基座一致性校验（WTM 落库后调）
@@ -84,7 +84,7 @@ class ChapterValidationResult(BaseModel):
 # ============ Validator 类 ============
 
 class Validator:
-    """校验 Agent（v0.9 重构）
+    """校验 Agent
     
     走 ReAct loop + 自己的 session cache
     校验范围：全覆盖所有基座

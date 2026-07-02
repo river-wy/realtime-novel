@@ -1,7 +1,6 @@
 """Gemini Provider（friday 代理 Google 原生异步 submit + poll）
 
 对应 infra.md §B.2.6
-v0.7 改造：provider_name 加 friday/ 前缀表示提供方，api_key 走 config_loader (.llm_api_key)
 """
 from __future__ import annotations
 
@@ -26,7 +25,7 @@ class GeminiProvider(LLMProvider):
     supported_roles = ["image"]
 
     def __init__(self, api_key: str | None = None):
-        # v0.7: api_key 走 .llm_api_key 文件，submit_url/query_url_template 从 agents.json 读
+        # api_key 走 .llm_api_key 文件，submit_url/query_url_template 从 agents.json 读
         self.api_key = api_key or load_llm_api_key()
         model_cfg = get_model_config("friday/gemini-3.1-flash-image-preview")
         self.SUBMIT_URL = model_cfg["submit_url"]

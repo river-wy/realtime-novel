@@ -1,4 +1,4 @@
-"""统一日志配置 (v0.8.3 新增)
+"""统一日志配置
 
 之前散落: print() / logging.warning() / 不分模块, LLM 调用无结构化日志.
 现在: 统一 logger = backend.{module}, 输出到 stderr (uvicorn 捕获) + tmp/logs/backend.log.
@@ -33,7 +33,7 @@ _configured = False
 
 
 def configure_logging() -> None:
-    """全局日志初始化 (幂等). 在 main 模块入口调一次即可."""
+    """全局日志初始化（幂等）。在 main 模块入口调一次即可。"""
     global _configured
     if _configured:
         return
@@ -67,7 +67,7 @@ def configure_logging() -> None:
         file_handler.setFormatter(formatter)
         root.addHandler(file_handler)
     except Exception as e:
-        # 文件 handler 失败不阻断, stderr 还能用
+        # 文件 handler 失败不阻断，stderr 还能用
         sys.stderr.write(f"[logger] file handler init failed: {e}\n")
 
     # uvicorn / fastapi logger 接管 (让他们的 access log 也走我们的格式)
@@ -78,7 +78,7 @@ def configure_logging() -> None:
 
 
 def get_logger(name: str) -> logging.Logger:
-    """获取 logger (子模块用 `__name__`). 第一次调用会自动 configure."""
+    """获取 logger（子模块用 `__name__`）。第一次调用会自动 configure。"""
     if not _configured:
         configure_logging()
     return logging.getLogger(name)
@@ -93,13 +93,13 @@ def logger(target):
 
     logger 名取 {module}.{qualname}，与 get_logger(__name__) 命名空间一致。
 
-    用法（类）:
+    用法（类）：
         @logger
         class MyService:
             def do_something(self):
                 self.log.info("done: %s", result)
 
-    用法（模块级函数）:
+    用法（模块级函数）：
         @logger
         async def my_func():
             my_func.log.info("called")

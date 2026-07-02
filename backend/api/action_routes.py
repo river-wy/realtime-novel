@@ -24,7 +24,6 @@ _cs_repo = ChapterStatusRepository()
 # ============ /interventions ============
 
 class InterventionRequest(BaseModel):
-    # v003：删 actor_feedback / actor_character 字段
     intervention: Optional[str] = None
 
 
@@ -36,7 +35,7 @@ class InterventionResponse(BaseModel):
 
 @router.post("/{project_id}/interventions", response_model=InterventionResponse)
 async def submit_intervention(project_id: str, req: InterventionRequest):
-    """提交剧情干预（v0.4.1 落库）"""
+    """提交剧情干预"""
     try:
         result = await _intervention.add(
             project_id,
@@ -58,7 +57,7 @@ async def submit_intervention(project_id: str, req: InterventionRequest):
             "result": result if isinstance(result, dict) else {"raw": str(result)},
         },
         project_id=project_id,
-        agent_name="world_tree_manager",   # v0.9.2 补：intervention 实际走 WTM ReAct
+        agent_name="world_tree_manager",
     )
     return InterventionResponse(
         project_id=project_id,
@@ -83,7 +82,7 @@ async def rollback_project(
     to_chapter: int = Query(..., ge=1),
     confirm: bool = Query(..., description="Must be true"),
 ):
-    """⚠️ 危险操作：回档 — 薄路由，调 rollback_base tool（v0.4.1 落库）"""
+    """⚠️ 危险操作：回档 — 薄路由，调 rollback_base tool"""
     if not confirm:
         raise HTTPException(400, "confirm query param must be true")
     try:
@@ -102,7 +101,7 @@ async def rollback_project(
             "result": output,
         },
         project_id=project_id,
-        agent_name="world_tree_manager",   # v0.9.2 补：rollback 改基座
+        agent_name="world_tree_manager",
     )
     return RollbackResponse(
         project_id=project_id,
@@ -128,7 +127,7 @@ class ImageResponse(BaseModel):
 
 @router.post("/{project_id}/image", response_model=ImageResponse)
 async def generate_image(project_id: str, req: ImageRequest):
-    """生成主立绘 — 薄路由，调 generate_image tool（v0.4.1 落库）"""
+    """生成主立绘 — 薄路由，调 generate_image tool"""
     from backend.agent.tools import get_tool
     from backend.agent.tools.schemas import GenerateImageInput
     from backend.agent.tools.base import ToolError
@@ -150,7 +149,7 @@ async def generate_image(project_id: str, req: ImageRequest):
             "result": result_dict,
         },
         project_id=project_id,
-        agent_name="novel_steward",   # v0.9.2 补：image 管家直接调（不是 WTM 路径）
+        agent_name="novel_steward",
     )
     return ImageResponse(
         project_id=output.project_id,
@@ -178,7 +177,7 @@ class UpdateBaseResponse(BaseModel):
 
 @router.patch("/{project_id}/base", response_model=UpdateBaseResponse)
 async def update_base(project_id: str, req: UpdateBaseRequest):
-    """改 7 件基座 — 薄路由，调 update_base tool（v0.4.1 落库）"""
+    """改 7 件基座 — 薄路由，调 update_base tool"""
     from backend.agent.tools import get_tool
     from backend.agent.tools.schemas import UpdateBaseInput
     from backend.agent.tools.base import ToolError
@@ -202,7 +201,7 @@ async def update_base(project_id: str, req: UpdateBaseRequest):
             "result": result_dict,
         },
         project_id=project_id,
-        agent_name="world_tree_manager",   # v0.9.2 补：update_base 改基座
+        agent_name="world_tree_manager",
     )
     return UpdateBaseResponse(
         project_id=output.project_id,
