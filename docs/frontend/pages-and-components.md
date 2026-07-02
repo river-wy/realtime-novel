@@ -174,7 +174,6 @@ const projectId = computed(() => route.params.projectId as string || 'demo-urban
 - `.header-content`（flex 横向）：
   - 返回按钮 → `router.push({ name: 'world', params: { projectId } })`
   - `.reader-title` 项目名（`text-overflow: ellipsis`）
-  - `.palette-badge` 调色板
   - **`.exploration-toggle` 探索度滑钮**（保守/标准/狂野），`toggle-slider` 滑块按 `:data-level` 用 `transform: translateX(0/100/200%)` 移动，`transition 300ms`（`Reader.vue:95-101`，样式 `Reader.vue:392-425`）
   - `.header-btn-wide` 「章节」按钮 → 切换 `showDrawer`
 

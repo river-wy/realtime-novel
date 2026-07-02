@@ -13,7 +13,6 @@ class LoadProjectInput(BaseModel):
 
 class CreateProjectInput(BaseModel):
     name: str = Field(..., min_length=1, max_length=100)
-    palette: str = Field(default="", min_length=0, max_length=500)
     exploration_level: Literal["conservative", "standard", "wild"] = Field(
         default="standard",
         description="探索度: conservative (严守) / standard (平衡) / wild (大胆)"
@@ -33,7 +32,6 @@ class DeleteProjectInput(BaseModel):
 class ProjectDetail(BaseModel):
     id: str
     name: str
-    palette: str
     exploration_level: str = "standard"
     seven_artifacts: Optional[dict[str, Any]] = None
     world_tree: Optional[dict[str, Any]] = None
@@ -124,7 +122,7 @@ class GenerateVolumeSummaryOutput(BaseModel):
 class UpdateBaseInput(BaseModel):
     """整段写入（兼容旧 API）"""
     project_id: str = Field(..., min_length=1)
-    key: Literal["name", "palette", "world_tree", "main_plot", "style_pack", "seed_table", "genre_resonance", "character_card", "sub_plot"]
+    key: Literal["name", "world_tree", "main_plot", "style_pack", "seed_table", "genre_resonance", "character_card", "sub_plot"]
     new_value: str = Field(..., min_length=1)
 
 

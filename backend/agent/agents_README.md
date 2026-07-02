@@ -200,7 +200,7 @@ executor.add_middleware(fn, agent_name=None)  # 编程式注册
 - ✅ `_generate_project_name` 从 onboarding_agent 移入 hooks.py（事件触发时调用）
 
 **能力清单**：
-- Step 1-2: 按钮交互（题材/风格/基调 + palette）
+- Step 1-2: 按钮交互（题材/风格/基调）
 - Step 3-4: LLM 多轮推演（`controller.consult()`）
 - Step 5: 调 NovelWriter 生成第 1 章
 - 重新提议检测（11 关键词）

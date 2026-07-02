@@ -83,7 +83,6 @@ class RollbackBaseTool(BaseTool):
                 return ProjectDetail(
                     id=input.project_id,
                     name="",
-                    palette="",
                     chapters=[],
                 )
             except FileNotFoundError as e:

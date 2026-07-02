@@ -125,7 +125,6 @@ function statusLabel(status: string): string {
           <div class="card-content">
             <h3 class="card-title" :title="p.name">{{ p.name }}</h3>
             <div class="card-meta">
-              <span class="palette">{{ p.palette }}</span>
               <span class="badge" :class="`exploration-${p.exploration_level || 'standard'}`">
                 <i :class="`ph ph-${explorationIcon(p.exploration_level || 'standard')}`"></i>
                 {{ explorationLabel(p.exploration_level || 'standard') }}
@@ -348,12 +347,6 @@ function statusLabel(status: string): string {
   gap: var(--space-2);
   flex-wrap: wrap;
   margin-bottom: var(--space-2);
-}
-.palette {
-  background: rgba(139, 92, 246, 0.2);
-  padding: 2px 6px;
-  border-radius: var(--radius-sm);
-  font-size: var(--text-xs);
 }
 .card-chapter-count {
   font-size: var(--text-xs);

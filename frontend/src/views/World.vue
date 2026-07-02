@@ -83,7 +83,6 @@ const explorationIcons: Record<string, string> = {
       <div class="cover-title-area" v-if="projectsStore.current">
         <h1 class="cover-title">{{ projectsStore.current.name }}</h1>
         <div class="cover-badges">
-          <span class="badge palette-badge">{{ projectsStore.current.palette }}</span>
           <span class="badge exploration-badge" v-if="projectsStore.current.exploration_level">
             <i :class="`ph ph-${explorationIcons[projectsStore.current.exploration_level] || 'scales'}`"></i>
             {{ explorationLabels[projectsStore.current.exploration_level] || '标准' }}
@@ -103,8 +102,6 @@ const explorationIcons: Record<string, string> = {
         <dl>
           <dt>章节数</dt>
           <dd>{{ chaptersStore.count }}</dd>
-          <dt>调色板</dt>
-          <dd>{{ projectsStore.current?.palette || '-' }}</dd>
           <dt>探索度</dt>
           <dd>{{ explorationLabels[projectsStore.current?.exploration_level || 'standard'] }}</dd>
           <dt>状态</dt>
@@ -255,10 +252,6 @@ const explorationIcons: Record<string, string> = {
   backdrop-filter: blur(4px);
 }
 .badge i { font-size: 12px; }
-.palette-badge {
-  background: rgba(139, 92, 246, 0.3);
-  color: #c4b5fd;
-}
 .exploration-badge {
   background: rgba(255, 143, 177, 0.25);
   color: var(--color-sakura-light);

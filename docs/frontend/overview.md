@@ -112,7 +112,7 @@ frontend/
 |------|------|
 | `loadList(limit?)` | 加载项目列表 |
 | `loadOne(id)` | 加载单个项目详情 |
-| `create(name, palette, initialPrompt?)` | 创建项目 |
+| `create(name, initialPrompt?)` | 创建项目 |
 | `remove(id)` | 软删除项目（本地立即过滤 + 后台刷新） |
 | `updateExplorationLevel(id, level)` | 切换探索度 |
 
@@ -158,7 +158,7 @@ timeout = 120_000ms              （章节生成最长 2 分钟）
 ```
 listProjects(limit?) → { projects: ProjectInfo[], total: number }
 getProject(id) → ProjectDetail
-createProject(name, palette, initialPrompt?) → { id, name }
+createProject(name, initialPrompt?) → { id, name }
 deleteProject(id) → { success }
 updateExplorationLevel(id, level) → { exploration_level }
 ```
@@ -166,7 +166,7 @@ updateExplorationLevel(id, level) → { exploration_level }
 **ProjectInfo**（列表简版）：
 
 ```
-{ id, name, palette, exploration_level, cover_image_url, chapter_count, created_at }
+{ id, name, exploration_level, cover_image_url, chapter_count, created_at }
 ```
 
 **ProjectDetail**（详版，含 7 件基座）：
@@ -341,7 +341,7 @@ interface StewardMessage {
 
 **顶部工具栏**：
 - 返回按钮 → `/world/:projectId`
-- 项目名称 + palette 标签
+- 项目名称
 - 探索度下拉（conservative/standard/wild）
 - 章节列表 Drawer 开关
 

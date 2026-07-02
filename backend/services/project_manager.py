@@ -28,15 +28,9 @@ class ProjectManager:
 
     # ============ CRUD ============
 
-    async def create(self, name: str, palette: str = "", initial_prompt: Optional[str] = None,
+    async def create(self, name: str, initial_prompt: Optional[str] = None,
                     exploration_level: str = "standard") -> dict:
-        """创建项目（DB + 目录）
-
-        v003：
-        - 删 palette / initial_prompt 入参透传给 ProjectRepository
-        - palette 仅作响应回填（前端 UI 主题色兼容）
-        - 探索度入库 projects.exploration_level
-        """
+        """创建项目（DB + 目录）"""
         import secrets
         project_id = f"world-{secrets.token_hex(4)}"
         self.log.info("PM create START: name=%r, exploration_level=%s, id=%s", name, exploration_level, project_id)
@@ -51,7 +45,6 @@ class ProjectManager:
         return {
             "id": project.id,
             "name": project.name,
-            "palette": palette,  # v003: 仅响应回填，不入 projects 表
             "exploration_level": project.exploration_level,
         }
 
@@ -116,7 +109,6 @@ class ProjectManager:
         return {
             "id": project.id,
             "name": project.name,
-            "palette": onboarding_payload.get("palette", "") if isinstance(onboarding_payload, dict) else "",
             "exploration_level": project.exploration_level,
             "current_pov": pov_char_id,
             "current_pov_char_id": pov_char_id,
@@ -145,7 +137,6 @@ class ProjectManager:
             result.append({
                 "id": p.id,
                 "name": p.name,
-                "palette": "",  # v003: 不再入 projects 表；如需读，从 onboarding_state 查
                 "exploration_level": p.exploration_level,
                 "chapter_count": chapter_count,
                 "onboarding_step": onboarding_step,

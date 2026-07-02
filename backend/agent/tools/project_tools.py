@@ -68,7 +68,6 @@ class LoadProjectTool(BaseTool):
             return ProjectDetail(
                 id=project.get("id", input.project_id),
                 name=project.get("name", ""),
-                palette=project.get("palette", ""),
                 seven_artifacts=project.get("seven_artifacts"),
                 world_tree=project.get("world_tree"),
                 chapters=project.get("chapters"),
@@ -90,14 +89,12 @@ class CreateProjectTool(BaseTool):
         try:
             project = await self._manager.create(
                 name=input.name,
-                palette=input.palette,
                 initial_prompt=input.initial_prompt,
                 exploration_level=input.exploration_level,
             )
             return ProjectDetail(
                 id=project.get("id", ""),
                 name=input.name,
-                palette=input.palette,
                 seven_artifacts=None, world_tree=None, chapters=[],
             )
         except FileExistsError as e:
@@ -125,7 +122,6 @@ class DeleteProjectTool(BaseTool):
             return ProjectDetail(
                 id=input.project_id,
                 name=result.get("project_id", input.project_id),
-                palette="",
             )
         except FileNotFoundError as e:
             return ToolError(code="NOT_FOUND", message=str(e))

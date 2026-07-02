@@ -6,27 +6,20 @@ import {api} from './client'
 export interface ProjectInfo {
   id: string
   name: string
-  palette: string
-  // 探索度
   exploration_level: 'conservative' | 'standard' | 'wild'
   chapter_count: number
   last_updated: string | null
-  // 项目状态
   status: 'not_started' | 'in_progress' | 'completed'
-  // 世界封面图
   cover_image_url?: string | null
 }
 
 export interface ProjectDetail {
   id: string
   name: string
-  palette: string
-  // 探索度
   exploration_level: 'conservative' | 'standard' | 'wild'
   seven_artifacts: Record<string, any> | null
   world_tree: Record<string, any> | null
   chapters: ChapterSummary[] | null
-  // 世界封面图
   cover_image_url?: string | null
 }
 
@@ -49,8 +42,8 @@ export async function getProject(id: string): Promise<ProjectDetail> {
   return data
 }
 
-export async function createProject(name: string, palette: string, initialPrompt?: string) {
-  const { data } = await api.post('/projects', { name, palette, initial_prompt: initialPrompt })
+export async function createProject(name: string, initialPrompt?: string) {
+  const { data } = await api.post('/projects', { name, initial_prompt: initialPrompt })
   return data
 }
 

@@ -50,7 +50,6 @@ class ProjectRepository:
     def create(self, project_id: str, name: str,
                exploration_level: str = "standard",
                style_pack_id: Optional[str] = None) -> Project:
-        """v003：删 palette 入参"""
         now = _now()
         with get_store().connection() as conn:
             conn.execute(

@@ -69,7 +69,7 @@ realtime-novel 前端使用 Pinia（Setup 语法）管理状态，外加 1 个 V
 |------|------|------|------|------|
 | `loadList` | `limit?: number`（默认 50） | `Promise<void>` | 拉取项目列表，写入 `projects` / `total` | 15 |
 | `loadOne` | `id: string` | `Promise<void>` | 拉取单个项目详情到 `current` | 27 |
-| `create` | `name: string`, `palette: string`, `initialPrompt?: string` | `Promise<api.CreateProjectResponse>` | 新建项目后自动 `loadList` 刷新 | 39 |
+| `create` | `name: string`, `initialPrompt?: string` | `Promise<api.CreateProjectResponse>` | 新建项目后自动 `loadList` 刷新 | 39 |
 | `remove` | `id: string` | `Promise<api.DeleteProjectResponse>` | 乐观本地过滤 + 后台再 `loadList` 一次 | 46 |
 | `updateExplorationLevel` | `id: string`, `level: 'conservative' \| 'standard' \| 'wild'` | `Promise<api.UpdateExplorationResponse>` | v0.8 探索度切换：先 `loadOne(id)` 刷新详情，再 `loadList` 刷新列表 | 55 |
 

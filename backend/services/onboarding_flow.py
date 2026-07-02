@@ -18,7 +18,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from backend.persistence import ProjectRepository, OnboardingRepository
+from backend.persistence import OnboardingRepository
 
 
 def _step_to_num(step: str) -> int:
@@ -45,7 +45,6 @@ class OnboardingFlow:
         """执行 onboarding 单步，更新 onboarding_state 表
 
         副作用：
-        - Step 2：把 palette 写入 projects.palette（UI 主题色）
         - Step 5：委托文笔家生成第 1 章（HTTP 路由兜底路径，管家 Agent 走 OnboardingGenerateChapterTool）
         """
         next_step_map = {"1": "2", "2": "3", "3": "4", "4": "5", "5": None}
@@ -59,12 +58,6 @@ class OnboardingFlow:
         state_data["updated_at"] = datetime.now().isoformat()
 
         repo.upsert_step(project_id, _step_to_num(step), state_data)
-
-        # Step 2：palette 写入 projects 表
-        if step == "2":
-            palette = payload.get("palette", "") or ""
-            if palette:
-                ProjectRepository().update_palette(project_id, palette)
 
         # Step 5：HTTP 路由兜底，生成第 1 章
         if step == "5":

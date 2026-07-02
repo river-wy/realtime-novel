@@ -18,15 +18,11 @@ _pm = ProjectManager()
 class ProjectInfo(BaseModel):
     id: str
     name: str
-    palette: str
-    # 探索度
     exploration_level: str = "standard"
     chapter_count: int = 0
     last_updated: Optional[str] = None
-    # onboard 续接用
     onboarding_step: Optional[int] = None  # null=从未进过, 0=未开始, 1-4=进行中
     status: Optional[str] = "not_started"  # not_started / in_progress / completed
-    # 世界封面图
     cover_image_url: Optional[str] = None
 
 
@@ -37,8 +33,6 @@ class ProjectListResponse(BaseModel):
 
 class CreateProjectRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=100)
-    palette: str = Field(default="", min_length=0, max_length=500)
-    # 创建时可指定探索度，默认 standard
     exploration_level: Literal["conservative", "standard", "wild"] = Field(
         default="standard",
         description="探索度: conservative(严守) / standard(平衡) / wild(大胆)"
@@ -56,16 +50,12 @@ class CreateProjectResponse(BaseModel):
 class ProjectDetailResponse(BaseModel):
     id: str
     name: str
-    palette: str
-    # 探索度
     exploration_level: str = "standard"
     seven_artifacts: Optional[dict[str, Any]] = None
     world_tree: Optional[dict[str, Any]] = None
     chapters: Optional[list[dict]] = None
-    # onboard 续接用
     onboarding_step: Optional[int] = None      # 已完成到哪步 (0=未开始, 1-4=进行中)
     onboarding_payload: Optional[dict[str, Any]] = None  # 已填入的 payload (续接回填用)
-    # 世界封面图
     cover_image_url: Optional[str] = None
 
 
@@ -104,7 +94,7 @@ async def list_projects(
 async def create_project(req: CreateProjectRequest):
     """创建项目"""
     try:
-        result = await _pm.create(req.name, req.palette, req.initial_prompt, exploration_level=req.exploration_level)
+        result = await _pm.create(req.name, req.initial_prompt, exploration_level=req.exploration_level)
     except FileExistsError as e:
         raise HTTPException(409, f"Project already exists: {req.name}")
     # 落库 (via ConversationRepository)
@@ -114,7 +104,7 @@ async def create_project(req: CreateProjectRequest):
         conversation_id=conv.id,
         role=MessageRole.TOOL,
         tool_results={"name": "create_project",
-                      "args": {"name": req.name, "palette": req.palette, "initial_prompt": req.initial_prompt,
+                      "args": {"name": req.name, "initial_prompt": req.initial_prompt,
                                "exploration_level": req.exploration_level},
                       "result": result},
         project_id=result.get("id"),
@@ -137,7 +127,6 @@ async def get_project(project_id: str):
     return ProjectDetailResponse(
         id=project.get("id", project_id),
         name=project.get("name", ""),
-        palette=project.get("palette", ""),
         exploration_level=project.get("exploration_level", "standard"),
         seven_artifacts=project.get("seven_artifacts"),
         world_tree=project.get("world_tree"),

@@ -93,7 +93,6 @@ Agent (ReAct loop)
 
 ### 2.5 关键约定
 
-- **v003 删除 palette 入参**（`project_manager.py:38`）：`palette` 仅响应回填给前端，不入 `projects` 表
 - **软删项目过滤**（`project_manager.py:78`）：`load()` 发现 `deleted_at` 非空返 `None`
 - **回档安全门**：`confirm=False` 直接 `raise ValueError`，必须显式确认
 - **status 字段**（`project_manager.py:152`）：根据 `chapter_count` + `onboarding_step` 推 `"completed"` / `"in_progress"` / `"not_started"`
@@ -121,7 +120,7 @@ v0.8 起：管家 ReAct 自由对话 → `verify_world_tree_baseline` 校验 →
 | 方法 | 职责 |
 |------|------|
 | `load_state(project_id)` | 读 onboarding_state 的 `state_json`（v003 实际优先 `payload_json`） |
-| `step(project_id, step, payload)` | **DEPRECATED**，原 5 步状态机入口。Step 2 写 `palette`（已废弃），Step 5 调 `delegate_chapter_generation` 生成第 1 章 |
+| `step(project_id, step, payload)` | **DEPRECATED**，原 5 步状态机入口。Step 5 调 `delegate_chapter_generation` 生成第 1 章 |
 | `update_project_name_in_state(project_id, new_name)` | 把自动生成的项目名写 `state_json.project_name`，由 `onboarding_hooks` 在 Step 4 完成时调 |
 
 ### 3.4 依赖

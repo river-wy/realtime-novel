@@ -64,7 +64,7 @@ api.interceptors.response.use(
 |---|---|---|---|---|
 | 1 | GET | `/api/projects?limit&offset` | `listProjects(limit=20, offset=0) → { total, projects: ProjectInfo[] }` | `project_routes.py:91` |
 | 2 | GET | `/api/projects/{id}` | `getProject(id) → ProjectDetail` | `project_routes.py:131` |
-| 3 | POST | `/api/projects` | `createProject(name, palette, initialPrompt?) → { id, name, created_at, onboarding_required }` | `project_routes.py:103` |
+| 3 | POST | `/api/projects` | `createProject(name, initialPrompt?) → { id, name, created_at, onboarding_required }` | `project_routes.py:103` |
 | 4 | DELETE | `/api/projects/{id}?confirm=true` | `deleteProject(id) → DeleteProjectResponse` | `project_routes.py:171` |
 | 5 | PATCH | `/api/projects/{id}/exploration-level` | `updateExplorationLevel(projectId, level) → { project_id, exploration_level, message }` | `project_routes.py:152` |
 | 🟡 | PATCH | `/api/projects/{id}/base` | `updateBase(projectId, key, newValue)` | `action_routes.py:144`（**死代码**） |
@@ -76,7 +76,6 @@ api.interceptors.response.use(
 interface ProjectInfo {
   id: string
   name: string
-  palette: string                                           // ⚠️ list 端点硬编码返回 ""（见 api-self-check.md P2-4）
   exploration_level: 'conservative' | 'standard' | 'wild'   // v0.8+
   chapter_count: number
   last_updated: string | null
@@ -86,7 +85,7 @@ interface ProjectInfo {
 
 // projects.ts:25-37
 interface ProjectDetail {
-  id, name, palette, exploration_level: 同上
+  id, name, exploration_level: 同上
   seven_artifacts: Record<string, any> | null
   world_tree: Record<string, any> | null
   chapters: ChapterSummary[] | null
@@ -424,7 +423,6 @@ if (t === 'agent_thinking') {
 | **P2-1** | 4 个未使用的 API 函数 | `healthCheck` / `updateBase` / `submitIntervention` / `generateImage` |
 | **P2-2** | 前端无 WS `interrupt` / `ping` 发送 | `useStewardChat.ts` 缺 `sendInterrupt()` |
 | **P2-3** | 后端 `/api/info` 端点无前端调用 | `system_routes.py:48` |
-| **P2-4** | list 端点 `palette` 始终为 `""` | `services/project_manager.py:148` 硬编码 |
 | **P2-5** | `ChapterInfo` list 不返回 `word_count` / `file_path` | `chapter_routes.py:65-72` |
 
 ### 4.3 整体健康度

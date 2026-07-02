@@ -38,8 +38,8 @@ export const useProjectsStore = defineStore('projects', () => {
     }
   }
 
-  async function create(name: string, palette: string, initialPrompt?: string) {
-    const r = await api.createProject(name, palette, initialPrompt)
+  async function create(name: string, initialPrompt?: string) {
+    const r = await api.createProject(name, initialPrompt)
     await loadList()
     return r
   }

@@ -91,7 +91,6 @@ const currentExploration = computed(() => projectsStore.current?.exploration_lev
           <i class="ph ph-arrow-left"></i>
         </button>
         <h1 class="reader-title" v-if="projectsStore.current">{{ projectsStore.current.name }}</h1>
-        <span class="palette-badge" v-if="projectsStore.current">{{ projectsStore.current.palette }}</span>
         <!-- 探索度 toggle -->
         <div class="exploration-toggle" :data-level="currentExploration">
           <div class="toggle-slider" :data-level="currentExploration"></div>
@@ -344,14 +343,6 @@ const currentExploration = computed(() => projectsStore.current?.exploration_lev
   text-overflow: ellipsis;
   text-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
   margin: 0;
-}
-.palette-badge {
-  font-size: var(--text-xs);
-  background: rgba(139, 92, 246, 0.2);
-  color: var(--color-text-secondary);
-  padding: 3px 10px;
-  border-radius: var(--radius-sm);
-  flex-shrink: 0;
 }
 
 /* 探索度 toggle（slider 指示器） */

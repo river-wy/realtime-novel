@@ -103,7 +103,6 @@ function onConfirm(action: string, confirmed: boolean) {
               >
                 <div class="card-name">《{{ p.name }}》</div>
                 <div class="card-meta">
-                  {{ p.palette || '未设置主题色' }}
                   · {{ p.updated_at?.slice(0, 10) || '未知' }}
                 </div>
               </div>

@@ -66,7 +66,6 @@ function goToProject(projectId: string) {
               <div class="project-name">《{{ p.name }}》</div>
               <div class="project-meta">
                 <span>{{ p.chapter_count || 0 }} 章</span>
-                <span v-if="p.palette">· {{ p.palette.slice(0, 16) }}</span>
               </div>
             </div>
           </div>
