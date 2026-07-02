@@ -1,6 +1,7 @@
-"""Base Edit 工具（update_base / rollback_base）
+"""Base Edit 工具（rollback_base）
 
-对应 core.md §B.1
+update_base 已删除（v003 重构后 save_7_artifacts 不存在）。
+基座修改请用 edit_artifact(target=...) 增量编辑 9 张表。
 """
 from __future__ import annotations
 
@@ -10,41 +11,11 @@ from pathlib import Path
 
 from backend.agent.tools.base import BaseTool, ToolError, register_tool
 from backend.agent.tools.schemas import (
-    UpdateBaseInput, UpdateBaseResult, RollbackBaseInput, ProjectDetail,
+    RollbackBaseInput, ProjectDetail,
 )
 from backend.agent.tools.locks import get_project_lock
 from backend.services.project_manager import ProjectManager
-from pathlib import Path  # noqa: F401  (保留 import 以防 Path 被未来代码需要)
-
-
-class UpdateBaseTool(BaseTool):
-    name = "update_base"
-    description = "改 7 件基座之一（key ∈ 7 件名）"
-    input_schema = UpdateBaseInput
-    output_schema = UpdateBaseResult
-
-    def __init__(self):
-        self._manager = ProjectManager()
-
-    async def run(
-        self, input: UpdateBaseInput, progress_callback=None
-    ) -> UpdateBaseResult:
-        try:
-            if progress_callback:
-                await progress_callback({"step": "loading", "percentage": 0})
-            # 走 manager
-            result = await self._manager.update_base(
-                project_id=input.project_id,
-                key=input.key,
-                new_value=input.new_value,
-            )
-            if progress_callback:
-                await progress_callback({"step": "done", "percentage": 100})
-            return UpdateBaseResult(**result)
-        except FileNotFoundError as e:
-            return ToolError(code="NOT_FOUND", message=str(e))
-        except Exception as e:
-            return ToolError(code="UPDATE_FAILED", message=str(e))
+from pathlib import Path  # noqa: F401
 
 
 class RollbackBaseTool(BaseTool):
@@ -72,7 +43,6 @@ class RollbackBaseTool(BaseTool):
             try:
                 if progress_callback:
                     await progress_callback({"step": "rolling_back", "percentage": 0})
-                # 走 manager
                 result = await self._pm.rollback(
                     project_id=input.project_id,
                     to_chapter=input.to_chapter,
@@ -93,5 +63,4 @@ class RollbackBaseTool(BaseTool):
                 return ToolError(code="ROLLBACK_FAILED", message=str(e))
 
 
-register_tool(UpdateBaseTool())
 register_tool(RollbackBaseTool())

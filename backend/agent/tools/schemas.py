@@ -117,21 +117,9 @@ class GenerateVolumeSummaryOutput(BaseModel):
     status: str = Field(default="in_progress", description="卷最终状态")
 
 
-# ============ Base Edit 工具（6 件基座）============
-
-class UpdateBaseInput(BaseModel):
-    """整段写入（兼容旧 API）"""
-    project_id: str = Field(..., min_length=1)
-    key: Literal["name", "world_tree", "main_plot", "style_pack", "seed_table", "genre_resonance", "character_card", "sub_plot"]
-    new_value: str = Field(..., min_length=1)
-
-
-class UpdateBaseResult(BaseModel):
-    project_id: str
-    key: str
-    old_value_preview: str
-    new_value_preview: str
-    chapters_affected: list[int]
+# ============ Base Edit 工具（v0.9 废除 update_base）============
+# update_base 已删除（v003 重构后 save_7_artifacts 不存在）。
+# 基座修改请用 edit_artifact(target=...) 增量编辑 9 张表。
 
 
 class EditArtifactInput(BaseModel):

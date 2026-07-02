@@ -95,13 +95,14 @@ class ProjectManager:
                     pass
         except Exception:
             pass
-        # current_pov 存 char_id，查 name 供前端展示（复用已有 project 对象，避免重复查 DB）
-        pov_char_id = project.current_pov
+        # current_pov 存 char_id，查 name 供前端展示（从 project_state 表读，v003 迁移自 projects）
+        state = self._proj_repo.get_project_state(project_id)
+        pov_char_id = state.current_pov if state else None
         pov_char_name: Optional[str] = None
         if pov_char_id:
             char = self._proj_repo.get_character(project.id, pov_char_id)
             if char:
-                pov_char_name = char.get("name")
+                pov_char_name = getattr(char, "name", None) or (char.get("name") if isinstance(char, dict) else None)
             else:
                 # 兼容旧数据：char_id 查不到角色，说明存的是 name 字符串
                 pov_char_name = pov_char_id
@@ -110,7 +111,6 @@ class ProjectManager:
             "id": project.id,
             "name": project.name,
             "exploration_level": project.exploration_level,
-            "current_pov": pov_char_id,
             "current_pov_char_id": pov_char_id,
             "current_pov_name": pov_char_name,
             "cover_image_url": project.cover_image_url,
@@ -154,61 +154,10 @@ class ProjectManager:
         key: str,
         new_value: str,
     ) -> dict:
-        """改 6 件基座（整段写入）"""
-        import json
-        try:
-            parsed = json.loads(new_value)
-        except Exception:
-            parsed = new_value
-
-        key_to_table = {
-            "world_tree": "world_tree",
-            "genre_resonance": "genre_resonance",
-            "main_plot": "main_plot",
-            "sub_plot": "sub_plot",
-            "character_card": None,
-            "seed_table": "seeds",
-        }
-        table = key_to_table.get(key)
-        old_preview = ""
-        if table:
-            try:
-                old_data = self._load_one(project_id, key)
-                old_preview = str(old_data)[:100]
-            except Exception:
-                pass
-
-        world_tree = parsed if key == "world_tree" else self._load_one(project_id, "world_tree")
-        genre_resonance = parsed if key == "genre_resonance" else self._load_one(project_id, "genre_resonance")
-        main_plot = parsed if key == "main_plot" else self._load_one(project_id, "main_plot")
-        sub_plot = parsed if key == "sub_plot" else self._load_one(project_id, "sub_plot")
-        character_card = parsed if key == "character_card" else self._load_one(project_id, "character_card")
-        seed_table = parsed if key == "seed_table" else self._load_one(project_id, "seed_table")
-
-        self._proj_repo.save_7_artifacts(
-            project_id=project_id,
-            world_tree=world_tree,
-            genre_resonance=genre_resonance,
-            main_plot=main_plot,
-            sub_plot=sub_plot,
-            character_card=character_card,
-            seed_table=seed_table,
+        """已废除。基座修改请走 edit_artifact(target=...) 增量编辑 9 张表。"""
+        raise NotImplementedError(
+            "update_base 已废除（v0.9）。请用 edit_artifact(target=core_rule/world_entry/...)"
         )
-
-        chapters = self._chap_repo.list_by_project(project_id, limit=200)
-        affected = [c.chapter_num for c in chapters]
-        return {
-            "project_id": project_id,
-            "key": key,
-            "old_value_preview": old_preview,
-            "new_value_preview": new_value[:100],
-            "chapters_affected": affected,
-        }
-
-    def _load_one(self, project_id: str, key: str) -> Dict[str, Any]:
-        """从 DB 读 6 件之一"""
-        all_data = self._proj_repo.load_all_artifacts(project_id)
-        return all_data.get(key, {})
 
     async def rollback(self, project_id: str, to_chapter: int, confirm: bool = False) -> dict:
         """回档到指定章节（cascade 删 chapters + 关联表 + 文件）"""

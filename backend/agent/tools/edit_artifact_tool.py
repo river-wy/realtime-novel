@@ -336,8 +336,8 @@ class EditArtifactTool(BaseTool):
         data = input.data or {}
 
         if input.operation == "add":
-            from_id = data.get("from_char")
-            to_id = data.get("to_char")
+            from_id = data.get("from_char") or data.get("char_a_id")
+            to_id = data.get("to_char") or data.get("char_b_id")
             if not (from_id and to_id):
                 return EditArtifactResult(
                     project_id=input.project_id, target=input.target,
@@ -349,6 +349,30 @@ class EditArtifactTool(BaseTool):
                 project_id=input.project_id, target=input.target,
                 operation=input.operation, identifier=rel_id, success=True,
                 affected={"rel_id": rel_id, "from": from_id, "to": to_id},
+            )
+
+        elif input.operation == "update":
+            if not input.identifier:
+                return EditArtifactResult(
+                    project_id=input.project_id, target=input.target,
+                    operation=input.operation, success=False,
+                    error="identifier required for update",
+                )
+            found = repo.update_relationship(
+                input.project_id, input.identifier, data
+            )
+            if not found:
+                return EditArtifactResult(
+                    project_id=input.project_id, target=input.target,
+                    operation=input.operation, identifier=input.identifier,
+                    success=False,
+                    error=f"relationship not found: {input.identifier}",
+                )
+            return EditArtifactResult(
+                project_id=input.project_id, target=input.target,
+                operation=input.operation, identifier=input.identifier,
+                success=True,
+                affected={"rel_id": input.identifier},
             )
 
         elif input.operation == "delete":

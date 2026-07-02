@@ -42,11 +42,14 @@ class SwitchPovTool(BaseTool):
                 )
             new_pov_name = char.get("name", "") if isinstance(char, dict) else getattr(char, "name", "")
 
-            # 3. 记录前 POV char_id
-            previous_pov_char_id = project.current_pov or ""
+            # 3. 记录前 POV char_id（v003：从 project_state 表读，Project model 不再含 current_pov）
+            state = self._project_repo.get_project_state(input.project_id)
+            previous_pov_char_id = state.current_pov if state else ""
 
-            # 4. 写新 POV
-            self._project_repo.update_current_pov(input.project_id, input.new_pov_char_id)
+            # 4. 写新 POV（v003：迁入 project_state 表）
+            self._project_repo.upsert_project_state(
+                input.project_id, current_pov=input.new_pov_char_id
+            )
 
             if progress_callback:
                 await progress_callback({"step": "done", "percentage": 100})

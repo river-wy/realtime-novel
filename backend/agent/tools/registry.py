@@ -63,12 +63,14 @@ AGENT_TOOLS: Dict[str, List[str]] = {
         "load_project",
         "edit_artifact",
         "edit_artifact_batch",
-        "update_base",
         "weave_plot",
         "introspect_character",
         "adjust_style",
         "switch_pov",
     ],
+    # ── Validator（仅输出不调工具，但 executor 要求 agent_name 必须在白名单）────
+    "validator_world_tree": [],
+    "validator_chapter": [],
 }
 
 

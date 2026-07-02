@@ -228,41 +228,6 @@ class ProjectRepository:
 
     # ---------- world_tree (5 字段最终态) ----------
 
-    def _upsert_world_tree(self, project_id: str, data: Dict[str, Any]) -> None:
-        """v003 重写：仅写 5 字段
-
-        输入 data 格式：
-        - data["story_core"]: str（顶层）
-        - data["genre_tags"]: list[str]（顶层，替代 genre_resonance）
-        - data["base"]["core_rules"]: list[dict]（约束规则）
-        """
-        now = _now()
-        story_core = data.get("story_core")
-        genre_tags = data.get("genre_tags") or data.get("genres", [])
-        base = data.get("base", {}) or {}
-        core_rules = base.get("core_rules", [])
-
-        with get_store().connection() as conn:
-            conn.execute(
-                """
-                INSERT INTO world_tree (
-                    project_id, story_core, genre_tags_json, core_rules_json, updated_at
-                ) VALUES (?, ?, ?, ?, ?)
-                ON CONFLICT(project_id) DO UPDATE SET
-                    story_core=excluded.story_core,
-                    genre_tags_json=excluded.genre_tags_json,
-                    core_rules_json=excluded.core_rules_json,
-                    updated_at=excluded.updated_at
-                """,
-                (
-                    project_id,
-                    story_core,
-                    _to_json(genre_tags),
-                    _to_json(core_rules),
-                    now,
-                ),
-            )
-
     def get_world_tree(self, project_id: str) -> Optional[WorldTreeRow]:
         with get_store().connection() as conn:
             row = conn.execute(
@@ -790,11 +755,7 @@ class ProjectRepository:
 
     def add_relationship(self, project_id: str, data: Dict[str, Any]) -> str:
         rel_id = data.get("id", f"rel-{uuid.uuid4().hex[:8]}")
-        # 规范化：保证 char_a_id < char_b_id
-        a = data.get("char_a_id", "")
-        b = data.get("char_b_id", "")
-        if a >= b:
-            a, b = b, a
+        a, b, rel_type = self._resolve_relationship_pair(data)
         now = _now()
         with get_store().connection() as conn:
             conn.execute(
@@ -805,12 +766,55 @@ class ProjectRepository:
                 """,
                 (
                     rel_id, project_id, a, b,
-                    data.get("rel_type", "friend"),
+                    rel_type,
                     data.get("description"),
                     now,
                 ),
             )
         return rel_id
+
+    def update_relationship(
+        self, project_id: str, rel_id: str, data: Dict[str, Any]
+    ) -> bool:
+        rel_type = data.get("rel_type") or data.get("relation_type")
+        description = data.get("description")
+        with get_store().connection() as conn:
+            cur = conn.execute(
+                """
+                UPDATE character_relationships
+                SET rel_type = COALESCE(?, rel_type),
+                    description = COALESCE(?, description),
+                    updated_at = ?
+                WHERE project_id = ? AND id = ?
+                """,
+                (rel_type, description, _now(), project_id, rel_id),
+            )
+            return cur.rowcount > 0
+
+    def _resolve_relationship_pair(self, data: Dict[str, Any]) -> tuple[str, str, str]:
+        """从 LLM 入参中提取 (a, b, rel_type)，兼容两种字段命名。
+
+        LLM 实际传的两种字段名：
+        - char_a_id / char_b_id / rel_type      （DB 字段名）
+        - from_char / to_char / relation_type   （自然语言）
+        """
+        a = data.get("char_a_id") or data.get("from_char") or ""
+        b = data.get("char_b_id") or data.get("to_char") or ""
+        if not a and not b:
+            raise ValueError("relationship requires char_a_id/char_b_id or from_char/to_char")
+        # 至少一个为空时，将对方补齐为同一 id（防御性兜底）
+        if not a:
+            a = b
+        if not b:
+            b = a
+        if a >= b:
+            a, b = b, a
+        rel_type = (
+            data.get("rel_type")
+            or data.get("relation_type")
+            or "friend"
+        )
+        return a, b, rel_type
 
     def delete_relationship(self, project_id: str, rel_id: str) -> None:
         with get_store().connection() as conn:

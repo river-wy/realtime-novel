@@ -38,7 +38,7 @@ class ChapterState(str, Enum):
 class ConversationStatus(str, Enum):
     ACTIVE = "active"
     INVALIDATED = "invalidated"
-    ARCHARCHIVED = "archived"
+    ARCHIVED = "archived"
 
 
 class CharacterRole(str, Enum):
@@ -405,5 +405,4 @@ class OnboardingStateRow(BaseModel):
     updated_at: datetime
     # 兼容旧字段
     current_step: int = 0
-    started_at: Optional[datetime] = None
     state_json: Optional[str] = None

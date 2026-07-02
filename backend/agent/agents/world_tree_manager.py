@@ -10,7 +10,6 @@
 实现：s3.4 起改用 AgentExecutor 跑 ReAct loop，LLM 自主决定调：
 - load_project（读 7 件基座）
 - edit_artifact（改 7 件）
-- update_base（直接改基座字段）
 - weave_plot（调整主线/支线）
 - introspect_character（更新角色状态）
 - adjust_style（调整文风）
@@ -104,7 +103,7 @@ WORLD_TREE_MANAGER_SYSTEM_PROMPT = """你是「世界树管理」。
    - 是否需要埋伏笔（seed_table）？
    - 是否引发 7 件之间的矛盾？
 4. 调用对应 tool 执行修改：
-   - 简单字段改 → update_base
+   - 简单字段改 → edit_artifact(target=...) 增量编辑
    - 复杂结构改 → edit_artifact
    - 主线/支线调整 → weave_plot
    - 角色状态变化 → introspect_character
@@ -572,7 +571,7 @@ class WorldTreeManager:
         )
 
         user_message = (
-            "请基于管家收集的 hint，在 ReAct loop 中自主调 edit_artifact / update_base 等工具，"
+            "请基于管家收集的 hint，在 ReAct loop 中自主调 edit_artifact 等工具，"
             "规划并落库完整小说世界基座（9 张表）。"
             "落库完成后输出 final_response，结构化说明每张表生成了多少行。"
         )

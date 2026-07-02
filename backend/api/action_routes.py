@@ -159,55 +159,8 @@ async def generate_image(project_id: str, req: ImageRequest):
     )
 
 
-# ============ PATCH /base ============
+# ============ /base 端点已删除 ============
+# update_base 工具已在 v0.9 废除（v003 重构后 save_7_artifacts 不存在）。
+# 基座修改请用 edit_artifact(target=...) 增量编辑 9 张表。
+# 历史 endpoint 仍可保留 410 标记，暂不暴露以免前端误调。
 
-class UpdateBaseRequest(BaseModel):
-    key: Literal["name", "world_tree", "main_plot", "style_pack", "seed_table", "genre_resonance"]
-    new_value: str = Field(..., min_length=1)
-
-
-class UpdateBaseResponse(BaseModel):
-    project_id: str
-    key: str
-    old_value_preview: str
-    new_value_preview: str
-    updated_at: str
-    chapters_affected: list[int] = Field(default_factory=list)
-
-
-@router.patch("/{project_id}/base", response_model=UpdateBaseResponse)
-async def update_base(project_id: str, req: UpdateBaseRequest):
-    """改 7 件基座 — 薄路由，调 update_base tool"""
-    from backend.agent.tools import get_tool
-    from backend.agent.tools.schemas import UpdateBaseInput
-    from backend.agent.tools.base import ToolError
-    tool = get_tool("update_base")
-    input_obj = UpdateBaseInput(
-        project_id=project_id, key=req.key, new_value=req.new_value
-    )
-    output = await tool.run(input_obj)
-    if isinstance(output, ToolError):
-        raise HTTPException(500, f"Update base failed: {output.message}")
-    # 落库
-    result_dict = output.model_dump() if hasattr(output, "model_dump") else {"_raw": str(output)}
-    conv_repo = ConversationRepository()
-    conv = await conv_repo.get_or_create_active_conversation("default")
-    await conv_repo.add_message(
-        conversation_id=conv.id,
-        role=MessageRole.TOOL,
-        tool_results={
-            "name": "update_base",
-            "args": {"project_id": project_id, "key": req.key, "new_value_preview": req.new_value[:100]},
-            "result": result_dict,
-        },
-        project_id=project_id,
-        agent_name="world_tree_manager",
-    )
-    return UpdateBaseResponse(
-        project_id=output.project_id,
-        key=output.key,
-        old_value_preview=output.old_value_preview,
-        new_value_preview=output.new_value_preview,
-        updated_at=datetime.now().isoformat(),
-        chapters_affected=output.chapters_affected,
-    )

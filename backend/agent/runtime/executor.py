@@ -525,6 +525,17 @@ class AgentExecutor:
                                 agent.agent_name, tool_name,
                                 tool_output.code, tool_duration_ms,
                             )
+                        elif hasattr(tool_output, "success") and tool_output.success is False:
+                            # Pydantic 风格的 tool result（如 EditArtifactResult）返 success=False
+                            # 不当成功走 else 分支，否则会误记为 SUCCESS — 修正 #4 生产黑盒
+                            error_msg = getattr(tool_output, "error", "") or "tool reported success=False"
+                            tool_result = tool_output.model_dump() if hasattr(tool_output, "model_dump") else {"error": error_msg}
+                            status = "tool_error"
+                            self.log.warning(
+                                "AgentExecutor[%s]: tool '%s' 返 success=False: %s (%dms)",
+                                agent.agent_name, tool_name,
+                                error_msg, tool_duration_ms,
+                            )
                         else:
                             tool_result = tool_output.model_dump() if hasattr(tool_output, "model_dump") else tool_output
                             status = "success"
