@@ -1,6 +1,9 @@
 """EditArtifactTool：结构化编辑 6 件基座（add/update/delete）"""
 from __future__ import annotations
 
+import logging
+log = logging.getLogger(__name__)
+
 import uuid
 from typing import Optional
 
@@ -76,6 +79,7 @@ class EditArtifactTool(BaseTool):
                 await progress_callback({"step": "done", "percentage": 100})
             return result
         except Exception as e:
+            log.error("edit_artifact 失败: project_id=%s, target=%s, error=%s", input.project_id, input.target, e, exc_info=True)
             return EditArtifactResult(
                 project_id=input.project_id,
                 target=input.target,
@@ -162,6 +166,7 @@ class EditArtifactTool(BaseTool):
                             rolled_back_ids=rolled_back_ids,
                         )
             except Exception as e:
+                log.warning("edit_artifact_batch item 失败: target=%s, error=%s", item.target, e, exc_info=True)
                 result = EditArtifactResult(
                     project_id=input.project_id,
                     target=item.target,
@@ -219,6 +224,7 @@ class EditArtifactTool(BaseTool):
                     return {"target": prev_result.target, "id": prev_id, "rolled_back": "delete"}
             return {"target": prev_result.target, "id": prev_id, "rolled_back": "best_effort"}
         except Exception as e:
+            log.warning("edit_artifact._rollback_one 异常: project_id=%s, error=%s", input.project_id, e, exc_info=True)
             edit_artifact_tool = EditArtifactTool  # silence linter
             return None
 

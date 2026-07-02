@@ -4,6 +4,9 @@
 """
 from __future__ import annotations
 
+import logging
+log = logging.getLogger(__name__)
+
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 from typing import Optional, Any, Literal
@@ -96,6 +99,7 @@ async def create_project(req: CreateProjectRequest):
     try:
         result = await _pm.create(req.name, req.initial_prompt, exploration_level=req.exploration_level)
     except FileExistsError as e:
+        log.warning("POST /projects 重复: name=%s, error=%s", req.name, e, exc_info=True)
         raise HTTPException(409, f"Project already exists: {req.name}")
     # 落库 (via ConversationRepository)
     conv_repo = ConversationRepository()
@@ -151,9 +155,11 @@ async def update_exploration_level(
     """
     try:
         await _pm.update_exploration_level(project_id, req.exploration_level)
-    except FileNotFoundError:
+    except FileNotFoundError as e:
+        log.warning("update_exploration_level 项目不存在: project_id=%s, error=%s", project_id, e, exc_info=True)
         raise HTTPException(404, f"Project not found: {project_id}")
     except ValueError as e:
+        log.warning("update_exploration_level 参数错: project_id=%s, error=%s", project_id, e, exc_info=True)
         raise HTTPException(400, str(e))
     return UpdateExplorationLevelResponse(
         project_id=project_id,
@@ -173,6 +179,7 @@ async def delete_project(
     try:
         result = await _pm.soft_delete(project_id, confirm=True)
     except FileNotFoundError as e:
+        log.warning("PATCH /projects/{id} 项目不存在: project_id=%s, error=%s", project_id, e, exc_info=True)
         raise HTTPException(404, str(e))
     # 落库 (via ConversationRepository)
     conv_repo = ConversationRepository()

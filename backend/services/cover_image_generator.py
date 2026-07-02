@@ -94,7 +94,7 @@ async def generate_and_save_cover(
             generate_and_save_cover.log.warning("[%s] 图片数据为空", project_id)
             return None
 
-        generate_and_save_cover.log.info("[%s] 图片数据前缀: %s", project_id, str(image_data)[:80])
+        generate_and_save_cover.log.info("[%s] 图片数据前缀: %s", project_id, str(image_data))
 
         project_dir = projects_root / project_id
         project_dir.mkdir(parents=True, exist_ok=True)
@@ -104,7 +104,7 @@ async def generate_and_save_cover(
         if image_data.startswith("http://") or image_data.startswith("https://"):
             # 直接是 URL → 下载
             import httpx
-            generate_and_save_cover.log.info("[%s] 图片是 URL，开始下载: %s", project_id, image_data[:100])
+            generate_and_save_cover.log.info("[%s] 图片是 URL，开始下载: %s", project_id, image_data)
             async with httpx.AsyncClient(timeout=30) as client:
                 resp = await client.get(image_data)
                 resp.raise_for_status()
@@ -122,7 +122,7 @@ async def generate_and_save_cover(
                 image_bytes = base64.b64decode(image_data)
             except Exception as e:
                 generate_and_save_cover.log.error("[%s] base64 解码失败: %s, data_prefix=%s",
-                                                  project_id, str(e), str(image_data)[:60])
+                                                  project_id, str(e), str(image_data))
                 return None
 
         cover_path.write_bytes(image_bytes)

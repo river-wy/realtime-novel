@@ -117,12 +117,12 @@ class GeminiProvider(LLMProvider):
                 if inline.get("data"):
                     raw = inline["data"]
                     mime = inline.get("mimeType", "")
-                    self.log.debug("Gemini part inlineData: mime=%s, data_prefix=%s", mime, str(raw)[:60])
+                    self.log.debug("Gemini part inlineData: mime=%s, data_prefix=%s", mime, str(raw))
                     image_urls.append(raw)
                 # fileData.fileUri: 直接是 URL（新版 API 可能返这个）
                 file_data = p.get("fileData", {})
                 if file_data.get("fileUri"):
-                    self.log.debug("Gemini part fileData: uri=%s", file_data["fileUri"][:100])
+                    self.log.debug("Gemini part fileData: uri=%s", file_data["fileUri"])
                     image_urls.append(file_data["fileUri"])
         # 兜底：有些版本直接在 data 层面返 imageUrl 字段
         if not image_urls and data_obj.get("imageUrl"):

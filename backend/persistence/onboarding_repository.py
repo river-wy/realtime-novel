@@ -8,6 +8,9 @@ v003 重构（spec §5.8.6）：
 from __future__ import annotations
 
 import json
+import logging
+log = logging.getLogger(__name__)
+
 from datetime import datetime
 from typing import Any, Dict, Optional
 
@@ -48,7 +51,8 @@ class OnboardingRepository:
             return {}
         try:
             return json.loads(row["payload_json"])
-        except Exception:
+        except Exception as e:
+            log.warning("onboarding_repo.get_payload 解析失败, 返空: project_id=%s, error=%s", project_id, e, exc_info=True)
             return {}
 
     def get_info_state(self, project_id: str) -> str:
@@ -75,12 +79,14 @@ class OnboardingRepository:
         if row["payload_json"]:
             try:
                 return json.loads(row["payload_json"])
-            except Exception:
+            except Exception as e:
+                log.warning("onboarding_repo 读 state_json 失败: project_id=%s, error=%s", project_id, e, exc_info=True)
                 pass
         if row["state_json"]:
             try:
                 return json.loads(row["state_json"])
-            except Exception:
+            except Exception as e:
+                log.warning("onboarding_repo JSON 解析失败, 返 None: project_id=%s, error=%s", project_id, e, exc_info=True)
                 pass
         return None
 
@@ -165,7 +171,8 @@ class OnboardingRepository:
             if row and row["payload_json"]:
                 try:
                     existing_payload = json.loads(row["payload_json"]) or {}
-                except Exception:
+                except Exception as e:
+                    log.warning("onboarding_repo 读 existing_payload 失败: project_id=%s, error=%s", project_id, e, exc_info=True)
                     existing_payload = {}
             merged = {**existing_payload, **fields}
 

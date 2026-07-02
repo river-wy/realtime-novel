@@ -524,7 +524,7 @@ class WorldTreeManager:
         self,
         project_id: str,
         steward_payload: Dict[str, Any],
-        max_iterations: int = 20,
+        max_iterations: int = 30,
     ) -> Dict[str, Any]:
         """WTM 入口：Onboarding 阶段完整规划小说世界基座（走 ReAct loop）
 
@@ -537,7 +537,7 @@ class WorldTreeManager:
         跟 analyze_intervention 的区别：
         - 注入的 system_prompt 是 initial_baseline 身份段
         - context_message 注入 steward_payload（管家收集的 hint）
-        - max_iterations=20（首次生成比干预更复杂）
+        - max_iterations=30（首次生成比干预更复杂；prompt 改为一次准备充分后批量调用）
         - LLM 自主落库，不需要"应用前/应用后"一致性 diff
         """
         from backend.agent.prompts.agent_prompt_factory import (
@@ -571,8 +571,9 @@ class WorldTreeManager:
         )
 
         user_message = (
-            "请基于管家收集的 hint，在 ReAct loop 中自主调 edit_artifact 等工具，"
-            "规划并落库完整小说世界基座（9 张表）。"
+            "请基于管家收集的 hint，在 ReAct loop 中自主调 edit_artifact / edit_artifact_batch 等工具，"
+            "一次性准备完善后批量调用（每类数据一次 batch 调完），"
+            "在 30 轮内规划并落库完整小说世界基座（9 张表）。"
             "落库完成后输出 final_response，结构化说明每张表生成了多少行。"
         )
 
@@ -861,12 +862,12 @@ class WorldTreeManager:
 
         if parsed is None:
             self.log.warning(
-                "WorldTreeManager._parse_diff: 无法提取 JSON: intent=%s, preview=%s",
-                intent, final[:200],
+                "WorldTreeManager._parse_diff: 无法提取 JSON: intent=%s, raw=%s",
+                intent, final,
             )
             return WorldTreeDiff(
                 intent=intent,
-                summary=final[:200] or "LLM 输出无法解析",
+                summary=final or "LLM 输出无法解析",
                 consistency=ConsistencyCheckResult(status="FAIL", conflicts=["JSON 解析失败"]),
                 risk_level="high",
                 requires_double_confirm=True,

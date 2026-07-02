@@ -181,7 +181,7 @@ def get_exploration_level_config(level: str) -> dict[str, Any]:
     Returns:
         {
           "temperature": 0.6 | 0.85 | 1.05,
-          "max_tokens": 2500 | 4500 | 6000,
+          "max_tokens": 8192,
           "frequency_penalty": 0.1 | 0.3 | 0.5,
           "supplement_aggressiveness": "low" | "medium" | "high",
           "description": "..."

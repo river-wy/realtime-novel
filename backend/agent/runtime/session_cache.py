@@ -353,13 +353,13 @@ async def _generate_summary(llm_adapter, messages: List[dict]) -> str:
         role = m.get("role", "")
         content = m.get("content") or ""
         if role == "user":
-            lines.append(f"用户：{content[:300]}")
+            lines.append(f"用户：{content}")
         elif role == "assistant":
             # assistant 可能是 管家/WTM/文笔家/Validator
-            lines.append(f"AI：{content[:300]}")
+            lines.append(f"AI：{content}")
         elif role == "tool":
             name = m.get("name", "tool")
-            lines.append(f"工具({name})：{content[:150]}")
+            lines.append(f"工具({name})：{content}")
 
     if not lines:
         return ""

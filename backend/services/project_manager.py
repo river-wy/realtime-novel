@@ -91,9 +91,11 @@ class ProjectManager:
                     import json as _json
                     state_data = _json.loads(ob_row.state_json)
                     onboarding_payload = state_data.get("payload", {}) or {}
-                except Exception:
+                except Exception as e:
+                    self.log.warning("PM load onboarding_state 读 payload 失败: project_id=%s, error=%s", project_id, e, exc_info=True)
                     pass
-        except Exception:
+        except Exception as e:
+            self.log.error("PM load 读 onboarding_state 失败: project_id=%s, error=%s", project_id, e, exc_info=True)
             pass
         # current_pov 存 char_id，查 name 供前端展示（从 project_state 表读，v003 迁移自 projects）
         state = self._proj_repo.get_project_state(project_id)
@@ -127,7 +129,8 @@ class ProjectManager:
         onboarding_map: dict[str, int] = {}
         try:
             onboarding_map = OnboardingRepository().list_current_steps()
-        except Exception:
+        except Exception as e:
+            self.log.warning("PM list_projects 读 onboarding 失败: error=%s", e, exc_info=True)
             pass
 
         result = []
@@ -176,7 +179,8 @@ class ProjectManager:
                     num = int(f.stem.split("_")[1])
                     if num > to_chapter:
                         f.unlink()
-                except (ValueError, IndexError):
+                except (ValueError, IndexError) as e:
+                    self.log.info("PM rollback 删除 chapter 文件失败: chapter_num=%s, error=%s", chapter_num, e, exc_info=True)
                     continue
         self.log.warning("PM rollback DONE: project=%s, kept=%d, removed=%d", project_id, kept, removed)
         return {

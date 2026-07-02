@@ -207,7 +207,7 @@ class DelegateToAgentTool(BaseTool):
                 error=output.error,
             )
 
-        preview = output.chapter_content[:150].replace("\n", " ") if output.chapter_content else ""
+        preview = output.chapter_content.replace("\n", " ") if output.chapter_content else ""
         return DelegateToAgentOutput(
             agent="novel_writer",
             success=True,

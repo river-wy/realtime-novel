@@ -43,7 +43,8 @@ class WebSocketManager:
             task.cancel()
             try:
                 await task
-            except (asyncio.CancelledError, Exception):
+            except (asyncio.CancelledError, Exception) as e:
+                log.info("ws_disconnect 异常忽略: user_id=%s, error=%s", user_id, e, exc_info=True)
                 pass
         log.info(f"ws_manager: user_id={user_id} disconnected")
 
@@ -121,7 +122,8 @@ async def chat_endpoint(websocket: WebSocket):
                         "type": "interrupted",
                         "message": "当前生成已取消",
                     })
-                except Exception:
+                except Exception as e:
+                    log.warning("ws_manager 处理消息异常: user_id=%s, error=%s", user_id, e, exc_info=True)
                     pass
 
             elif msg_type == "confirm":
@@ -153,7 +155,8 @@ async def chat_endpoint(websocket: WebSocket):
                 "code": "WEBSOCKET_ERROR",
                 "message": str(e),
             })
-        except Exception:
+        except Exception as e:
+            log.warning("ws_manager 错误消息发送失败: user_id=%s, error=%s", user_id, e, exc_info=True)
             pass
         await ws_manager.disconnect(user_id)
 
@@ -247,7 +250,8 @@ async def handle_user_message(ws: WebSocket, user_id: str, data: dict):
                 "type": "interrupted",
                 "message": "已中断",
             })
-        except Exception:
+        except Exception as e:
+            log.warning("ws interrupted 通知发送失败: user_id=%s, error=%s", user_id, e, exc_info=True)
             pass
     except Exception as e:
         log.error(f"ws_manager: handle_user_message failed: {e}", exc_info=True)
@@ -257,7 +261,8 @@ async def handle_user_message(ws: WebSocket, user_id: str, data: dict):
                 "code": "HANDLER_ERROR",
                 "message": str(e),
             })
-        except Exception:
+        except Exception as e:
+            log.warning("ws error 消息发送失败: user_id=%s, error=%s", user_id, e, exc_info=True)
             pass
 
 

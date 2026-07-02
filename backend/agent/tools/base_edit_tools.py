@@ -56,10 +56,13 @@ class RollbackBaseTool(BaseTool):
                     chapters=[],
                 )
             except FileNotFoundError as e:
+                self._pm.log.warning("rollback_base FileNotFoundError: project=%s, err=%s", input.project_id, e)
                 return ToolError(code="NOT_FOUND", message=str(e))
             except ValueError as e:
+                self._pm.log.warning("rollback_base ValueError: project=%s, err=%s", input.project_id, e)
                 return ToolError(code="ROLLBACK_FAILED", message=str(e))
             except Exception as e:
+                self._pm.log.error("rollback_base 异常: project=%s", input.project_id, exc_info=True)
                 return ToolError(code="ROLLBACK_FAILED", message=str(e))
 
 

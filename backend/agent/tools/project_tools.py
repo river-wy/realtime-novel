@@ -4,6 +4,9 @@
 """
 from __future__ import annotations
 
+import logging
+log = logging.getLogger(__name__)
+
 from typing import Optional, Callable, Awaitable, List
 from pydantic import BaseModel, Field
 
@@ -73,6 +76,7 @@ class LoadProjectTool(BaseTool):
                 chapters=project.get("chapters"),
             )
         except Exception as e:
+            log.error("load_project 失败: project_id=%s, error=%s", input.project_id, e, exc_info=True)
             return ToolError(code="LOAD_FAILED", message=str(e))
 
 
@@ -98,8 +102,10 @@ class CreateProjectTool(BaseTool):
                 seven_artifacts=None, world_tree=None, chapters=[],
             )
         except FileExistsError as e:
+            log.warning("create_project 已存在: name=%s, error=%s", req.name, e, exc_info=True)
             return ToolError(code="ALREADY_EXISTS", message=str(e))
         except Exception as e:
+            log.error("create_project 失败: name=%s, error=%s", req.name, e, exc_info=True)
             return ToolError(code="CREATE_FAILED", message=str(e))
 
 
@@ -124,8 +130,10 @@ class DeleteProjectTool(BaseTool):
                 name=result.get("project_id", input.project_id),
             )
         except FileNotFoundError as e:
+            log.warning("delete_project 不存在: project_id=%s, error=%s", input.project_id, e, exc_info=True)
             return ToolError(code="NOT_FOUND", message=str(e))
         except Exception as e:
+            log.error("delete_project 失败: project_id=%s, error=%s", input.project_id, e, exc_info=True)
             return ToolError(code="DELETE_FAILED", message=str(e))
 
 
@@ -171,7 +179,8 @@ class ListProjectsTool(BaseTool):
                 try:
                     from backend.persistence import ChapterRepository
                     chap_count = ChapterRepository().count_chapters(r.id)
-                except Exception:
+                except Exception as ee:
+                    log.warning("list_projects 读 chapter_count 失败: project_id=%s, error=%s", r.id, ee, exc_info=True)
                     chap_count = 0
                 status = (
                     "completed" if chap_count > 0
@@ -193,6 +202,7 @@ class ListProjectsTool(BaseTool):
                 has_more=len(rows) > input.offset + input.limit,
             )
         except Exception as e:
+            log.error("list_projects 整体失败, 返空列表: %s", e, exc_info=True)
             # 失败不抛错，返空列表（避免 LLM 决策阻断）
             return ListProjectsOutput(projects=[], total=0, has_more=False)
 

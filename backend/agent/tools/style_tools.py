@@ -100,6 +100,7 @@ class AdjustStyleTool(BaseTool):
                 style_pack_updated=True,
             )
         except Exception as e:
+            log.error("adjust_style 失败: project_id=%s, error=%s", input.project_id, e, exc_info=True)
             return ToolError(code="ADJUST_STYLE_FAILED", message=str(e))
 
 

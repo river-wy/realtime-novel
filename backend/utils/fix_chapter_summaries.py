@@ -63,7 +63,7 @@ async def _regenerate_summary(chapter_content: str, project_id: str, chapter_num
         enable_thinking=False,  # summary 不需要 thinking，关闭节省 token
     )
     summary = response.content.strip()
-    logger.info(f"[{project_id}] ch{chapter_num:03d} 新 summary: {summary[:80]}...")
+    logger.info(f"[{project_id}] ch{chapter_num:03d} 新 summary: {summary}")
     return summary if summary else None
 
 
@@ -114,7 +114,7 @@ async def fix_summaries(project_id: str | None, dry_run: bool) -> None:
             skipped += 1
             continue
 
-        logger.info(f"[{pid}] ch{num:03d} 发现可疑 summary: {summary[:60]}...")
+        logger.info(f"[{pid}] ch{num:03d} 发现可疑 summary: {summary}")
 
         if dry_run:
             logger.info(f"[DRY-RUN] 跳过实际修复")

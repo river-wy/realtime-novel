@@ -71,7 +71,7 @@ async def _generate_project_name(story_core: str, characters: str, tone: list[st
         name = raw.split("\n")[0].strip().strip("'\"`'「」《》")
         name = name[:50]
         if not name or len(name) < 2:
-            _generate_project_name.log.warning("auto-name: too short, raw=%s", raw[:100])
+            _generate_project_name.log.warning("auto-name: too short, raw=%s", raw)
             return ""
         _generate_project_name.log.info("auto-name generated: %s", name)
         return name

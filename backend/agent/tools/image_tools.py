@@ -4,6 +4,9 @@
 """
 from __future__ import annotations
 
+import logging
+log = logging.getLogger(__name__)
+
 import hashlib
 from datetime import datetime
 
@@ -70,8 +73,10 @@ class GenerateImageTool(BaseTool):
                 await progress_callback({"step": "done", "percentage": 100})
             return image_result
         except TimeoutError as e:
+            log.warning("image poll timeout: project_id=%s, error=%s", input.project_id, e, exc_info=True)
             return ToolError(code="POLL_TIMEOUT", message=str(e))
         except Exception as e:
+            log.error("generate_image 失败: project_id=%s, error=%s", input.project_id, e, exc_info=True)
             return ToolError(code="GENERATION_FAILED", message=str(e))
 
 

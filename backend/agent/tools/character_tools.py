@@ -1,6 +1,9 @@
 """character_tools.py — introspect_character 工具"""
 from __future__ import annotations
 
+import logging
+log = logging.getLogger(__name__)
+
 from backend.agent.tools.base import BaseTool, ToolError, register_tool
 from backend.agent.tools.schemas import (
     IntrospectCharacterInput, IntrospectResult,
@@ -52,6 +55,7 @@ class IntrospectCharacterTool(BaseTool):
                 inner_monologue=inner_monologue,
             )
         except Exception as e:
+            log.error("introspect_character 失败: project_id=%s, char_id=%s, error=%s", input.project_id, input.char_id, e, exc_info=True)
             return ToolError(code="INTROSPECT_FAILED", message=str(e))
 
 

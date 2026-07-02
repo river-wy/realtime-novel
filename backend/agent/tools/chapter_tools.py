@@ -13,6 +13,9 @@
 """
 from __future__ import annotations
 
+import logging
+log = logging.getLogger(__name__)
+
 from typing import Optional, Callable, Awaitable
 from datetime import datetime
 from pathlib import Path
@@ -118,12 +121,13 @@ class GenerateChapterTool(BaseTool):
                     summary=None,  # 由文笔家在 ReAct loop 里调 summarize_chapter 工具填
                 )
             except Exception as e:
+                log.error("generate_chapter 失败: project_id=%s, error=%s", input.project_id, e, exc_info=True)
                 try:
                     await self._status_repo.set_status(
                         input.project_id, next_chapter_num, ChapterState.FAILED, error=str(e)
                     )
-                except Exception:
-                    pass
+                except Exception as ee:
+                    log.error("generate_chapter 状态回写失败: project_id=%s, chapter_num=%d, error=%s", input.project_id, next_chapter_num, ee, exc_info=True)
                 return ToolError(code="GENERATION_FAILED", message=str(e))
 
 
@@ -157,6 +161,7 @@ class ReadChapterTool(BaseTool):
                 generated_at=datetime.fromtimestamp(chapter_path.stat().st_mtime).isoformat(),
             )
         except Exception as e:
+            log.error("read_chapter 失败: project_id=%s, chapter_num=%s, error=%s", input.project_id, input.chapter_num, e, exc_info=True)
             return ToolError(code="READ_FAILED", message=str(e))
 
 

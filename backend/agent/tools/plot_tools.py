@@ -1,6 +1,9 @@
 """plot_tools.py — weave_plot 工具"""
 from __future__ import annotations
 
+import logging
+log = logging.getLogger(__name__)
+
 import json
 
 from backend.agent.tools.base import BaseTool, ToolError, register_tool
@@ -63,7 +66,8 @@ class WeavePlotTool(BaseTool):
             # 解析 JSON（fallback 模板）
             try:
                 plan = json.loads(raw)
-            except (json.JSONDecodeError, TypeError):
+            except (json.JSONDecodeError, TypeError) as e:
+                log.warning("weave_plot JSON 解析失败, 走 fallback: project_id=%s, error=%s", input.project_id, e, exc_info=True)
                 plan = {
                     "seed": input.plot_seed,
                     "act_1_setup": f"建立场景：引入 '{input.plot_seed}' 作为本章开端",
@@ -79,6 +83,7 @@ class WeavePlotTool(BaseTool):
                 await progress_callback({"step": "done", "percentage": 100})
             return WeavePlotResult(next_chapter_plan=plan)
         except Exception as e:
+            log.error("weave_plot 失败: project_id=%s, error=%s", input.project_id, e, exc_info=True)
             return ToolError(code="WEAVE_PLOT_FAILED", message=str(e))
 
 

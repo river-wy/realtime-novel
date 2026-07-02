@@ -2,6 +2,9 @@
 from __future__ import annotations
 
 import json
+import logging
+log = logging.getLogger(__name__)
+
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime
@@ -40,6 +43,7 @@ class SQLiteStore:
                     except Exception as e:
                         err_msg = str(e).lower()
                         if "duplicate column" in err_msg or "already exists" in err_msg:
+                            log.debug("sqlite migration idempotent (skip): %s", e)
                             pass  # 幂等
                         else:
                             raise
@@ -72,7 +76,8 @@ class SQLiteStore:
             try:
                 yield conn
                 conn.execute("COMMIT")
-            except Exception:
+            except Exception as e:
+                log.error("sqlite store 事务回滚: error=%s", e, exc_info=True)
                 conn.execute("ROLLBACK")
                 raise
 

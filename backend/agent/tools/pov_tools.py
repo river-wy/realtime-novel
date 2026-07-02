@@ -4,6 +4,9 @@ current_pov 存 char_id，写入前校验角色存在，返回包含 name。
 """
 from __future__ import annotations
 
+import logging
+log = logging.getLogger(__name__)
+
 from backend.agent.tools.base import BaseTool, ToolError, register_tool
 from backend.agent.tools.schemas import (
     SwitchPovInput, SwitchPovResult,
@@ -60,6 +63,7 @@ class SwitchPovTool(BaseTool):
                 new_pov_name=new_pov_name,
             )
         except Exception as e:
+            log.error("switch_pov 失败: project_id=%s, new_pov=%s, error=%s", input.project_id, input.new_pov_char_id, e, exc_info=True)
             return ToolError(code="SWITCH_POV_FAILED", message=str(e))
 
 

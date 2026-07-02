@@ -223,10 +223,31 @@ class AgentExecutor:
         """
         start = time.time()
 
+        # 查 project 的 exploration_level -> LLM max_tokens / temperature
+        # 默认 standard (8K tokens)，与 agents.json:exploration_levels.standard 对齐
+        llm_params: dict = {"max_tokens": 8192, "temperature": 0.7}
+        if project_id:
+            try:
+                from backend.config import get_exploration_level_config
+                from backend.persistence import ProjectRepository
+                repo = ProjectRepository()
+                proj = repo.get(project_id)
+                level = proj.exploration_level if proj else "standard"
+                cfg = get_exploration_level_config(level)
+                llm_params = {
+                    "max_tokens": cfg.get("max_tokens", 8192),
+                    "temperature": cfg.get("temperature", 0.7),
+                }
+            except Exception as e:
+                self.log.warning(
+                    "AgentExecutor: 读 exploration_level 失败 project_id=%s, 用 standard 默认: %s",
+                    project_id, e,
+                )
+
         self.log.info(
             "AgentExecutor.execute START: agent=%s, project_id=%s, "
-            "max_iterations=%d, msg_len=%d",
-            agent.agent_name, project_id, max_iterations, len(user_message or ""),
+            "max_iterations=%d, msg_len=%d, llm_params=%s",
+            agent.agent_name, project_id, max_iterations, len(user_message or ""), llm_params,
         )
 
         # 1. 加载工具集（基础 + 临时扩展）
@@ -368,8 +389,8 @@ class AgentExecutor:
                         messages=messages,
                         tools=openai_tools,
                         tool_choice="auto",
-                        max_tokens=4096,
-                        temperature=0.7,
+                        max_tokens=llm_params["max_tokens"],
+                        temperature=llm_params["temperature"],
                         role=ModelRole.TEXT,
                     )
                 )

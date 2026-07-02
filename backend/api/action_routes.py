@@ -6,6 +6,9 @@ Onboarding 相关路由已迁移到 onboarding_routes.py
 """
 from __future__ import annotations
 
+import logging
+log = logging.getLogger(__name__)
+
 from datetime import datetime
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -42,6 +45,7 @@ async def submit_intervention(project_id: str, req: InterventionRequest):
             req.intervention,
         )
     except Exception as e:
+        log.error("intervention route 失败: project_id=%s, error=%s", project_id, e, exc_info=True)
         raise HTTPException(500, str(e))
     # 落库
     conv_repo = ConversationRepository()
@@ -88,6 +92,7 @@ async def rollback_project(
     try:
         output = await _pm.rollback(project_id, to_chapter=to_chapter, confirm=True)
     except Exception as e:
+        log.error("rollback route 失败: project_id=%s, error=%s", project_id, e, exc_info=True)
         raise HTTPException(500, str(e))
     # 落库
     conv_repo = ConversationRepository()
